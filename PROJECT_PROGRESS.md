@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。研究代码已按领域分包并补齐具名函数文档；风险评分、波动率仓位、保守减仓和研究页面已完成本地验证。风险代码提交已推送，Draft PR #10 的四项远程CI全通过。**
+**Phase1及GitHub恢复机制已交付。Phase2首个单元（三年历史K线本地归档服务、认证API与图表入口）已通过本地隔离验证；正在继续做5秒选中标的刷新、多周期结构/情绪分析及可配置模拟账号。行情范围覆盖资产注册表中的所有精确核验合约，按需加载，不推测未核验符号。上一阶段代码留在Draft PR #10，远程CI全通过。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
-Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以`git log -1 --oneline`为准；本文件与代码一起提交，不能在自身内容里保存自身提交哈希。Draft PR #10：https://github.com/LegendaryFlutist/global-quant-ai/pull/10 。风险代码提交`c9a099e`远程backend、frontend、publish-hygiene和risk-engine CI均通过（Actions run 39130693978）。
+Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refactor/domain-packages-and-function-docs`派生。准确提交以`git log -5 --oneline`为准。Draft PR #10：https://github.com/LegendaryFlutist/global-quant-ai/pull/10 ，依赖的文档提交CI全绿（Actions run 39130960260）。当前Phase2尚未实现/验证，不得标成完成。
 
 ## 已完成功能
 
@@ -46,6 +46,9 @@ Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以
 | 2026-10-18 | `node scripts/platform_browser_check.mjs 9223` | 未通过：旧bootstrap密码已失效，登录页拒绝认证；没有继续页面断言，不修改数据库凭据 | 本机控制台；脚本在失败前写入`runs/platform_phase1/login.png`，可能覆盖原登录截图；后续E2E使用隔离账号和新输出目录 |
 | 2026-10-18 | GitHub Draft PR #10 / commit `c9a099e` | 分支已推送；backend、frontend、publish-hygiene、risk-engine全部通过 | https://github.com/LegendaryFlutist/global-quant-ai/pull/10 ，Actions run 39130693978 |
 | 2026-10-18 | GitHub Draft PR #10 / architecture handoff commit `2aefb3f` | 文档变更的backend、frontend、publish-hygiene、risk-engine CI全部通过 | Actions run 39130868450 |
+| 2026-10-18 | Phase2历史归档：`bash scripts/platform.sh build`、`bash scripts/platform.sh test` | 重建测试镜像后30 passed；1项既有Starlette TestClient/httpx弃用提示 | 本机控制台；mock Binance、临时目录、quant_test数据库；真实网络未请求 |
+| 2026-10-18 | `cd frontend && npm test && npm run build` | 2 passed；TypeScript与Vite生产构建成功 | 本机控制台 |
+| 2026-10-18 | `python3 scripts/check_docs.py`、`git diff --check` | 428个具名Python函数有docstring；差异空白检查通过 | 本机控制台 |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
 
@@ -63,7 +66,8 @@ Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以
 - 已完成并推送：版本化风险配置、真实GRU质量评分、波动率感知预算、保守只减仓回测、认证只读风险API及Web风险页面。风险单元提交`c9a099e`远程4项CI全通过；当前Draft PR #10。
 - 架构及交接说明已更新并提交；commit `2aefb3f` 的四项CI通过。PR仍因浏览器验证未完成而保持Draft。
 - 浏览器验证需解决：本机保存的初始bootstrap凭据与现存密码不一致。使用独立临时测试账户/隔离测试数据库和新的输出目录完成页面端到端检查；不得重置当前用户密码或更改持久数据库。
-- 随后优先完成同一回放窗的风险指标页面/CLI周期选择、实时数据时效提示及更长独立验证设计；新训练/独立留出未获批准前不晋升模型。继续按TASKS.md推进。
+- 已完成Phase2首个开发单元：长期行情独立归档服务、`FETCH_ARCHIVE`后台任务、认证API和图表采集/读取入口；点击后按页写不可变Parquet与SHA256清单，可续传且不影响90天快照。测试运行于mock与隔离库，尚未真实访问Binance，也未浏览器验收。
+- 下一步：先完成技术结构分析契约和因果性测试，再做趋势线/道氏123/波浪候选/背离、多周期趋势打破；然后接整体情绪；随后做单一5秒选中标的刷新和多账户组合回测。注册表中的全部精确核验资产都能按需采集，不对未核验符号推定供应商代码；未收盘K线只能展示，结构信号等收盘确认。
 
 ## 发布交接记录
 

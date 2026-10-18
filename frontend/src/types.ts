@@ -40,6 +40,22 @@ export interface CandleResult {
   dataset_sha256: string;
   source: Record<string, unknown>;
 }
+export interface ArchiveResult {
+  asset_id: string;
+  symbol?: string;
+  interval: string;
+  candles?: Candle[];
+  available_count?: number;
+  first_open_ms?: number | null;
+  last_close_ms?: number | null;
+  requested_start_ms?: number;
+  updated_at_ms?: number;
+  status?: string;
+  source?: string;
+  segment_sha256?: string;
+  research_only: boolean;
+  available?: boolean;
+}
 export interface Interval {
   interval: string;
   available: boolean;

@@ -7,9 +7,32 @@ from app.core.security import current_user
 from app.domains.models import User, MarketData
 from app.services.market_data import candles, MINUTES
 from app.adapters.public_binance import INTERVALS
+from app.services.long_history import read_archive, validate_archive_identity
 
 
 router=APIRouter()
+
+@router.get('/api/market/archive')
+def market_archive(asset_id:str,interval:str='4h',limit:int=Query(2000,ge=1,le=10000),end_ms:int|None=None,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """读取已核验合约的本地三年归档，不因查看页面发出交易所请求。
+
+    Args:
+        asset_id: 带市场命名空间的精确USDT永续产品ID。
+        interval: 币安原生K线周期。
+        limit: 最近最多返回10000根已收盘归档K线。
+        end_ms: 可选UTC毫秒回放截止时间。
+        user: 认证依赖已经校验的当前用户。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        本地归档及分段哈希；未缓存时返回`available=false`。
+    """
+    try:
+        validate_archive_identity(db,asset_id,interval)
+        value=read_archive(asset_id,interval,limit,end_ms)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from None
+    return value or {'asset_id':asset_id,'interval':interval,'available':False,'research_only':True}
 
 @router.get('/api/market/candles')
 def market_candles(asset_id:str,interval:str='4h',limit:int=Query(800,ge=1,le=10000),end_ms:int|None=None,user:User=Depends(current_user),db:DBSession=Depends(get_db)):

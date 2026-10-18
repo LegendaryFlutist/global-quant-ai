@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Asset, CandleResult, Interval } from "../types";
+import type { ArchiveResult, Asset, CandleResult, Interval } from "../types";
 import { api, date, post } from "../services/api";
 import PriceChart from "../components/PriceChart";
 /** 按标的/周期读取已校验历史；切换后忽略旧请求，采集作为独立后台任务。 */
@@ -20,6 +20,8 @@ export default function ChartPage({
   const [interval, setInterval] = useState(initialInterval);
   const [intervals, setIntervals] = useState<Interval[]>([]);
   const [data, setData] = useState<CandleResult | null>(null);
+  const [archive, setArchive] = useState<ArchiveResult | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [ma, setMA] = useState(true);
@@ -43,11 +45,15 @@ export default function ChartPage({
     setLoading(true);
     setError("");
     setData(null);
-    api<CandleResult>(
-      `/market/candles?asset_id=${encodeURIComponent(assetId)}&interval=${interval}&limit=10000`,
-    )
-      .then((v) => {
-        if (active) setData(v);
+    setArchive(null);
+    const query = `?asset_id=${encodeURIComponent(assetId)}&interval=${interval}&limit=10000`;
+    (showArchive
+      ? api<ArchiveResult>(`/market/archive${query}`)
+      : api<CandleResult>(`/market/candles${query}`))
+      .then((value) => {
+        if (!active) return;
+        if (showArchive) setArchive(value as ArchiveResult);
+        else setData(value as CandleResult);
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -58,7 +64,7 @@ export default function ChartPage({
     return () => {
       active = false;
     };
-  }, [assetId, interval, reload]);
+  }, [assetId, interval, reload, showArchive]);
   /** 创建最近90天公开行情任务；不把入队成功当作采集成功。 */
   async function collect() {
     try {
@@ -77,6 +83,24 @@ export default function ChartPage({
       setError((e as Error).message);
     }
   }
+  /** 为所选已核验永续合约创建三年公开历史归档任务，数据由后台分页写入本地磁盘。 */
+  async function collectArchive() {
+    try {
+      const result = await post<{ id: string }>("/tasks", {
+        kind: "FETCH_ARCHIVE",
+        asset_id: assetId,
+        interval,
+      });
+      onTask(
+        "三年历史归档任务已创建：" +
+          result.id.slice(0, 8) +
+          "；可在后台任务查看进度和实际覆盖范围",
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const chartCandles = showArchive ? archive?.candles ?? [] : data?.candles ?? [];
   return (
     <>
       <header className="page-heading">
@@ -109,6 +133,13 @@ export default function ChartPage({
             MA20 / MA60
           </label>
           <button onClick={collect}>采集最近90天</button>
+          <button onClick={() => void collectArchive()}>采集三年历史</button>
+          <button
+            aria-pressed={showArchive}
+            onClick={() => setShowArchive((value) => !value)}
+          >
+            {showArchive ? "查看90天缓存" : "查看三年缓存"}
+          </button>
         </div>
         <div className="intervals">
           {(intervals.length
@@ -144,8 +175,10 @@ export default function ChartPage({
             {error}
             <small>可选择已有数据的周期，或创建公开行情采集任务。</small>
           </div>
-        ) : data?.candles.length ? (
-          <PriceChart candles={data.candles} timezone={timezone} showMA={ma} />
+        ) : chartCandles.length ? (
+          <PriceChart candles={chartCandles} timezone={timezone} showMA={ma} />
+        ) : showArchive && archive?.available === false ? (
+          <div className="empty">本地尚无该标的/周期的长期缓存；点击“采集三年历史”创建后台任务。</div>
         ) : (
           <div className="empty">没有完整周期 K 线；当前不做预测或插值。</div>
         )}
@@ -155,21 +188,24 @@ export default function ChartPage({
           data-loaded-asset={data?.asset_id}
         >
           <span>
-            数据截止：{date(data?.as_of_ms, timezone)} · 当前显示{" "}
-            {data?.candles.length ?? 0} 根 / 可用 {data?.available_count ?? 0}{" "}
-            根
+            {showArchive
+              ? `长期缓存截止：${date(archive?.last_close_ms, timezone)} · 覆盖状态 ${archive?.status ?? "未缓存"}`
+              : `数据截止：${date(data?.as_of_ms, timezone)}`} · 当前显示{" "}
+            {chartCandles.length} 根 / 可用{" "}
+            {showArchive ? archive?.available_count ?? 0 : data?.available_count ?? 0} 根
           </span>
           <span>
-            原始周期 {data?.source_interval ?? "—"} · 排除不完整周期{" "}
-            {data?.excluded_incomplete_buckets ?? 0} 个
+            {showArchive
+              ? `本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
+              : `原始周期 ${data?.source_interval ?? "—"} · 排除不完整周期 ${data?.excluded_incomplete_buckets ?? 0} 个`}
           </span>
         </div>
       </section>
       <div className="two-col">
         <section className="panel">
           <h3>数据可追溯</h3>
-          <p>来源：{String(data?.source.provider ?? "暂无数据")}</p>
-          <p className="mono break">SHA256：{data?.dataset_sha256 ?? "—"}</p>
+          <p>来源：{showArchive ? archive?.source ?? "暂无归档" : String(data?.source.provider ?? "暂无数据")}</p>
+          <p className="mono break">SHA256：{showArchive ? archive?.segment_sha256 ?? "—" : data?.dataset_sha256 ?? "—"}</p>
           <p>
             历史缓存不是实时盘口。新行情只有公开接口实际返回成功后才会进入图表。
           </p>

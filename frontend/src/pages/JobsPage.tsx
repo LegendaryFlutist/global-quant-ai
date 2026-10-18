@@ -54,8 +54,10 @@ export default function JobsPage({
                   {j.result.error
                     ? String(j.result.error)
                     : j.result.rows
-                      ? `${j.result.rows} 根真实 K 线`
-                      : "—"}
+                      ? `${j.result.rows} 根真实 K 线${j.result.status ? ` · ${String(j.result.status)}` : ""}`
+                      : j.kind === "FETCH_ARCHIVE"
+                        ? "三年历史归档 · 仅追加本地分段"
+                        : "—"}
                 </td>
                 <td>{date(j.created_at, timezone)}</td>
                 <td>
