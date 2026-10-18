@@ -66,6 +66,7 @@ export interface LiveMarketResult {
   last_closed_at_ms?: number | null;
   updated_at_ms?: number;
   archive_sha256?: string;
+  live_snapshot_sha256?: string | null;
   source?: string;
   research_only: boolean;
   stale: boolean;

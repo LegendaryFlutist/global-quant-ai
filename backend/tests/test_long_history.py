@@ -403,6 +403,8 @@ def test_live_refresh_appends_only_closed_rows_and_keeps_open_snapshot(tmp_path)
     assert saved["available_count"] == 2
     assert snapshot["candle"]["is_closed"] is False
     assert snapshot["stale"] is True
+    assert len(result["live_snapshot_sha256"]) == 64
+    assert len(snapshot["sha256"]) == 64
 
 
 def test_live_refresh_api_requires_csrf_and_returns_incremental_snapshot(logged_in, monkeypatch):

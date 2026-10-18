@@ -42,7 +42,7 @@ def market_live(payload:LiveRefreshRequest,user:User=Depends(current_user),db:DB
     except PublicDataError as exc:
         snapshot=read_live_snapshot(asset_id,interval)
         if snapshot:
-            return {'asset_id':asset_id,'interval':interval,'live_candle':snapshot.get('candle'),'closed_candles':[],'updated_at_ms':snapshot.get('fetched_at_ms'),'source':snapshot.get('source'),'research_only':True,'stale':True,'refresh_error':str(exc)}
+            return {'asset_id':asset_id,'interval':interval,'live_candle':snapshot.get('candle'),'closed_candles':[],'updated_at_ms':snapshot.get('fetched_at_ms'),'source':snapshot.get('source'),'research_only':True,'stale':True,'live_snapshot_sha256':snapshot.get('sha256'),'refresh_error':str(exc)}
         raise HTTPException(503,str(exc)) from None
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from None

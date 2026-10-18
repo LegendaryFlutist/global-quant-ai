@@ -274,7 +274,7 @@ export default function ChartPage({
           </span>
           <span>
             {showArchive
-              ? `${live?.live_candle && !live.stale ? "实时K线未收盘；结构分析只使用已收盘K线 · " : ""}本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
+              ? `${live?.live_candle && !live.stale ? `实时K线快照SHA256 ${live.live_snapshot_sha256?.slice(0, 16) ?? "—"}；结构分析只使用已收盘K线 · ` : ""}本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
               : `原始周期 ${data?.source_interval ?? "—"} · 排除不完整周期 ${data?.excluded_incomplete_buckets ?? 0} 个`}
           </span>
         </div>

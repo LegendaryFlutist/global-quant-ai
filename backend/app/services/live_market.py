@@ -247,8 +247,10 @@ def refresh_latest_candle(db, asset_id, interval, now_ms=None, adapter=None, roo
     closed = [row for row in parsed if row["is_closed"] and row["open_time"] > latest_open]
     live = next((row for row in reversed(parsed) if not row["is_closed"]), None)
     additions = _append_closed_rows(directory, manifest, closed, current_ms)
+    live_snapshot_sha256 = None
     if live is not None:
         _write_live_snapshot(directory, asset_id, symbol, interval, live, current_ms)
+        live_snapshot_sha256 = hashlib.sha256((directory / "live.json").read_bytes()).hexdigest()
     directory_manifest_sha = hashlib.sha256((directory / "manifest.json").read_bytes()).hexdigest()
     return {
         "asset_id": asset_id,
@@ -263,6 +265,7 @@ def refresh_latest_candle(db, asset_id, interval, now_ms=None, adapter=None, roo
         "last_closed_at_ms": manifest.get("last_close_ms"),
         "updated_at_ms": current_ms,
         "archive_sha256": directory_manifest_sha,
+        "live_snapshot_sha256": live_snapshot_sha256,
         "new_segments": additions,
         "source": "binance_usdm_public_rest_klines",
         "research_only": True,
