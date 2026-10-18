@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。Phase2首个单元（三年历史K线本地归档服务、认证API与图表入口）已通过本地隔离验证；正在继续做5秒选中标的刷新、多周期结构/情绪分析及可配置模拟账号。行情范围覆盖资产注册表中的所有精确核验合约，按需加载，不推测未核验符号。上一阶段代码留在Draft PR #10，远程CI全通过。**
+**Phase1及GitHub恢复机制已交付。Phase2已实现三年历史K线本地归档和多周期技术结构API/图表（道氏123、趋势线破坏、波浪候选、RSI背离）；PR #11 的后端、前端、研究与发布检查全通过。本机API镜像仍待包下载恢复后重建。下一步为单一选中标的5秒行情刷新；之后做总体情绪与隔离模拟账户。行情只覆盖注册表中精确核验的标的，按需采集，不推测未核验符号。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
-Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refactor/domain-packages-and-function-docs`派生。准确提交以`git log -5 --oneline`为准。Draft PR #10：https://github.com/LegendaryFlutist/global-quant-ai/pull/10 ，依赖的文档提交CI全绿（Actions run 39130960260）。当前Phase2尚未实现/验证，不得标成完成。
+Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refactor/domain-packages-and-function-docs`派生。准确提交以`git log -5 --oneline`为准。Draft PR #11：https://github.com/LegendaryFlutist/global-quant-ai/pull/11（基于PR #10）；提交`32f1a9e`四项GitHub CI成功。Phase2其他计划项目仍未完成，不得整体标为完成。
 
 ## 已完成功能
 
