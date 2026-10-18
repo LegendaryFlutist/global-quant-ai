@@ -72,7 +72,7 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 已完成Phase2首个开发单元：长期行情独立归档服务、`FETCH_ARCHIVE`后台任务、认证API和图表采集/读取入口；点击后按页写不可变Parquet与SHA256清单，可续传且不影响90天快照。测试运行于mock与隔离库，尚未真实访问Binance，也未浏览器验收。
 - 已实现并提交多周期结构归档单元：复用确认摆动点和Dow123，输出各周期趋势线/破位、波浪候选、确认123、RSI顶/底背离，并关联数据SHA256；将事件汇入已有离线HTML/JSON结构报告。目标模块7项测试通过，完整研究套件156项通过；见最新Git记录。
 - 多周期结构Web单元已通过PR #11提交`32f1a9e`上的GitHub CI：Python3.11 backend、前端、risk-engine、发布扫描全success；本机npm测试2 passed/生产构建成功、py_compile与437函数文档检查通过。新增API运行容器未在本机重建：Docker BuildKit两次停在ARM64 NumPy wheel下载，第二次约90秒无进度后手动取消（退出码130）；现有服务仍用旧镜像，不声称本机已部署。恢复命令：处理可达的Python包索引/代理后运行`bash scripts/platform.sh up`，随后`bash scripts/platform.sh test`及认证后页面验收。CI结果与限制记录于`docs/platform/phase1.md`。
-- 实时刷新单元提交`cf678fd`已通过PR #11四项GitHub CI（Python3.11后端隔离PostgreSQL/Redis、前端、研究、发布扫描全success）；新服务/API测试包含闭合K线只追加Parquet、未闭合快照独立SHA256、会话/CSRF、无外部网络mock。前端2 passed/构建成功；本机py_compile、448个函数docstring检查通过。实例只在三年缓存视图刷新当前周期，退避至60秒。Docker本机镜像仍未重建：BuildKit ARM64 NumPy下载无进度后手动取消，当前运行API/Web还是旧镜像；恢复需在包索引可达后`bash scripts/platform.sh up`、`bash scripts/platform.sh test`和隔离账号浏览器验收。单进程锁适用于当前单机服务；若横向多API副本，需要Redis级共享节流。
+- 实时刷新单元提交`cf678fd`及SHA256展示修正提交`dbb3602`已通过PR #11四项GitHub CI（Python3.11后端隔离PostgreSQL/Redis、前端、研究、发布扫描全success）；新服务/API测试包含闭合K线只追加Parquet、未闭合快照独立SHA256、会话/CSRF、无外部网络mock。前端2 passed/构建成功；本机py_compile、448个函数docstring检查通过。实例只在三年缓存视图刷新当前周期，错误退避至60秒。Docker本机镜像仍未重建：BuildKit ARM64 NumPy下载无进度后手动取消，当前运行API/Web还是旧镜像；恢复需在包索引可达后`bash scripts/platform.sh up`、`bash scripts/platform.sh test`和隔离账号浏览器验收。单进程锁适用于当前单机服务；若横向多API副本，需要Redis级共享节流。
 - 下一步：接四个优先标的可解释的整体情绪/市场周期汇总（缺数据保留UNKNOWN），再建立可配置且资金隔离的多个模拟账户、按模型组合理论回测并给出总/分标的净值、回撤、操作与持仓报告。完成后重建本机API/Web镜像并做隔离浏览器端到端验收。注册表精确核验标的按需采集，不推测未核验符号；未收盘K线仅显示，结构信号等收盘确认。
 
 ## 发布交接记录
