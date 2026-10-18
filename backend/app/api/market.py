@@ -13,11 +13,34 @@ router=APIRouter()
 
 @router.get('/api/market/candles')
 def market_candles(asset_id:str,interval:str='4h',limit:int=Query(800,ge=1,le=10000),end_ms:int|None=None,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """向已登录用户返回校验过的真实缓存K线。
+
+    Args:
+        asset_id: 带市场命名空间的精确产品ID。
+        interval: 精确K线周期名称，月线1M区别于分钟。
+        limit: 最多返回的已收盘K线条数。
+        end_ms: 可选的历史观察截止毫秒时间；不返回结束晚于它的K线。
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        包含来源、周期、截止时刻与SHA256的响应；不支持周期报422。
+    """
     try:return candles(db,asset_id,interval,limit,end_ms)
     except ValueError as exc:raise HTTPException(422,str(exc)) from None
 
 @router.get('/api/market/intervals')
 def market_intervals(asset_id:str,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """根据原生数据集判断每个周期是否能直接读取或合法聚合。
+
+    Args:
+        asset_id: 带市场命名空间的精确产品ID。
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        各周期可用状态与缺失原因，不从大周期伪造小周期。
+    """
     sources=list(db.scalars(select(MarketData).where(MarketData.asset_id==asset_id)))
     output=[]
     for interval in INTERVALS:

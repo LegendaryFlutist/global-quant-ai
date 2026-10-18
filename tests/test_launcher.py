@@ -13,6 +13,15 @@ import run as launcher
 
 class LauncherTests(unittest.TestCase):
     def fixture(self,root,symbol):
+        """构造当前报告/行情测试所需的独立临时输入和冻结边界。
+
+        Args:
+            root: 当前任务的项目/数据根目录路径；不会自动读取其他目录。
+            symbol: 精确产品代码；股票、ETF与相关永续不能混用。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         data=root/'data'/(symbol.lower()+'_90d_connector');data.mkdir(parents=True)
         for name in ('bars.csv','funding.csv','mark_bars.csv'):(data/name).write_text('fixture\n')
         (data/'source.json').write_text(json.dumps(dict(symbol=symbol,synthetic=False,start=1609459200000,end=1609545599999)))
@@ -21,10 +30,26 @@ class LauncherTests(unittest.TestCase):
         (baseline/'report.json').write_text(json.dumps(dict(dataset_sha256=digest,holdout_period_ms=[1,2])))
 
     def test_defaults_from_other_cwd_and_unique_output(self):
+        """验证从不同目录启动仍定位项目且每次输出目录唯一。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'QUANT_MAIL_MODE':'real'}):
             root=Path(directory)/'project';other=Path(directory)/'other';other.mkdir()
             for symbol in launcher.DEFAULT_SYMBOLS:self.fixture(root,symbol)
             def research(data,out,baseline,**kwargs):
+                """模拟研究调用并断言启动器传入的策略、目录与模拟模式。
+
+                Args:
+                    data: 当前函数契约下的时间顺序行情/特征表。
+                    out: 本次输出目录；研究执行器通常要求目录尚不存在。
+                    baseline: 当前测试/接口参数，含义见该函数的具体场景。
+                    **kwargs: 透传的命名参数；不能绕过当前调用的校验。
+
+                Returns:
+                    测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+                """
                 out.mkdir();(out/'comparison.html').write_text('fixture')
                 self.assertTrue(data.is_absolute());self.assertTrue(baseline.is_absolute())
                 self.assertEqual(kwargs['leverage'],5.)
@@ -55,6 +80,11 @@ class LauncherTests(unittest.TestCase):
                 self.assertTrue((batch/'runtime.json').is_file())
 
     def test_config_overrides_and_existing_output_are_checked(self):
+        """验证研究配置覆盖规则且拒绝覆盖已存在输出。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         from research_config import load_config
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
@@ -73,6 +103,11 @@ class LauncherTests(unittest.TestCase):
                 research.assert_not_called()
 
     def test_preflight_missing_data_or_changed_baseline(self):
+        """验证缺数据或冻结数据指纹变化会阻止运行。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory,patch('pattern_research.run_pattern_research') as run:
             root=Path(directory)
             self.assertEqual(launcher.main(['--check'],root=root),1)
@@ -83,8 +118,13 @@ class LauncherTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_lab_without_arguments_dispatches_before_scientific_imports(self):
+        """验证无参数旧入口在科学计算库加载前正确转发。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         fake=types.ModuleType('run');fake.main=Mock(return_value=0)
-        lab=Path(launcher.__file__).with_name('lab.py')
+        lab=launcher.ROOT/'lab.py'
         with patch.dict(sys.modules,{'run':fake}),patch.object(sys,'argv',[str(lab)]):
             with self.assertRaises(SystemExit) as result:runpy.run_path(str(lab),run_name='__main__')
         self.assertEqual(result.exception.code,0)

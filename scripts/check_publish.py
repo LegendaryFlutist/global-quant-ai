@@ -16,9 +16,22 @@ PATTERNS={
 }
 
 def git(*args):
+    """执行只用于发布检查的Git子命令并获取原始输出。
+
+    Args:
+        *args: 透传的额外位置参数，按当前接口契约解释。
+
+    Returns:
+        命令标准输出字节；Git失败传播CalledProcessError。
+    """
     return subprocess.check_output(['git',*args])
 
 def main():
+    """检查将要发布的路径、大小和凭据模式，并只报告脱敏位置。
+
+    Returns:
+        无返回值；发现禁止文件或疑似凭据以非零码退出。
+    """
     parser=argparse.ArgumentParser();parser.add_argument('--staged',action='store_true');args=parser.parse_args()
     paths=[p for p in git('ls-files','-z').decode().split('\0') if p]
     failures=[];size=0

@@ -1,6 +1,6 @@
 # Global Quant AI engineering rules
 
-- Root Python scripts are the existing offline research engine. Keep historical datasets, evaluation plans and reports immutable. New Web code lives in `backend/` and `frontend/`.
+- `quant_lab/` contains the offline research engine; root Python files are stable compatibility shims. Keep historical datasets, evaluation plans and reports immutable. New Web code lives in `backend/` and `frontend/`.
 - Phase 1 implements authenticated public-data research only. `backend/app/domains/contracts.py` contains future contracts, not live or paper execution. Do not enable orders, ingest private exchange keys, or send real mail as part of platform work.
 - Run platform with `bash scripts/platform.sh up`; preserve the existing `lab` service and unrelated Docker projects. Never run `docker compose down -v` or reset the user's database.
 - Python backend must run on 3.11; GPU research currently uses NVIDIA's Python 3.12 runtime. Do not replace NVIDIA Torch/CUDA packages.
@@ -14,10 +14,10 @@
 
 ## Architecture map
 
-- `frontend/src/`: React/TypeScript pages, chart components and same-origin API client.
-- `backend/app/api/`: auth, assets, market, jobs, settings, system routers; `core/`: settings/database/security; `domains/`: Phase 1 ORM and future type contracts; `services/`: ingestion/queue; `adapters/`: public GET-only Binance.
+- `frontend/src/`: React/TypeScript pages including historical risk research and same-origin API client.
+- `backend/app/api/`: auth, assets, market, jobs, settings, system and research-risk routers; `core/`: settings/database/security; `domains/`: Phase 1 ORM and future type contracts; `services/`: ingestion/queue; `adapters/`: public GET-only Binance.
 - `backend/migrations/`: immutable Alembic revisions; `config/platform/`: public asset registry/snapshot; `config/swing.json`: research strategy policy.
-- Root Python modules: existing offline backtesting, model families, confirmed market structure, reporting and simulated mail. Web integration is not complete for these domains.
+- `quant_lab/{analysis,models,strategies,backtesting,research,reports,notifications,risk}`: offline domain implementations; `core` owns resource paths; `cli` owns entry points; `services/risk_research.py` creates a read-only, versioned report from previously used validation windows. Root same-name modules only alias the actual module for old imports and trusted pickles. Live signals and execution are not implemented.
 - Persistent local state: PostgreSQL named volume, Redis AOF volume, `.runtime/market-data/`, `data/` and `runs/`. Git intentionally excludes these. Git is not a backup of personal research artifacts.
 
 ## Mandatory session recovery and checkpoints
@@ -32,3 +32,9 @@
 8. Local data/weights survive reboot on persistent disk but are not in GitHub. Use `docs/platform/recovery.md` for application-aware backup/restore. Never put private backups, tokens or account data in Git. GitHub cannot recover artifacts that were never backed up.
 9. End each phase with: completed features; actual tests; unresolved issues; latest Git commit; specific next tasks; recovery commands. Record GitHub push/CI state honestly. Default developer `main` changes should go through a feature branch/PR once the initial baseline is established.
 10. Progress/tasks/CI artifacts must not contain passwords, API keys, tokens, personal account records or full environment dumps. No automatic destructive cleanup, `git reset --hard`, `git clean -fdx`, or `docker compose down -v` during recovery.
+
+## Module and documentation rules
+
+- New research logic belongs in a domain package under quant_lab, never in a root compatibility shim. Use canonical package imports internally.
+- All named Python functions, including nested helpers and tests, need useful docstrings with input units, return contract and temporal/safety constraints. Run `python3 scripts/check_docs.py`. Named TypeScript components/helpers/hooks need JSDoc. Avoid filler comments that only repeat the function name.
+- Preserve legacy module-object identity and trusted artifact loading; tests/test_packages.py covers compatibility and resource paths. See docs/project.md.

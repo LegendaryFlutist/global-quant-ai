@@ -21,6 +21,16 @@ DECIMAL = pa.decimal128(34, 12)
 SCHEMA = pa.schema([('open_time',pa.int64()), *[(x, DECIMAL) for x in FIELDS], ('close_time',pa.int64())])
 
 def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict]:
+    """校验OHLC、Decimal数值和时间边界，去重并去掉未来/过期K线。
+
+    Args:
+        rows: 原始K线/记录列表；字段契约由当前领域函数校验。
+        now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
+        interval: 精确K线周期名称，月线1M区别于分钟。
+
+    Returns:
+        按时间排序的已收盘真实记录；冲突或非法数值抛出ValueError。
+    """
     if interval not in INTERVALS:
         raise ValueError('不支持的周期')
     clean = {}
@@ -54,6 +64,19 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict
     return [r for r in ordered if r['open_time'] >= cutoff]
 
 def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dict, now_ms: int | None = None):
+    """以资产周期事务锁写不可变Parquet并原子更新元数据指针。
+
+    Args:
+        db: 本次调用的SQLAlchemy数据库会话。
+        asset_id: 带市场命名空间的精确产品ID。
+        interval: 精确K线周期名称，月线1M区别于分钟。
+        rows: 原始K线/记录列表；字段契约由当前领域函数校验。
+        source: 已知来源元数据，或对齐函数中的源K线表。
+        now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
+
+    Returns:
+        行数、SHA256和截止时间；拒绝用旧快照覆盖新数据。
+    """
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
     if db.bind.dialect.name == 'postgresql':
         db.execute(text('SELECT pg_advisory_xact_lock(hashtext(:key))'), {'key':asset_id+interval})
@@ -82,6 +105,14 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
     return {'rows':len(rows),'asset_id':asset_id,'interval':interval,'sha256':sha,'last_close_ms':rows[-1]['close_time']}
 
 def read_dataset(metadata: MarketData):
+    """校验受控文件路径及SHA256后读取原始Decimal行情。
+
+    Args:
+        metadata: 指向不可变Parquet和SHA256的行情元数据记录。
+
+    Returns:
+        记录列表；文件缺失或损坏立即拒绝读取。
+    """
     path = DATA_ROOT / metadata.path
     if path.parent != DATA_ROOT or not path.is_file():
         raise ValueError('历史数据文件不存在')
@@ -90,6 +121,15 @@ def read_dataset(metadata: MarketData):
     return pq.read_table(path).to_pylist()
 
 def bucket_bounds(ms: int, interval: str):
+    """计算UTC固定周期、周一周线或自然月的聚合边界。
+
+    Args:
+        ms: UTC毫秒时间戳。
+        interval: 精确K线周期名称，月线1M区别于分钟。
+
+    Returns:
+        左闭右开的起止毫秒二元组。
+    """
     dt = datetime.fromtimestamp(ms/1000, timezone.utc)
     if interval == '1M':
         start = datetime(dt.year,dt.month,1,tzinfo=timezone.utc)
@@ -102,6 +142,16 @@ def bucket_bounds(ms: int, interval: str):
     return (ms//step)*step,(ms//step+1)*step
 
 def aggregate(rows: list[dict], source_interval: str, target: str):
+    """聚合严格覆盖完整桶的真实K线，排除缺失和边界未完成周期。
+
+    Args:
+        rows: 原始K线/记录列表；字段契约由当前领域函数校验。
+        source_interval: 输入数据的原生周期名称。
+        target: 报告目标目录或聚合目标周期；具体用途由函数名说明。
+
+    Returns:
+        聚合记录与被排除桶数；不允许向小周期插值。
+    """
     if target == source_interval:
         return rows, 0
     base = MINUTES.get(source_interval)
@@ -121,6 +171,18 @@ def aggregate(rows: list[dict], source_interval: str, target: str):
     return output,excluded
 
 def candles(db, asset_id: str, interval: str, limit: int = 800, end_ms: int | None = None):
+    """选择直接或可合法聚合的数据源并按截止时间与条数输出图表K线。
+
+    Args:
+        db: 本次调用的SQLAlchemy数据库会话。
+        asset_id: 带市场命名空间的精确产品ID。
+        interval: 精确K线周期名称，月线1M区别于分钟。
+        limit: 最多返回的已收盘K线条数。
+        end_ms: 可选的历史观察截止毫秒时间；不返回结束晚于它的K线。
+
+    Returns:
+        价格为十进制字符串的行情响应，包含来源和文件指纹。
+    """
     sources=list(db.scalars(select(MarketData).where(MarketData.asset_id==asset_id)))
     direct=next((s for s in sources if s.interval==interval),None)
     chosen=direct or next((s for s in sources if s.interval in MINUTES and (interval=='1M' or (interval in MINUTES and MINUTES[s.interval]<=MINUTES[interval] and MINUTES[interval]%MINUTES[s.interval]==0))),None)

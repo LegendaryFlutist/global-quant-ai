@@ -20,6 +20,11 @@ ENV = dict(QUANT_SMTP_HOST='smtp.example.test', QUANT_SMTP_PORT='465',
 
 class NotificationTests(unittest.TestCase):
     def test_ssl_and_missing_config(self):
+        """验证真实邮件必须配置齐全并使用校验TLS的SSL连接。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with patch.dict(os.environ,{},clear=True), patch('notifications.smtplib.SMTP_SSL') as smtp:
             with self.assertRaises(NotificationError): send_email('test','body')
             smtp.assert_not_called()
@@ -33,6 +38,11 @@ class NotificationTests(unittest.TestCase):
             self.assertIn('context',smtp.call_args.kwargs)
 
     def test_starttls_and_error_redaction(self):
+        """验证STARTTLS先于登录且SMTP错误不泄露授权码。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with patch.dict(os.environ,{**ENV,'QUANT_SMTP_SECURITY':'starttls'},clear=True), patch('notifications.smtplib.SMTP') as smtp:
             send_email('test','body')
             client=smtp.return_value.__enter__.return_value
@@ -43,6 +53,11 @@ class NotificationTests(unittest.TestCase):
             self.assertNotIn('fake-test-code',str(error.exception))
 
     def test_success_dedup_failure_retry(self):
+        """验证仅成功投递记去重，失败仍可重试。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,ENV,clear=True):
             with patch('notifications.send_email',side_effect=NotificationError('failed')):
                 with self.assertRaises(NotificationError): deliver_once('one','subject','body',root)
@@ -52,6 +67,11 @@ class NotificationTests(unittest.TestCase):
                 self.assertEqual(send.call_count,1)
 
     def test_fresh_inference_and_rejections(self):
+        """验证前向推断使用新鲜真实行情并拒绝策略/来源不符。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as root:
             d=Path(root)/'data';demo(d,300)
             b=load_bars(d/'bars.csv')
@@ -71,6 +91,11 @@ class NotificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError): infer(model,b,data,moment)
 
     def test_preview_no_send_direction_change_and_retry(self):
+        """验证预览不投递、方向变化独立去重且失败可重试。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,ENV,clear=True):
             p=Path(root);d=p/'data';demo(d,300)
             model=p/'model.joblib';joblib.dump({},model)

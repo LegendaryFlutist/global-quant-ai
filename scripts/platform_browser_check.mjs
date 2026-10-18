@@ -40,9 +40,19 @@ try{
    }
  }
  await evaluate(`document.querySelector('nav button:nth-child(2)').click()`);await waitFor(`document.querySelectorAll('tbody tr').length>=40`);await screenshot('asset-registry.png');
- await evaluate(`document.querySelector('nav button:nth-child(4)').click()`);await waitFor(`document.querySelector('h1')?.textContent==='后台任务'`);await screenshot('tasks.png');
- await evaluate(`document.querySelector('nav button:nth-child(5)').click()`);await waitFor(`document.querySelectorAll('.capability-grid .panel').length===8`);await screenshot('capabilities.png');
- await evaluate(`document.querySelector('nav button:nth-child(6)').click()`);await waitFor(`document.querySelector('h1')?.textContent==='系统设置'`);await screenshot('settings.png');
+ await evaluate(`document.querySelector('nav button:nth-child(5)').click()`);await waitFor(`document.querySelector('h1')?.textContent==='后台任务'`);await screenshot('tasks.png');
+ await evaluate(`document.querySelector('nav button:nth-child(6)').click()`);await waitFor(`document.querySelectorAll('.capability-grid .panel').length===8`);await screenshot('capabilities.png');
+ await evaluate(`document.querySelector('nav button:nth-child(7)').click()`);await waitFor(`document.querySelector('h1')?.textContent==='系统设置'`);await screenshot('settings.png');
+ await evaluate(`document.querySelector('nav button:nth-child(4)').click()`);await waitFor(`document.querySelector('[data-testid=risk-equity-chart] canvas')`);await screenshot('risk-research.png');
+ const riskChecks=[];
+ for(const symbol of ['KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT']){
+  await evaluate(`(()=>{const el=document.querySelector('[aria-label="风控标的"]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,${JSON.stringify(symbol)});el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await waitFor(`document.querySelector('section h2')?.textContent.startsWith(${JSON.stringify(symbol)})`);
+  await click('计算假设仓位');await waitFor(`!document.querySelector('.risk-controls button').disabled`);
+  if(await evaluate(`Boolean(document.querySelector('[role=alert].error'))`))throw Error('Risk budget failed');
+  riskChecks.push(symbol);
+ }
+ console.log(JSON.stringify({riskSymbols:riskChecks,riskChart:true}));
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await screenshot('mobile-settings.png');
  if(errors.length)throw Error('Uncaught browser errors: '+errors.join(';'));
  const report={status:'PASS',checked_at:new Date().toISOString(),authenticated:true,priority_assets:summary.priority_assets.map(a=>a.symbol),assets:summary.asset_count,candles:summary.candle_count,charts:counts,uncaught_browser_errors:errors,execution_mode:summary.execution_mode};

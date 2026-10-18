@@ -13,6 +13,11 @@ import warnings
 
 
 def check_runtime():
+    """核验DGX容器的Python、GPU、CUDA与科学计算库可用性。
+
+    Returns:
+        实际环境摘要；缺失或不兼容条件会中止，不修改依赖。
+    """
     import joblib
     import matplotlib
     import numpy as np
@@ -64,6 +69,11 @@ def check_runtime():
 
 
 def main():
+    """运行环境自检并将实际结果打印/写入用户指定位置。
+
+    Returns:
+        无返回值；不启动训练或读取邮件配置。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="Save runtime check JSON")
     args = parser.parse_args()

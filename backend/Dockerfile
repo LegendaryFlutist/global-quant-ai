@@ -6,5 +6,7 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install --timeout 30 --retrie
 RUN useradd --uid 1000 --create-home quant
 COPY --chown=quant:quant backend /app
 COPY --chown=quant:quant config/platform /app/config
+COPY --chown=quant:quant quant_lab /app/quant_lab
+COPY --chown=quant:quant config/risk.json /app/config/risk.json
 USER quant
 CMD ["sh", "-c", "alembic upgrade head && python -m app.bootstrap && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"]

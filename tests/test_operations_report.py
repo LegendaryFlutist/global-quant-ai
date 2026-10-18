@@ -15,10 +15,36 @@ class OperationsReportTests(unittest.TestCase):
     SECOND = '15m|random_forest|time_exit'
 
     def fixture(self, root, selected=False):
-        """Two independent accounts, with the first account stitched across folds."""
+        """构造当前报告/行情测试所需的独立临时输入和冻结边界。
+
+        Args:
+            root: 当前任务的项目/数据根目录路径；不会自动读取其他目录。
+            selected: 当前测试/接口参数，含义见该函数的具体场景。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+
+        Notes:
+            原有细则保留如下：
+            Two independent accounts, with the first account stitched across folds.
+        """
         start = 1_787_616_000_000  # 2026-08-25 00:00 UTC / 08:00 Shanghai.
 
         def trade(config, fold, capital, direction, net, fee, funding, day=0):
+            """构造一条有明确资金、成本和时间口径的模拟完整交易。
+
+            Args:
+                config: 当前测试/接口参数，含义见该函数的具体场景。
+                fold: 当前测试/接口参数，含义见该函数的具体场景。
+                capital: 当前测试/接口参数，含义见该函数的具体场景。
+                direction: 方向：1做多、-1做空、0不建立新仓位。
+                fee: 单边成交手续费比例，例如0.0005表示0.05%。
+                funding: 资金费历史，口径由数据构造函数校验。
+                day: 当前测试/接口参数，含义见该函数的具体场景。
+
+            Returns:
+                测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+            """
             entry = start + day * 86_400_000 + 900_000
             gross = net + fee + funding
             return dict(
@@ -52,6 +78,16 @@ class OperationsReportTests(unittest.TestCase):
         }
 
         def row(config, net, entries, folds):
+            """构造当前报告所需的候选配置排名行。
+
+            Args:
+                config: 当前测试/接口参数，含义见该函数的具体场景。
+                entries: 当前测试/接口参数，含义见该函数的具体场景。
+                folds: 当前测试/接口参数，含义见该函数的具体场景。
+
+            Returns:
+                测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+            """
             return dict(
                 config=config, timeframe='15m', model=config.split('|')[1],
                 exit_mode=config.split('|')[2], net_return=net,
@@ -88,6 +124,11 @@ class OperationsReportTests(unittest.TestCase):
         return report
 
     def test_fold_scaled_costs_returns_operation_directions_and_shanghai_times(self):
+        """验证验证折缩放后的成本、方向、收益与上海时间正确。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.fixture(root)
@@ -125,6 +166,11 @@ class OperationsReportTests(unittest.TestCase):
             self.assertTrue(operations.time_shanghai.astype(str).str.contains('08:15:00').any())
 
     def test_independent_accounts_and_default_selection_does_not_promote_models(self):
+        """验证独立账户展示和默认选择不等于模型晋升。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.fixture(root)
@@ -141,6 +187,11 @@ class OperationsReportTests(unittest.TestCase):
             self.assertEqual(json.loads((root/'report.json').read_text())['status'], 'REJECTED')
 
     def test_offline_idempotent_report_preserves_research_and_never_sends_email(self):
+        """验证离线重复报告不修改研究原件且不发送邮件。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.fixture(root)
@@ -172,6 +223,11 @@ class OperationsReportTests(unittest.TestCase):
                 self.assertGreater((root/filename).stat().st_size, 100)
 
     def test_elapsed_time_uses_timestamps_and_keeps_accounts_independent(self):
+        """验证持仓时长用时间戳计算且不混合不同账户。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             self.fixture(root)
@@ -196,6 +252,11 @@ class OperationsReportTests(unittest.TestCase):
                 self.assertIn(text,page)
 
     def test_duration_buckets_tolerate_only_one_millisecond_at_bar_close(self):
+        """验证持仓分桶仅容许收盘边界的一毫秒误差。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             self.fixture(root)
@@ -213,6 +274,11 @@ class OperationsReportTests(unittest.TestCase):
             self.assertLessEqual(summary['time_in_market'],1)
 
     def test_partial_exit_events_are_not_counted_as_new_positions_and_reconcile_pnl(self):
+        """验证减仓不当作新开仓且完整损益守恒。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             self.fixture(root)
@@ -254,6 +320,11 @@ class OperationsReportTests(unittest.TestCase):
             self.assertIn('holding_duration',partials.columns)
 
     def test_no_trade_account_still_has_zero_holding_and_download_headers(self):
+        """验证无交易账户持仓为零且仍可导出字段表头。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             report=self.fixture(root)
@@ -273,6 +344,11 @@ class OperationsReportTests(unittest.TestCase):
             self.assertEqual(len(pd.read_csv(root/'partial_exits.csv')),0)
 
     def test_duration_distribution_uses_the_current_24h_to_21d_policy(self):
+        """验证持仓分布使用当前24小时至21天目标。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);report=self.fixture(root)
             report['holding_policy']=dict(min_holding_hours=24,max_holding_hours=504)

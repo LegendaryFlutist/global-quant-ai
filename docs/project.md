@@ -1,38 +1,55 @@
-# 代码与数据结构
+# 工程模块与函数文档
 
-入口、参数、计算、报告、容器和测试按职责分开；保留原 `lab.py` 子命令与模块导入，便于旧报告和脚本继续使用。
+## 研究引擎
 
-| 层 | 文件 | 职责 |
-|---|---|---|
-| 启动与配置 | `run.py`、`research_config.py`、`config/swing.json` | 预检、读取参数、生成唯一批次目录、顺序执行标的、汇总报告 |
-| 形态与特征 | `candlestick_patterns.py`、`pattern_features.py` | 12类反转、已收盘多周期、历史波动筛选、48h标签及训练截断 |
-| 训练与验证 | `pattern_research.py`、`model_registry.py` | 8模型/规则、扩展窗口、候选筛选、单候选留出测试、模拟通知 |
-| 合约执行 | `pattern_execution.py` | 实际15m延迟回放、时间/价格目标、硬止损、逐仓强平近似、资金费和部分减仓 |
-| 新增深度与结构 | `deep_model.py`、`market_structure.py`、`structure_report.py` | PyTorch时序训练、确认转折/波浪/周期、独立道氏123、多周期K线与支撑压力 |
-| 报告 | `operation_report.py`、`batch_report.py` | 独立账户统计、持仓时间线、收益曲线、总体→模型→标的报告与CSV |
-| 通知 | `paper_mail.py`、`notifications.py`、`settings.py` | 本地去重模拟邮件；容器固定模拟且屏蔽本机SMTP配置 |
-| 原研究能力 | `lab.py`、`technical.py`、`strategy.py`、`futures_backtest.py`、`leverage_research.py` | 历史基准、道氏123、趋势线、旧杠杆敏感性回放等兼容入口 |
-| 容器与开发 | `Dockerfile`、`compose.yaml`、`scripts/`、`.devcontainer/`、`.vscode/` | 基于NVIDIA镜像的环境、GPU诊断、统一运行命令和VS Code接入 |
-| 数据与实验 | `data/`、`runs/` | 原始行情只读；每次实验另建目录，不覆盖历史 |
-| 验证 | `tests/` | 因果性、执行与费用对账、时间约束、报告口径、批次结构和入口 |
+实际实现位于`quant_lab/`，根目录同名Python文件只保留旧导入/命令行兼容。新代码必须从领域包导入，不继续向根兼容文件堆业务逻辑。
 
-流程：`run.py → pattern_research → pattern_features + 模型 → pattern_execution → operation_report → batch_report`。
+| 包 | 职责 |
+|---|---|
+| cli | 批量研究和旧子命令入口；`python -m quant_lab`与`python run.py`等价 |
+| core | 项目资源路径、研究配置和本机配置解析 |
+| data | 公开K线解析与历史基础特征 |
+| analysis | 12类反转形态、经典道氏/123、确认摆动点与波浪候选 |
+| models | 注册名称、PyTorch GRU训练/推断及可信检查点序列化 |
+| strategies | 只用已收盘大周期的入场过滤、特征和未来标签隔离 |
+| backtesting | 逐仓执行、手续费/滑点/资金费、近似强平与完整仓位账本 |
+| research | 冻结时间切分、候选筛选、杠杆场景对比、模拟审计 |
+| reports | 独立账户曲线、持仓/逐笔操作、结构图与三级汇总 |
+| notifications | 明确区分真实显式SMTP、预览及本地模拟记录 |
+| risk | GRU入场质量、只用过去收盘估计的波动预算、止损/回撤上限、仅减仓规则 |
 
-## 数据与时间边界
+`quant_lab.services.risk_research`复用本机冻结检查点，在已使用验证窗生成只读风险对照产物；`config/risk.json`为版本化策略。输出不是当前信号，页面只提供历史研究和预算试算，不连接账户、不下单。
 
-当前原始目录为 `data/{btcusdt,ethusdt}_90d_connector`，包含15m成交价K线、标记价K线、精确资金费事件、来源和数据日期。旧基准报告仅提供对应SHA256及固定测试边界；它们不作为新策略的训练数据。所有高周期只聚合完整K线，未来标签单独存储并按标签结束时间清除跨验证边界的训练样本。
+`quant_lab.compat.alias_legacy`让旧名与新模块指向同一个对象，保留旧测试patch和`deep_model.TorchGRUClassifier`模型的反序列化路径。不要删除兼容层或直接加载不可信joblib/pickle。
 
-本轮约前36天作为最早训练历史，后续三个约12天验证窗口逐次扩展训练；剩余区间留给单一合格候选。每个验证折结束时清仓，所以长持仓可能受折末截断。当前不把整段90天都描述为可交易样本，也不伪造未实际持有的21天交易。
+`quant_lab.core.paths.PROJECT_ROOT`统一定位根目录config、watchlist和.env；不依赖调用时工作目录。GPU镜像显式复制领域包，API镜像保留独立Python3.11依赖。
 
-## 收益分母
+## Web后端
 
-- 标的数量加权方向价格收益：整笔交易毛损益 / 初始开仓名义金额，已计各次部分平仓的价格与数量，未扣手续费和资金费。
-- 保证金净收益：整笔净损益 / 初始分配逐仓资金，扣手续费、资金费，计入执行滑点。
-- 本笔账户收益：整笔净损益 / 开仓前账户权益。
-- 验证曲线：各折净值复合，每笔用 `stitched_net_pnl = net_pnl × fold_start_equity` 对账。
+- `app/api/`：按认证、资产、行情、任务、设置、系统状态和只读风险研究分路由。
+- `app/core/`：配置、数据库和认证边界。
+- `app/domains/`：持久模型、公开资产目录和后续领域契约。
+- `app/services/catalog.py`：幂等注册资产；`ingestion.py`：真实数据导入/核验/采集；`jobs.py`：队列、有限重试、终态对账。
+- `app/bootstrap.py`：首次本机管理员与任务恢复；不混入资产长列表。
+- `app/adapters/`：固定主机公开GET适配器。
 
-每个模型×周期×退出×标的是不同实验账户，不能相加作为组合收益；也不能相加持仓时间得到一个账户的持仓占比。
+## Web前端
 
-## 后续深度学习
+`App.tsx`只协调路由和任务反馈。`pages/`每页一个组件，`layout/`负责导航和公共反馈，`hooks/useAuth.ts`负责会话，`hooks/useWorkspaceData.ts`负责只读轮询，`services/`负责同源API，`components/`负责图表和状态徽标。风险页显示本机历史研究、单标的曲线和受限的假设仓位预算；页面不直接访问交易所或存储会话令牌。
 
-原有sklearn模型保留CPU训练；新增双层GRU已在GB10上训练，详见 `docs/deep-structure-models.md`。容器继承NVIDIA优化的PyTorch/CUDA并已实际做GPU计算验证；引入序列模型时，可在 `pattern_research.estimator/fit_model` 的契约外新增独立PyTorch适配器，并保持 `predict_proba` 类别顺序、样本时间与模型保存接口。序列输入需进一步清除跨训练/验证边界的重叠，不能直接把当下容器GPU可用称为已实现深度学习策略。
+## 注释规范
+
+具名Python函数（含内部函数、方法、脚本、测试夹具和迁移入口）有中文docstring，说明用途、参数口径、返回值及必要约束。参数默认值以签名为准；价格变动、保证金收益、账户收益不能混称。毫秒/小时/分钟、标签的未来窗口和摆动点确认时间必须明确。
+
+具名TypeScript函数、组件和hooks使用JSDoc；匿名映射/事件回调由所属具名函数的文档及局部注释解释，不机械逐行翻译语法。新风控模块也必须遵守相同规范。
+
+```bash
+python3 scripts/check_docs.py
+bash scripts/container.sh test
+bash scripts/platform.sh test
+cd frontend
+npm test
+npm run build
+```
+
+此次迁移只给旧Alembic迁移补说明，revision和DDL不变；不会重新训练或修改冻结数据、模型权重、收益记录。新增风险策略应另设版本和验证产物，不能覆盖原基线。

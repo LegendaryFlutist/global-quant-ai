@@ -20,6 +20,16 @@ class TaskRequest(BaseModel):
 
 @router.post('/api/tasks',status_code=202)
 def create_task(payload:TaskRequest,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """验证任务参数并对相同进行中任务去重后入队。
+
+    Args:
+        payload: 通过API schema校验的请求数据或报告绘图数据。
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        任务ID、状态和可选去重标记；不直接执行网络采集。
+    """
     if payload.kind!='VERIFY_ASSETS' and (not payload.asset_id or not db.get(Asset,payload.asset_id)):raise HTTPException(400,'请选择已登记资产')
     # Deduplicate active work for the same operation/asset/interval.
     params={} if payload.kind=='VERIFY_ASSETS' else {'asset_id':payload.asset_id}
@@ -32,5 +42,14 @@ def create_task(payload:TaskRequest,user:User=Depends(current_user),db:DBSession
 
 @router.get('/api/tasks')
 def tasks(user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """先对账队列终态，再返回最近100条持久任务记录。
+
+    Args:
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        任务状态列表；不会把重试中或失败记录标为成功。
+    """
     reconcile_task_states(db)
     return [{'id':t.id,'kind':t.kind,'status':t.status,'parameters':t.parameters,'result':t.result,'attempts':t.attempts,'created_at':t.created_at,'updated_at':t.updated_at} for t in db.scalars(select(Task).order_by(Task.created_at.desc()).limit(100))]

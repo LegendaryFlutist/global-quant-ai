@@ -14,6 +14,14 @@ ROOT=Path(__file__).resolve().parents[1]
 NAMES={'KORUUSDT':'韩国MSCI指数每日3倍做多ETF永续','CLUSDT':'原油永续','NVDAUSDT':'英伟达股票永续'}
 
 def prepare(root=ROOT):
+    """从公开采集分页构造不可变行情集并冻结共同评估边界。
+
+    Args:
+        root: 当前任务的项目/数据根目录路径；不会自动读取其他目录。
+
+    Returns:
+        无返回值；只接受匹配的真实来源，不覆盖已存在研究计划。
+    """
     raw=root/'data/priority_raw_20261018'
     info=json.loads((root/'data/priority_contracts_20261018.json').read_text())
     symbols={x['symbol']:x for x in info['symbols']}

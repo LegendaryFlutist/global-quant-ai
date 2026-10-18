@@ -12,6 +12,11 @@ from pattern_research import finalize_pattern_mail,run_pattern_research
 
 class PatternResearchTests(unittest.TestCase):
     def test_audit_export_duplicate_config_and_resume_without_retest(self):
+        """验证审计导出可恢复且不重复训练/测试。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as root:
             out=Path(root)
             report=dict(source={'symbol':'BTCUSDT'},dataset_sha256='abc',status='NO_CANDIDATE',
@@ -29,6 +34,11 @@ class PatternResearchTests(unittest.TestCase):
             self.assertTrue(all(json.loads(p.read_text())['status']=='SIMULATED_NOT_SENT' for p in records))
 
     def test_only_one_selected_configuration_can_access_holdout(self):
+        """验证只允许原选定的一个配置访问冻结留出集。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as root:
             root=Path(root);data=root/'data';demo(data,5000)
             bars=pd.read_csv(data/'bars.csv');bars.to_csv(data/'mark_bars.csv',index=False)
@@ -37,6 +47,16 @@ class PatternResearchTests(unittest.TestCase):
             baseline=root/'baseline.json';baseline.write_text(json.dumps(dict(dataset_sha256=digest,holdout_period_ms=[cut,int(bars.close_time.iloc[-1])])) )
             calls=[]
             def fake_engine(frame,signals=None,**kwargs):
+                """返回确定性模拟账本供研究流程测试，避免重新训练或测试留出集。
+
+                Args:
+                    frame: 已对齐特征列与可知时间的当前数据表。
+                    signals: 与信号K线对齐的-1/0/1方向及可选形态表。
+                    **kwargs: 透传的命名参数；不能绕过当前调用的校验。
+
+                Returns:
+                    测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+                """
                 calls.append((int(frame.open_time.iloc[0]),int(frame.close_time.iloc[-1])))
                 size=len(frame)
                 metric=dict(net_return=.01,max_drawdown=.01,max_drawdown_stress=.02,entries=25,liquidations=0)
@@ -53,6 +73,11 @@ class PatternResearchTests(unittest.TestCase):
             self.assertEqual(result['status'],'REJECTED')
 
     def test_partial_exit_mail_is_recorded_once_without_smtp(self):
+        """验证减仓模拟通知仅记录一次且不调用SMTP。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as root:
             out=Path(root);key='15m|pattern_only|fixed_rr'
             report=dict(source={'symbol':'BTCUSDT'},dataset_sha256='abc',status='NO_CANDIDATE',
