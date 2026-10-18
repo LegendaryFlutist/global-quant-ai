@@ -1,0 +1,35 @@
+name: quant-lab
+services:
+  lab:
+    image: quant-lab:ngc25.11
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: "1000"
+        APP_GID: "1000"
+    working_dir: /workspace/quant_lab
+    user: "1000:1000"
+    init: true
+    gpus: all
+    ipc: private
+    shm_size: 8gb
+    environment:
+      QUANT_MAIL_MODE: simulate
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: /tmp/quant-matplotlib
+      HOME: /home/quant
+    volumes:
+      # Code, data and reports stay on the host with the host user's ownership.
+      - type: bind
+        source: .
+        target: /workspace/quant_lab
+      # Hide local email credentials from the research container.
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.env
+        read_only: true
+    command: ["sleep", "infinity"]
+    stop_grace_period: 20s

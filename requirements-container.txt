@@ -1,0 +1,8 @@
+# Versions already present in NVIDIA PyTorch 25.11 ARM64.
+# Keep this separate from the host .venv lock; preserve NVIDIA's NumPy.
+numpy==2.1.0
+pandas==2.3.3
+scipy==1.16.3
+scikit-learn==1.7.2
+joblib==1.5.2
+matplotlib==3.10.7

@@ -1,0 +1,20 @@
+{
+  "name": "Quant Lab · DGX Spark",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "lab",
+  "workspaceFolder": "/workspace/quant_lab",
+  "remoteUser": "ubuntu",
+  "updateRemoteUserUID": false,
+  "shutdownAction": "none",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.debugpy"],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/quant-venv/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postAttachCommand": "python run.py --check"
+}

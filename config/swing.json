@@ -1,0 +1,21 @@
+{
+  "timeframes": ["15m", "30m", "1h", "2h", "4h"],
+  "models": ["analysis_dow123", "torch_gru", "pattern_only", "logistic", "random_forest", "extra_trees", "hist_gradient", "mlp"],
+  "leverage": 5.0,
+  "margin_fraction": 0.1,
+  "execution_delay_minutes": 15.0,
+  "min_holding_hours": 24.0,
+  "max_holding_hours": 504.0,
+  "scale_out_after_hours": 168.0,
+  "scale_out_interval_hours": 48.0,
+  "scale_out_fraction": 0.25,
+  "scale_out_deviation_atr": 3.0,
+  "label_holding_hours": 48.0,
+  "risk_atr_floor_hours": 24.0,
+  "swing_lookback_hours": 168.0,
+  "swing_min_range": 0.02,
+  "swing_max_range": 0.5,
+  "min_profit_move_pct": 0.02,
+  "price_target_pct": 0.05,
+  "price_stop_pct": 0.03
+}

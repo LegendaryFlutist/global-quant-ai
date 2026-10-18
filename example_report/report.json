@@ -1,0 +1,473 @@
+{
+  "source": {
+    "symbol": "SYNTHETIC",
+    "synthetic": true
+  },
+  "dataset_sha256": "8bfcb37b895f2a70a6cc12bfa68e208096e5ae5198dcac3ab15b26c376183c01",
+  "selection": "Median net return over 3 purged expanding validation folds; final 20% held out",
+  "fee_side": 0.0005,
+  "slippage_side": 0.0002,
+  "exposure": 0.2,
+  "ranking": [
+    {
+      "name": "trend",
+      "threshold": 0.6,
+      "eligible": true,
+      "validation_score": 0.0027269868216324156,
+      "folds": [
+        {
+          "net_return": 0.0027269868216324156,
+          "max_drawdown": 0.009494392999258139,
+          "entries": 22,
+          "order_sides": 44,
+          "sharpe_estimate": 1.9159249880584357,
+          "bars": 658
+        },
+        {
+          "net_return": -0.0189776220298169,
+          "max_drawdown": 0.022279130392488633,
+          "entries": 24,
+          "order_sides": 48,
+          "sharpe_estimate": -13.66291029369874,
+          "bars": 658
+        },
+        {
+          "net_return": 0.00838260861809248,
+          "max_drawdown": 0.012830584627626429,
+          "entries": 18,
+          "order_sides": 36,
+          "sharpe_estimate": 5.944999846095605,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "logistic",
+      "threshold": 0.6,
+      "eligible": false,
+      "validation_score": 0.0,
+      "folds": [
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 2.027457027664603e-05,
+          "max_drawdown": 0.00013976758300049408,
+          "entries": 1,
+          "order_sides": 2,
+          "sharpe_estimate": 0.6964926110214543,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "random_forest",
+      "threshold": 0.6,
+      "eligible": false,
+      "validation_score": 0.0,
+      "folds": [
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.00026116910450380004,
+          "max_drawdown": 0.00013956551007654472,
+          "entries": 1,
+          "order_sides": 2,
+          "sharpe_estimate": 4.4896023176994255,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "extra_trees",
+      "threshold": 0.55,
+      "eligible": false,
+      "validation_score": 0.0,
+      "folds": [
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "extra_trees",
+      "threshold": 0.6,
+      "eligible": false,
+      "validation_score": 0.0,
+      "folds": [
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "mlp",
+      "threshold": 0.55,
+      "eligible": false,
+      "validation_score": 0.0,
+      "folds": [
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "mlp",
+      "threshold": 0.6,
+      "eligible": false,
+      "validation_score": 0.0,
+      "folds": [
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        },
+        {
+          "net_return": 0.0,
+          "max_drawdown": 0.0,
+          "entries": 0,
+          "order_sides": 0,
+          "sharpe_estimate": 0.0,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "logistic",
+      "threshold": 0.55,
+      "eligible": false,
+      "validation_score": -0.008946746104606884,
+      "folds": [
+        {
+          "net_return": -0.01212541647526233,
+          "max_drawdown": 0.01212541647526233,
+          "entries": 41,
+          "order_sides": 82,
+          "sharpe_estimate": -25.604083397948223,
+          "bars": 658
+        },
+        {
+          "net_return": -0.008946746104606884,
+          "max_drawdown": 0.008946746104606884,
+          "entries": 30,
+          "order_sides": 60,
+          "sharpe_estimate": -26.877007920334304,
+          "bars": 658
+        },
+        {
+          "net_return": -0.00041792842777155226,
+          "max_drawdown": 0.0014383377635717176,
+          "entries": 7,
+          "order_sides": 14,
+          "sharpe_estimate": -2.7023979361899473,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "random_forest",
+      "threshold": 0.55,
+      "eligible": false,
+      "validation_score": -0.013568270058661347,
+      "folds": [
+        {
+          "net_return": -0.01707971168863942,
+          "max_drawdown": 0.017544425357469473,
+          "entries": 65,
+          "order_sides": 130,
+          "sharpe_estimate": -35.72577110257354,
+          "bars": 658
+        },
+        {
+          "net_return": -0.013568270058661347,
+          "max_drawdown": 0.01393129748459887,
+          "entries": 46,
+          "order_sides": 92,
+          "sharpe_estimate": -34.835462696262184,
+          "bars": 658
+        },
+        {
+          "net_return": -0.011949958665590343,
+          "max_drawdown": 0.012067563506429457,
+          "entries": 47,
+          "order_sides": 94,
+          "sharpe_estimate": -28.928160758897626,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "mean_reversion",
+      "threshold": 0.6,
+      "eligible": false,
+      "validation_score": -0.01961953606410438,
+      "folds": [
+        {
+          "net_return": -0.01576425599642517,
+          "max_drawdown": 0.01606800057870239,
+          "entries": 67,
+          "order_sides": 134,
+          "sharpe_estimate": -28.04775755426878,
+          "bars": 658
+        },
+        {
+          "net_return": -0.023637294795539776,
+          "max_drawdown": 0.023840926137853158,
+          "entries": 67,
+          "order_sides": 134,
+          "sharpe_estimate": -40.22828825036467,
+          "bars": 658
+        },
+        {
+          "net_return": -0.01961953606410438,
+          "max_drawdown": 0.02049082535382396,
+          "entries": 67,
+          "order_sides": 134,
+          "sharpe_estimate": -31.47298149593112,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "hist_gradient",
+      "threshold": 0.6,
+      "eligible": false,
+      "validation_score": -0.02543030401017654,
+      "folds": [
+        {
+          "net_return": -0.024520429406929223,
+          "max_drawdown": 0.0245703146630204,
+          "entries": 118,
+          "order_sides": 236,
+          "sharpe_estimate": -36.79192631143416,
+          "bars": 658
+        },
+        {
+          "net_return": -0.02618421226690837,
+          "max_drawdown": 0.02633203742177348,
+          "entries": 90,
+          "order_sides": 180,
+          "sharpe_estimate": -45.57990510004921,
+          "bars": 658
+        },
+        {
+          "net_return": -0.02543030401017654,
+          "max_drawdown": 0.025457785925419363,
+          "entries": 81,
+          "order_sides": 162,
+          "sharpe_estimate": -47.87390297676221,
+          "bars": 658
+        }
+      ]
+    },
+    {
+      "name": "hist_gradient",
+      "threshold": 0.55,
+      "eligible": false,
+      "validation_score": -0.05919944813424172,
+      "folds": [
+        {
+          "net_return": -0.06321421287618523,
+          "max_drawdown": 0.06326211936269921,
+          "entries": 232,
+          "order_sides": 464,
+          "sharpe_estimate": -59.184589281859765,
+          "bars": 658
+        },
+        {
+          "net_return": -0.05919944813424172,
+          "max_drawdown": 0.0594865615457123,
+          "entries": 213,
+          "order_sides": 426,
+          "sharpe_estimate": -60.149347634687025,
+          "bars": 658
+        },
+        {
+          "net_return": -0.05332660562237579,
+          "max_drawdown": 0.05342728239355865,
+          "entries": 194,
+          "order_sides": 388,
+          "sharpe_estimate": -56.865585511433466,
+          "bars": 658
+        }
+      ]
+    }
+  ],
+  "selected": {
+    "name": "trend",
+    "threshold": 0.6,
+    "eligible": true,
+    "validation_score": 0.0027269868216324156,
+    "folds": [
+      {
+        "net_return": 0.0027269868216324156,
+        "max_drawdown": 0.009494392999258139,
+        "entries": 22,
+        "order_sides": 44,
+        "sharpe_estimate": 1.9159249880584357,
+        "bars": 658
+      },
+      {
+        "net_return": -0.0189776220298169,
+        "max_drawdown": 0.022279130392488633,
+        "entries": 24,
+        "order_sides": 48,
+        "sharpe_estimate": -13.66291029369874,
+        "bars": 658
+      },
+      {
+        "net_return": 0.00838260861809248,
+        "max_drawdown": 0.012830584627626429,
+        "entries": 18,
+        "order_sides": 36,
+        "sharpe_estimate": 5.944999846095605,
+        "bars": 658
+      }
+    ]
+  },
+  "status": "REJECTED",
+  "real_orders_enabled": false,
+  "limitations": [
+    "No liquidation, latency, spread dynamics, partial fills or intrabar stops",
+    "Funding timestamp boundary uses pre-rebalance holdings",
+    "Repeated manual selection on this dataset invalidates holdout independence",
+    "ML probabilities are not calibrated; thresholds are research settings"
+  ],
+  "holdout_period_ms": [
+    1613066400000,
+    1613958300000
+  ],
+  "baseline_flat": {
+    "net_return": 0.0,
+    "max_drawdown": 0.0,
+    "entries": 0,
+    "order_sides": 0,
+    "sharpe_estimate": 0.0,
+    "bars": 991
+  },
+  "baseline_long_perpetual": {
+    "net_return": -0.01081912437938426,
+    "max_drawdown": 0.0181319026044241,
+    "entries": 1,
+    "order_sides": 2,
+    "sharpe_estimate": -5.106868249783221,
+    "bars": 991
+  },
+  "holdout": {
+    "net_return": -0.019370223619577853,
+    "max_drawdown": 0.026631208233747317,
+    "entries": 33,
+    "order_sides": 66,
+    "sharpe_estimate": -9.109741492197887,
+    "bars": 991
+  },
+  "holdout_double_cost": {
+    "net_return": -0.02838940095175302,
+    "max_drawdown": 0.03491576270168806,
+    "entries": 33,
+    "order_sides": 66,
+    "sharpe_estimate": -13.029892580995572,
+    "bars": 991
+  }
+}

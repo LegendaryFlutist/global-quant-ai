@@ -1,0 +1,76 @@
+{
+  "instrument": {
+    "symbol": "BTCUSDT",
+    "name": "比特币",
+    "market": "binance_usdm",
+    "timeframes": [
+      "4h",
+      "1d",
+      "1w"
+    ]
+  },
+  "input": "example_data/bars.csv",
+  "source": {
+    "symbol": "SYNTHETIC",
+    "synthetic": true
+  },
+  "input_sha256": "f13a1fbb3ab41d653e3575a8d9f804d11810d641922e250ad330b0c37938841b",
+  "pivot_width": 2,
+  "real_orders_enabled": false,
+  "timeframes": {
+    "4h": {
+      "bars": 312,
+      "latest": {
+        "dow123_signal": -1,
+        "dow123_event": 0,
+        "bearish_step": 0,
+        "bullish_step": 0,
+        "support": 79.85386235797768,
+        "support_anchor1": 296.0,
+        "support_anchor2": 306.0,
+        "support_state": "HOLDING",
+        "resistance": 82.97945445173606,
+        "resistance_anchor1": 298.0,
+        "resistance_anchor2": 309.0,
+        "resistance_state": "HOLDING"
+      },
+      "status": "OK"
+    },
+    "1d": {
+      "bars": 52,
+      "latest": {
+        "dow123_signal": -1,
+        "dow123_event": 0,
+        "bearish_step": 0,
+        "bullish_step": 0,
+        "support": 86.59758163632928,
+        "support_anchor1": 35.0,
+        "support_anchor2": 42.0,
+        "support_state": "BROKEN",
+        "resistance": 88.37348042110418,
+        "resistance_anchor1": 45.0,
+        "resistance_anchor2": 48.0,
+        "resistance_state": "HOLDING"
+      },
+      "status": "OK"
+    },
+    "1w": {
+      "bars": 7,
+      "latest": {
+        "dow123_signal": 0,
+        "dow123_event": 0,
+        "bearish_step": 0,
+        "bullish_step": 0,
+        "support": null,
+        "support_anchor1": null,
+        "support_anchor2": null,
+        "support_state": "UNAVAILABLE",
+        "resistance": null,
+        "resistance_anchor1": null,
+        "resistance_anchor2": null,
+        "resistance_state": "UNAVAILABLE"
+      },
+      "status": "INSUFFICIENT_PIVOTS"
+    }
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "instruments": [
+    {
+      "symbol": "KORUUSDT",
+      "name": "韩国MSCI指数每日3倍做多ETF永续",
+      "market": "binance_usdm",
+      "special_attention": true,
+      "priority": 1,
+      "contract_type": "TRADIFI_PERPETUAL",
+      "timeframes": [
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "1d",
+        "1w",
+        "1mo"
+      ],
+      "entry_timeframe": "15m",
+      "trend_timeframe": "1h",
+      "timeframe_ratio": 4
+    },
+    {
+      "symbol": "CLUSDT",
+      "name": "原油永续",
+      "market": "binance_usdm",
+      "special_attention": true,
+      "priority": 2,
+      "contract_type": "TRADIFI_PERPETUAL",
+      "timeframes": [
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "1d",
+        "1w",
+        "1mo"
+      ],
+      "entry_timeframe": "15m",
+      "trend_timeframe": "1h",
+      "timeframe_ratio": 4
+    },
+    {
+      "symbol": "NVDAUSDT",
+      "name": "英伟达股票永续",
+      "market": "binance_usdm",
+      "special_attention": true,
+      "priority": 3,
+      "contract_type": "TRADIFI_PERPETUAL",
+      "timeframes": [
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "1d",
+        "1w",
+        "1mo"
+      ],
+      "entry_timeframe": "15m",
+      "trend_timeframe": "1h",
+      "timeframe_ratio": 4
+    },
+    {
+      "symbol": "BTCUSDT",
+      "name": "比特币永续",
+      "market": "binance_usdm",
+      "special_attention": true,
+      "priority": 4,
+      "contract_type": "PERPETUAL",
+      "timeframes": [
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "1d",
+        "1w",
+        "1mo"
+      ],
+      "entry_timeframe": "15m",
+      "trend_timeframe": "1h",
+      "timeframe_ratio": 4
+    },
+    {
+      "symbol": "ETHUSDT",
+      "name": "以太坊",
+      "market": "binance_usdm",
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "entry_timeframe": "15m",
+      "trend_timeframe": "1h",
+      "timeframe_ratio": 4
+    },
+    {
+      "symbol": "KORU",
+      "name": "韩国 MSCI 指数每日3倍做多",
+      "market": "us_etf",
+      "special_attention": true,
+      "daily_multiplier": 3,
+      "benchmark": "MSCI Korea 25/50 Index",
+      "timeframes": [
+        "1d",
+        "1w",
+        "1mo"
+      ],
+      "source": "https://www.direxion.com/product/daily-msci-south-korea-bull-3x-etf"
+    },
+    {
+      "symbol": "QID",
+      "name": "纳斯达克100每日2倍做空",
+      "market": "us_etf",
+      "special_attention": true,
+      "daily_multiplier": -2,
+      "benchmark": "Nasdaq-100",
+      "timeframes": [
+        "1d",
+        "1w",
+        "1mo"
+      ],
+      "source": "https://www.proshares.com/our-etfs/leveraged-and-inverse/qid"
+    }
+  ]
+}

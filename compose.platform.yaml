@@ -1,0 +1,106 @@
+# Merge with compose.yaml via scripts/platform.sh. Does not replace the GPU lab.
+services:
+  postgres:
+    image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+    environment:
+      POSTGRES_USER: quant
+      POSTGRES_DB: global_quant
+      POSTGRES_PASSWORD: ${PLATFORM_DB_PASSWORD:?Use scripts/platform.sh to generate local credentials}
+    volumes:
+      - platform_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U quant -d global_quant"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:6-alpine@sha256:b362b5dff9d14d961dc3352db4776aba6a8c53ca2661d7c74ad2c121f82cdaea
+    command: [redis-server, --appendonly, 'yes', --maxmemory-policy, noeviction]
+    volumes:
+      - platform_redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  api:
+    image: global-quant-api:phase1
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment: &api_environment
+      DATABASE_URL: postgresql+psycopg://quant:${PLATFORM_DB_PASSWORD}@postgres:5432/global_quant
+      REDIS_URL: redis://redis:6379/0
+      DATA_ROOT: /market-data
+      RESEARCH_ROOT: /research
+      COOKIE_SECURE: ${PLATFORM_COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${PLATFORM_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+    volumes: &api_volumes
+      - ./.runtime/market-data:/market-data
+      - ./.runtime:/secrets
+      - ./data:/research/data:ro
+      - ./runs:/research/runs:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  worker:
+    image: global-quant-api:phase1
+    environment: *api_environment
+    volumes: *api_volumes
+    command: [rq, worker, --url, 'redis://redis:6379/0', --with-scheduler, market-data]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  web:
+    image: global-quant-web:phase1
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '127.0.0.1:${PLATFORM_PORT:-8080}:8080'
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, 'http://127.0.0.1:8080/']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  postgres-test:
+    image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+    profiles: [test]
+    environment:
+      POSTGRES_USER: quant
+      POSTGRES_DB: quant_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U quant -d quant_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  redis-test:
+    image: redis:6-alpine@sha256:b362b5dff9d14d961dc3352db4776aba6a8c53ca2661d7c74ad2c121f82cdaea
+    profiles: [test]
+  backend-tests:
+    image: global-quant-api:phase1
+    profiles: [test]
+    environment:
+      DATABASE_URL: postgresql+psycopg://quant@postgres-test:5432/quant_test
+      REDIS_URL: redis://redis-test:6379/0
+      DATA_ROOT: /tmp/market-data-tests
+    command: [pytest, -q, tests]
+    depends_on:
+      postgres-test: {condition: service_healthy}
+      redis-test: {condition: service_started}
+volumes:
+  platform_postgres:
+  platform_redis:

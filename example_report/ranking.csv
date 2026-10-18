@@ -1,0 +1,13 @@
+name,threshold,eligible,validation_score
+trend,0.6,True,0.0027269868216324156
+logistic,0.6,False,0.0
+random_forest,0.6,False,0.0
+extra_trees,0.55,False,0.0
+extra_trees,0.6,False,0.0
+mlp,0.55,False,0.0
+mlp,0.6,False,0.0
+logistic,0.55,False,-0.008946746104606884
+random_forest,0.55,False,-0.013568270058661347
+mean_reversion,0.6,False,-0.01961953606410438
+hist_gradient,0.6,False,-0.02543030401017654
+hist_gradient,0.55,False,-0.05919944813424172
