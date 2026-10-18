@@ -16,6 +16,9 @@
 | research | 冻结时间切分、候选筛选、杠杆场景对比、模拟审计 |
 | reports | 独立账户曲线、持仓/逐笔操作、结构图与三级汇总 |
 | notifications | 明确区分真实显式SMTP、预览及本地模拟记录 |
+| risk | GRU入场质量、只用过去收盘估计的波动预算、止损/回撤上限、仅减仓规则 |
+
+`quant_lab.services.risk_research`复用本机冻结检查点，在已使用验证窗生成只读风险对照产物；`config/risk.json`为版本化策略。输出不是当前信号，页面只提供历史研究和预算试算，不连接账户、不下单。
 
 `quant_lab.compat.alias_legacy`让旧名与新模块指向同一个对象，保留旧测试patch和`deep_model.TorchGRUClassifier`模型的反序列化路径。不要删除兼容层或直接加载不可信joblib/pickle。
 
@@ -23,7 +26,7 @@
 
 ## Web后端
 
-- `app/api/`：按认证、资产、行情、任务、设置和系统状态分路由。
+- `app/api/`：按认证、资产、行情、任务、设置、系统状态和只读风险研究分路由。
 - `app/core/`：配置、数据库和认证边界。
 - `app/domains/`：持久模型、公开资产目录和后续领域契约。
 - `app/services/catalog.py`：幂等注册资产；`ingestion.py`：真实数据导入/核验/采集；`jobs.py`：队列、有限重试、终态对账。
@@ -32,7 +35,7 @@
 
 ## Web前端
 
-`App.tsx`只协调路由和任务反馈。`pages/`每页一个组件，`layout/`负责导航和公共反馈，`hooks/useAuth.ts`负责会话，`hooks/useWorkspaceData.ts`负责只读轮询，`services/`负责同源API，`components/`负责图表和状态徽标。页面不直接访问交易所或存储会话令牌。
+`App.tsx`只协调路由和任务反馈。`pages/`每页一个组件，`layout/`负责导航和公共反馈，`hooks/useAuth.ts`负责会话，`hooks/useWorkspaceData.ts`负责只读轮询，`services/`负责同源API，`components/`负责图表和状态徽标。风险页显示本机历史研究、单标的曲线和受限的假设仓位预算；页面不直接访问交易所或存储会话令牌。
 
 ## 注释规范
 

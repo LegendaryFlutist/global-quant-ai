@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TB
     Browser[React / TypeScript 个人工作台] --> Proxy[本机 Nginx / TLS 反向代理边界]
-    Proxy --> API[FastAPI: 身份 / 资产 / 行情 / 设置 / 任务]
+    Proxy --> API[FastAPI: 身份 / 资产 / 行情 / 设置 / 任务 / 只读风险研究]
     API --> PG[(PostgreSQL 业务与审计)]
     API --> Redis[(Redis / RQ 任务队列)]
     Redis --> Worker[Python 3.11 行情 Worker]
@@ -64,6 +64,8 @@ flowchart TB
 ## API 与安全边界
 
 Phase1 路由见 `/api/docs`：公开健康和登录握手，其余业务API要求会话。写操作同时要求CSRF，浏览器Origin必须在白名单。用户名密码错误统一响应，Redis限制每个IP/用户名5分钟10次，限流不可用则拒绝登录。密码修改撤销所有会话。登录、任务与设置变更写审计，不写密码、Cookie、密钥。
+
+风险研究路由只读取GPU容器生成的本机版本化报告，缺少/损坏产物时返回不可用；预算试算要求会话与CSRF，使用服务端风险上限重新计算。页面展示已使用验证窗的GRU质量分、波动预算、减仓对照和数据时点，不构成实时信号，不触碰保留留出集，不调用交易所私有API、不接受私钥、不发订单。详情见[`docs/risk-research.md`](../risk-research.md)。
 
 初始管理员密码随机生成到 `.runtime/bootstrap-admin.txt`（0600）；从不进入源码、镜像或日志。没有开放注册。`.runtime/`目录0700且数据库密码单独0600文件。此版本为本机个人部署：HTTP + loopback，`COOKIE_SECURE=false`仅适用本机；远程部署必须配置受控TLS/私网及`COOKIE_SECURE=true`、明确Origin白名单。不会自动接入现有80/443服务。
 

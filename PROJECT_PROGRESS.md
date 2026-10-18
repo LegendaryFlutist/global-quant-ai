@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。研究代码已按领域分包并补齐具名函数文档；风险评分、波动率仓位、保守减仓和研究页面已完成本地验证，等待本分支提交与远程CI。**
+**Phase1及GitHub恢复机制已交付。研究代码已按领域分包并补齐具名函数文档；风险评分、波动率仓位、保守减仓和研究页面已完成本地验证。风险代码提交已推送，Draft PR #10 的四项远程CI全通过。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
-Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以`git log -1 --oneline`为准；本文件与代码一起提交，不能在自身内容里保存自身提交哈希。风险模块提交前，远程PR/CI尚未创建。
+Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以`git log -1 --oneline`为准；本文件与代码一起提交，不能在自身内容里保存自身提交哈希。Draft PR #10：https://github.com/LegendaryFlutist/global-quant-ai/pull/10 。风险代码提交`c9a099e`远程backend、frontend、publish-hygiene和risk-engine CI均通过（Actions run 39130693978）。
 
 ## 已完成功能
 
@@ -43,7 +43,8 @@ Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以
 | 2026-10-18 | `bash scripts/container.sh test` | 154 passed，GPU容器研究/模型/回测/报告及恢复回归 | 控制台结果 |
 | 2026-10-18 | `cd frontend && npm test && npm run build` | 2 passed；TypeScript和Vite生产构建成功 | 控制台结果 |
 | 2026-10-18 | `bash scripts/platform.sh up`及健康检查 | API/Web重建；`/api/health`为200，风险研究未认证访问为401；现有lab与PostgreSQL/Redis保留 | 控制台结果 |
-| 2026-10-18 | `node scripts/platform_browser_check.mjs 9223` | 未通过：旧bootstrap密码已失效，登录页拒绝认证；没有继续浏览器页面断言，不修改数据库凭据 | 本机控制台；需要独立测试账号后才能完成完整浏览器截图验证 |
+| 2026-10-18 | `node scripts/platform_browser_check.mjs 9223` | 未通过：旧bootstrap密码已失效，登录页拒绝认证；没有继续页面断言，不修改数据库凭据 | 本机控制台；脚本在失败前写入`runs/platform_phase1/login.png`，可能覆盖原登录截图；后续E2E使用隔离账号和新输出目录 |
+| 2026-10-18 | GitHub Draft PR #10 / commit `c9a099e` | 分支已推送；backend、frontend、publish-hygiene、risk-engine全部通过 | https://github.com/LegendaryFlutist/global-quant-ai/pull/10 ，Actions run 39130693978 |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
 
@@ -58,9 +59,9 @@ Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以
 ## 进行中与下一步
 
 - 已完成：24个研究模块迁移到`quant_lab`领域包，保留根兼容入口；404个具名Python函数/嵌套函数有文档；前端页面按职责拆分。分包提交`b868d1f`已本地保存。
-- 已实现但待本地检查点：版本化风险配置、真实GRU质量评分、波动率感知预算、保守只减仓回测、认证只读风险API及Web风险页面。所有回归与容器构建通过，尚未做远程CI。
-- 当前Git状态是风险单元未提交改动；先审查差异并按`checkpoint.sh`提交，再推送分支、创建PR、等待CI。不要合并到main前把远程CI标成通过。
-- 浏览器验证需解决：本机保存的初始bootstrap凭据与现存密码不一致。使用独立临时测试账户/隔离测试数据库完成新页面端到端检查；不得重置当前用户密码或更改生产数据库。
+- 已完成并推送：版本化风险配置、真实GRU质量评分、波动率感知预算、保守只减仓回测、认证只读风险API及Web风险页面。风险单元提交`c9a099e`远程4项CI全通过；当前Draft PR #10。
+- 当前新改动只更新项目架构及交接说明；运行检查并保存文档检查点后，核对PR新一次CI。PR仍因浏览器验证未完成而保持Draft。
+- 浏览器验证需解决：本机保存的初始bootstrap凭据与现存密码不一致。使用独立临时测试账户/隔离测试数据库和新的输出目录完成页面端到端检查；不得重置当前用户密码或更改持久数据库。
 - 随后优先完成同一回放窗的风险指标页面/CLI周期选择、实时数据时效提示及更长独立验证设计；新训练/独立留出未获批准前不晋升模型。继续按TASKS.md推进。
 
 ## 发布交接记录

@@ -14,10 +14,10 @@
 
 ## Architecture map
 
-- `frontend/src/`: React/TypeScript pages, chart components and same-origin API client.
-- `backend/app/api/`: auth, assets, market, jobs, settings, system routers; `core/`: settings/database/security; `domains/`: Phase 1 ORM and future type contracts; `services/`: ingestion/queue; `adapters/`: public GET-only Binance.
+- `frontend/src/`: React/TypeScript pages including historical risk research and same-origin API client.
+- `backend/app/api/`: auth, assets, market, jobs, settings, system and research-risk routers; `core/`: settings/database/security; `domains/`: Phase 1 ORM and future type contracts; `services/`: ingestion/queue; `adapters/`: public GET-only Binance.
 - `backend/migrations/`: immutable Alembic revisions; `config/platform/`: public asset registry/snapshot; `config/swing.json`: research strategy policy.
-- `quant_lab/{analysis,models,strategies,backtesting,research,reports,notifications}`: offline domain implementations; `core` owns resource paths; `cli` owns entry points. Root same-name modules only alias the actual module for old imports and trusted pickles. Web integration is not complete for these domains.
+- `quant_lab/{analysis,models,strategies,backtesting,research,reports,notifications,risk}`: offline domain implementations; `core` owns resource paths; `cli` owns entry points; `services/risk_research.py` creates a read-only, versioned report from previously used validation windows. Root same-name modules only alias the actual module for old imports and trusted pickles. Live signals and execution are not implemented.
 - Persistent local state: PostgreSQL named volume, Redis AOF volume, `.runtime/market-data/`, `data/` and `runs/`. Git intentionally excludes these. Git is not a backup of personal research artifacts.
 
 ## Mandatory session recovery and checkpoints
