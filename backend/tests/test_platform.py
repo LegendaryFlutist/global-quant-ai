@@ -106,7 +106,10 @@ def test_asset_priority_identity_and_truthful_capabilities(logged_in):
     assert all(not a['live_tradable'] for a in assets)
     assert next(a for a in assets if a['id']=='us:NVDA')['underlying_id']==next(a for a in assets if a['symbol']=='NVDAUSDT')['underlying_id']
     caps=logged_in.get('/api/capabilities').json()
-    assert all(c['status']=='PLANNED' for c in caps if c['phase']>1)
+    statuses={c['id']:c['status'] for c in caps}
+    assert statuses['platform']=='IMPLEMENTED'
+    assert statuses['technical']=='PARTIAL'
+    assert all(status=='PLANNED' for key,status in statuses.items() if key not in ('platform','technical'))
     assert logged_in.post('/api/execution/orders',json={'side':'BUY'}).status_code==403
 
 def test_settings_validation_persistence_and_csrf(logged_in):

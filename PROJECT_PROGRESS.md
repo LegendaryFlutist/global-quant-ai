@@ -73,8 +73,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 已实现并提交多周期结构归档单元：复用确认摆动点和Dow123，输出各周期趋势线/破位、波浪候选、确认123、RSI顶/底背离，并关联数据SHA256；将事件汇入已有离线HTML/JSON结构报告。目标模块7项测试通过，完整研究套件156项通过；见最新Git记录。
 - 多周期结构Web单元已通过PR #11提交`32f1a9e`上的GitHub CI：Python3.11 backend、前端、risk-engine、发布扫描全success；本机npm测试2 passed/生产构建成功、py_compile与437函数文档检查通过。新增API运行容器未在本机重建：Docker BuildKit两次停在ARM64 NumPy wheel下载，第二次约90秒无进度后手动取消（退出码130）；现有服务仍用旧镜像，不声称本机已部署。恢复命令：处理可达的Python包索引/代理后运行`bash scripts/platform.sh up`，随后`bash scripts/platform.sh test`及认证后页面验收。CI结果与限制记录于`docs/platform/phase1.md`。
 - 实时刷新单元提交`cf678fd`及SHA256展示修正提交`dbb3602`已通过PR #11四项GitHub CI（Python3.11后端隔离PostgreSQL/Redis、前端、研究、发布扫描全success）；新服务/API测试包含闭合K线只追加Parquet、未闭合快照独立SHA256、会话/CSRF、无外部网络mock。前端2 passed/构建成功；本机py_compile、448个函数docstring检查通过。实例只在三年缓存视图刷新当前周期，错误退避至60秒。Docker本机镜像仍未重建：BuildKit ARM64 NumPy下载无进度后手动取消，当前运行API/Web还是旧镜像；恢复需在包索引可达后`bash scripts/platform.sh up`、`bash scripts/platform.sh test`和隔离账号浏览器验收。单进程锁适用于当前单机服务；若横向多API副本，需要Redis级共享节流。
-- WIP（未验证）：总体情绪摘要API和总览页按priority<4四个优先合约汇总15m/1h/4h/1d本地结构。分数由趋势70%、道氏30%及最近八根周期内的已确认RSI背离调整；20根对数收益波动率只作为背景显示，不暗中改变分数。逐层披露子项；方向冲突/趋势线破坏标TRANSITIONING，没数据标UNKNOWN。波浪只显示为候选背景、支撑压力与源哈希显示为证据，不会伪装胜率或交易信号。后端服务/API单测、前端测试/构建和静态检查待跑；没有外部行情请求。
-- 下一步：接四个优先标的可解释的整体情绪/市场周期汇总（缺数据保留UNKNOWN），再建立可配置且资金隔离的多个模拟账户、按模型组合理论回测并给出总/分标的净值、回撤、操作与持仓报告。完成后重建本机API/Web镜像并做隔离浏览器端到端验收。注册表精确核验标的按需采集，不推测未核验符号；未收盘K线仅显示，结构信号等收盘确认。
+- 总体结构周期摘要提交`9225ecc`的PR #11四项GitHub CI全部success：Python3.11 backend (mock结构、本地隔离测试库)、frontend、risk-engine和publish-hygiene；研究容器`bash scripts/container.sh test`为156 passed，前端2 passed/生产构建，本机`py_compile`、文档检查457函数、发布扫描全过。方向分明确为趋势70%+道氏30%并叠加最近八根周期内确认RSI背离（±0.2）；20根收盘对数波动只作背景；4h/1d冲突或破位为TRANSITIONING，缺档UNKNOWN。来源hash和支撑/压力透明显示；无公网行情读取。
+- 下一步：建立资金与成交账本完全隔离的多个模拟账户，允许配置结构理论/策略权重和风险政策，用一致数据窗/成本回测并生成总/分标的净值、回撤、操作次数与持仓时长。完成后修复本机包索引下载、重建API/Web镜像并做隔离浏览器端到端验收。注册表精确核验标的按需采集，不推测未核验符号；未收盘K线仅显示，结构信号等收盘确认。
 
 ## 发布交接记录
 

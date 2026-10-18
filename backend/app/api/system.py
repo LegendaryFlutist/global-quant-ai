@@ -47,7 +47,17 @@ def capabilities(user:User=Depends(current_user)):
     Returns:
         阶段能力列表，不能将离线研究误标为Web训练/实盘完成。
     """
-    return [{'id':key,'name':name,'phase':phase,'status':'IMPLEMENTED' if phase==1 else 'PLANNED','detail':detail} for key,name,phase,detail in [('platform','基础 Web 平台',1,'登录、资产注册、历史行情、多周期图表、队列和设置'),('technical','技术结构与道氏 / 波浪',2,'已有离线研究实现；Web 标注、回放与验证待开发'),('models','情绪与模型中心',3,'已有离线 GRU 等模型；Web 训练与版本注册待开发'),('backtests','组合策略与回测',4,'已有离线报告；Web 实验管理待开发'),('paper','独立模拟账户',5,'持久账本与账户排名未实现'),('notifications','通知与 Binance 只读账户',6,'Web 凭据配置和邮件任务未实现'),('approvals','逐笔审批交易',7,'2FA、独立风控、对账和实盘执行均未实现'),('ideas','研究思想与持续实验',8,'思想注册与验证工作流未实现')]]
+    definitions=[
+        ('platform','基础 Web 平台',1,'IMPLEMENTED','登录、资产注册、历史行情、多周期图表、队列和设置'),
+        ('technical','多周期技术结构与道氏 / 波浪',2,'PARTIAL','已实现三年按需归档、多周期趋势/破位、Dow 1-2-3、波浪候选、RSI背离、5秒选中周期刷新和优先资产结构周期摘要；浏览器运行验收待完成'),
+        ('models','宏观情绪与模型中心',3,'PLANNED','结构方向摘要已提供；新闻/宏观与跨市场传导、Web模型训练及版本注册待开发'),
+        ('backtests','组合策略与回测',4,'PLANNED','已有离线报告；Web实验管理待开发'),
+        ('paper','独立模拟账户',5,'PLANNED','持久账本与账户排名未实现'),
+        ('notifications','通知与 Binance 只读账户',6,'PLANNED','Web凭据配置和邮件任务未实现'),
+        ('approvals','逐笔审批交易',7,'PLANNED','2FA、独立风控、对账和实盘执行均未实现'),
+        ('ideas','研究思想与持续实验',8,'PLANNED','思想注册与验证工作流未实现'),
+    ]
+    return [{'id':key,'name':name,'phase':phase,'status':status,'detail':detail} for key,name,phase,status,detail in definitions]
 
 @router.post('/api/execution/orders')
 def no_execution(user:User=Depends(current_user)):
