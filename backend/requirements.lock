@@ -16,8 +16,10 @@ idna==3.20
 iniconfig==2.3.1
 Mako==1.4.3
 MarkupSafe==3.0.4
+numpy==2.4.3
 opentelemetry-api==1.45.1
 packaging==26.3
+pandas==3.0.6
 pluggy==1.7.0
 psycopg==3.3.6
 psycopg-binary==3.3.6
@@ -35,4 +37,5 @@ SQLAlchemy==2.1.5
 starlette==1.8.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
+tzdata==2026.2
 uvicorn==0.54.0

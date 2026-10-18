@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ArchiveResult, Asset, CandleResult, Interval } from "../types";
+import type { ArchiveResult, Asset, CandleResult, Interval, StructureResult } from "../types";
 import { api, date, post } from "../services/api";
 import PriceChart from "../components/PriceChart";
 /** 按标的/周期读取已校验历史；切换后忽略旧请求，采集作为独立后台任务。 */
@@ -21,6 +21,7 @@ export default function ChartPage({
   const [intervals, setIntervals] = useState<Interval[]>([]);
   const [data, setData] = useState<CandleResult | null>(null);
   const [archive, setArchive] = useState<ArchiveResult | null>(null);
+  const [structure, setStructure] = useState<StructureResult | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -46,21 +47,40 @@ export default function ChartPage({
     setError("");
     setData(null);
     setArchive(null);
+    setStructure(null);
     const query = `?asset_id=${encodeURIComponent(assetId)}&interval=${interval}&limit=10000`;
-    (showArchive
-      ? api<ArchiveResult>(`/market/archive${query}`)
-      : api<CandleResult>(`/market/candles${query}`))
-      .then((value) => {
+    if (showArchive) {
+      const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])]
+        .slice(0, 10).join(",");
+      Promise.all([
+        api<ArchiveResult>(`/market/archive${query}`),
+        api<StructureResult>(`/market/structure?asset_id=${encodeURIComponent(assetId)}&intervals=${encodeURIComponent(relatedIntervals)}&limit=10000`),
+      ])
+        .then(([archiveValue, structureValue]) => {
+          if (!active) return;
+          setArchive(archiveValue);
+          setStructure(structureValue);
+        })
+        .catch((e) => {
+          if (active) setError(e.message);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    } else {
+      setStructure(null);
+      api<CandleResult>(`/market/candles${query}`)
+        .then((value) => {
         if (!active) return;
-        if (showArchive) setArchive(value as ArchiveResult);
-        else setData(value as CandleResult);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+        setData(value);
+        })
+        .catch((e) => {
+          if (active) setError(e.message);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
     return () => {
       active = false;
     };
@@ -101,6 +121,8 @@ export default function ChartPage({
     }
   }
   const chartCandles = showArchive ? archive?.candles ?? [] : data?.candles ?? [];
+  const currentStructure = structure?.timeframes[interval];
+  const currentEvents = structure?.events.filter((event) => event.timeframe === interval) ?? [];
   return (
     <>
       <header className="page-heading">
@@ -176,7 +198,7 @@ export default function ChartPage({
             <small>可选择已有数据的周期，或创建公开行情采集任务。</small>
           </div>
         ) : chartCandles.length ? (
-          <PriceChart candles={chartCandles} timezone={timezone} showMA={ma} />
+          <PriceChart candles={chartCandles} timezone={timezone} showMA={ma} structure={currentStructure} events={currentEvents} />
         ) : showArchive && archive?.available === false ? (
           <div className="empty">本地尚无该标的/周期的长期缓存；点击“采集三年历史”创建后台任务。</div>
         ) : (
@@ -185,7 +207,7 @@ export default function ChartPage({
         <div
           className="chart-footer"
           data-loaded-interval={data?.interval}
-          data-loaded-asset={data?.asset_id}
+          data-loaded-asset={showArchive ? archive?.asset_id : data?.asset_id}
         >
           <span>
             {showArchive
@@ -212,11 +234,17 @@ export default function ChartPage({
         </section>
         <section className="panel">
           <h3>分析能力</h3>
-          <p>
-            本阶段提供蜡烛图、成交量、MA20 /
-            MA60、缩放和平移。道氏、波浪候选、手动画线和历史回放将在 Phase 2
-            接入；已有离线研究结果继续保留。
-          </p>
+          {showArchive ? (
+            <>
+              <p>分析截止：{date(structure?.as_of_ms, timezone)} · 只读已收盘K线 · {structure?.algorithm ?? "等待归档数据"}</p>
+              <p>当前周期：{interval} · 结构趋势 {currentStructure?.trend === 1 ? "上升" : currentStructure?.trend === -1 ? "下降" : currentStructure?.status === "OK" ? "震荡/分歧" : "数据不足"} · 趋势线状态 {currentStructure?.trendline_break_state ?? "待缓存"}</p>
+              <p>各周期缓存状态：{Object.entries(structure?.timeframes ?? {}).map(([tf, value]) => `${tf} ${value.status === "OK" ? value.trendline_break_state === "BROKEN" ? "趋势线破坏" : "可分析" : "数据不足"}`).join(" · ") || "请先采集对应周期"}</p>
+              <p>已确认事件：{currentEvents.length ? currentEvents.slice(-4).map((event) => `${event.kind} ${date(event.confirmed_at, timezone)}`).join("；") : "本周期暂无破位、123或RSI背离确认"}</p>
+              <p>波浪计数：{currentStructure?.wave?.status ?? "样本不足/待缓存"} · 只作为结构候选，不表示获利概率。</p>
+            </>
+          ) : (
+            <p>90天缓存用于普通蜡烛图；切换到“三年缓存”后会加载已落盘周期的趋势线、道氏123、波浪候选、RSI背离和跨周期结构破坏时间。</p>
+          )}
         </section>
       </div>
     </>

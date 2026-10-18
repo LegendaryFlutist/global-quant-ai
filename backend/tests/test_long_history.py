@@ -297,3 +297,32 @@ def test_archive_task_rejects_unverified_asset_and_missing_csrf(logged_in):
     payload = {"kind": "FETCH_ARCHIVE", "asset_id": "binance_usdm:BTCUSDT", "interval": "1h"}
     assert logged_in.post("/api/tasks", json=payload).status_code == 422
     assert logged_in.post("/api/tasks", json=payload, headers={"X-CSRF-Token": "invalid"}).status_code == 403
+
+
+def test_structure_api_reports_missing_local_periods_without_network(logged_in, tmp_path, monkeypatch):
+    """验证多周期分析API只报告本地缺档状态且拒绝无效周期。
+
+    Args:
+        logged_in: 已通过会话认证并带CSRF请求头的测试客户端。
+        tmp_path: pytest提供的隔离临时目录。
+        monkeypatch: pytest提供的模块依赖替换器。
+
+    Returns:
+        无返回值；若未缓存周期触发网络或错误周期被接纳则测试失败。
+    """
+    monkeypatch.setattr(long_history, "DATA_ROOT", tmp_path)
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == "binance_usdm:BTCUSDT"))
+        asset.verification = "VERIFIED"
+        db.commit()
+
+    response = logged_in.get(
+        "/api/market/structure?asset_id=binance_usdm:BTCUSDT&intervals=15m%2C1h%2C4h"
+    )
+    assert response.status_code == 200
+    assert response.json()["missing_archives"] == ["15m", "1h", "4h"]
+    assert response.json()["events"] == []
+    assert response.json()["research_only"] is True
+    assert logged_in.get(
+        "/api/market/structure?asset_id=binance_usdm:BTCUSDT&intervals=15s"
+    ).status_code == 422

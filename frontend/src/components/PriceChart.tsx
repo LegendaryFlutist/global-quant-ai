@@ -9,7 +9,7 @@ import {
   LegendComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import type { Candle } from "../types";
+import type { Candle, StructureEvent, StructureTimeframe } from "../types";
 import { date } from "../services/api";
 echarts.use([
   CandlestickChart,
@@ -40,20 +40,60 @@ export default function PriceChart({
   candles,
   timezone,
   showMA,
+  structure,
+  events = [],
 }: {
   candles: Candle[];
   timezone: string;
   showMA: boolean;
+  structure?: StructureTimeframe;
+  events?: StructureEvent[];
 }) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!element.current) return;
     const chart = echarts.init(element.current, "dark", { renderer: "canvas" });
+    const timestamps = candles.map((c) => c.open_time);
+    const lineSeries = (["support", "resistance"] as const).flatMap((name) => {
+      const line = structure?.trend_lines?.[name];
+      if (!line || line.anchors.length < 2) return [];
+      const [a, b] = line.anchors;
+      const span = b.time - a.time;
+      if (span <= 0) return [];
+      return [{
+        name: name === "support" ? "确认支撑趋势线" : "确认压力趋势线",
+        type: "line" as const,
+        data: candles.map((c) => c.open_time < a.time ? null :
+          Number(a.price) + (Number(b.price) - Number(a.price)) * (c.close_time - a.time) / span),
+        showSymbol: false,
+        connectNulls: false,
+        lineStyle: { width: 1.8, type: "dashed" as const, color: name === "support" ? "#46c8a6" : "#ee7485" },
+        itemStyle: { color: name === "support" ? "#46c8a6" : "#ee7485" },
+      }];
+    });
+    const markers = events.flatMap((event) => {
+      const target = candles.find((c) => c.close_time >= event.occurred_at);
+      if (!target) return [];
+      const isBullish = event.kind.includes("BULLISH") ||
+        (event.kind === "DOW123_CONFIRMED" && event.evidence.direction === 1);
+      const isBreak = event.kind === "TRENDLINE_BREAK";
+      const label = isBreak ? "破位" : event.kind === "DOW123_CONFIRMED" ? "123" :
+        event.kind === "BULLISH_RSI_DIVERGENCE" ? "底背离" : "顶背离";
+      return [{
+        name: label,
+        type: "scatter" as const,
+        data: [[date(target.open_time, timezone), Number(target.close)]],
+        symbol: isBreak ? "diamond" : "circle",
+        symbolSize: 11,
+        itemStyle: { color: isBullish ? "#64a7ff" : isBreak ? "#f2ae52" : "#d87cf2" },
+        label: { show: true, formatter: label, position: isBullish ? "bottom" : "top", color: "#dbe6f7", fontSize: 10 },
+      }];
+    });
     chart.setOption({
       backgroundColor: "#111927",
       animation: false,
       legend: {
-        data: ["价格", ...(showMA ? ["MA20", "MA60"] : [])],
+        data: ["价格", ...(showMA ? ["MA20", "MA60"] : []), ...lineSeries.map((s) => s.name), ...markers.map((m) => m.name)],
         top: 8,
         textStyle: { color: "#aab8ce" },
       },
@@ -148,6 +188,8 @@ export default function PriceChart({
               },
             ]
           : []),
+        ...lineSeries,
+        ...markers,
         {
           name: "成交量",
           type: "bar",
@@ -168,7 +210,7 @@ export default function PriceChart({
       observer.disconnect();
       chart.dispose();
     };
-  }, [candles, timezone, showMA]);
+  }, [candles, timezone, showMA, structure, events]);
   return (
     <div
       ref={element}

@@ -56,6 +56,46 @@ export interface ArchiveResult {
   research_only: boolean;
   available?: boolean;
 }
+/** Per-cycle structure output; all price values cross the API as Decimal strings. */
+export interface StructureLine {
+  state: string;
+  value: string | null;
+  slope_per_bar: string | null;
+  anchors: { time: number; price: string; confirmed_at: number }[];
+  confirmed_at?: number;
+}
+/** One closed-bar structure event with separate occurrence and known-at times. */
+export interface StructureEvent {
+  kind: string;
+  timeframe: string;
+  occurred_at: number;
+  confirmed_at: number;
+  evidence: Record<string, unknown>;
+  source_sha256?: string | null;
+}
+/** Summary for one native candle timeframe. */
+export interface StructureTimeframe {
+  status: string;
+  bars?: number;
+  last_closed_at?: number;
+  close?: string;
+  trend?: number;
+  trendline_break_state?: string;
+  trend_lines?: Record<string, StructureLine>;
+  dow123_state?: number;
+  wave?: { status: string; direction: number; interpretation: string; invalidation: string | null; labels: string[] };
+  latest_divergence?: StructureEvent | null;
+}
+/** Authenticated local-cache analysis for the selected asset and cycle set. */
+export interface StructureResult {
+  schema_version: number;
+  algorithm: string;
+  as_of_ms: number;
+  timeframes: Record<string, StructureTimeframe>;
+  events: StructureEvent[];
+  missing_archives: string[];
+  research_only: boolean;
+}
 export interface Interval {
   interval: string;
   available: boolean;

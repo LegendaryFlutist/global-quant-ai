@@ -298,8 +298,8 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
     Returns:
         Decimal价格字符串K线、时间范围、SHA256及归档状态。
     """
-    if not isinstance(limit, int) or not 1 <= limit <= 10000:
-        raise ValueError("归档读取数量必须在1到10000之间")
+    if not isinstance(limit, int) or not 1 <= limit <= 200000:
+        raise ValueError("归档读取数量必须在1到200000之间")
     if end_ms is not None and (not isinstance(end_ms, int) or end_ms < 0):
         raise ValueError("归档截止时间必须为UTC毫秒时间戳")
     manifest = archive_manifest(asset_id, interval, root)
@@ -316,6 +316,7 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
         rows = [row for row in rows if row["close_time"] <= end_ms]
     selected = rows[-limit:]
     digest_input = "".join(item["sha256"] for item in manifest["segments"])
+    manifest_sha256 = hashlib.sha256((directory / "manifest.json").read_bytes()).hexdigest()
     return {
         "asset_id": asset_id,
         "symbol": manifest["symbol"],
@@ -332,6 +333,7 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
         "status": manifest["status"],
         "source": manifest["source"],
         "segment_sha256": digest_input,
+        "dataset_sha256": manifest_sha256,
         "research_only": True,
     }
 

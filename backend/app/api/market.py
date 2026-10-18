@@ -8,9 +8,33 @@ from app.domains.models import User, MarketData
 from app.services.market_data import candles, MINUTES
 from app.adapters.public_binance import INTERVALS
 from app.services.long_history import read_archive, validate_archive_identity
+from app.services.structure_analysis import STRUCTURE_INTERVALS, analyze_archived_structure
 
 
 router=APIRouter()
+
+@router.get('/api/market/structure')
+def market_structure(asset_id:str,intervals:str=Query('15m,1h,4h,1d',max_length=100),as_of_ms:int|None=None,limit:int=Query(10000,ge=1,le=200000),user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """返回本地归档的多周期趋势线、123、波浪候选与确认背离。
+
+    Args:
+        asset_id: 带市场命名空间的精确产品ID。
+        intervals: 逗号分隔的原生周期；只允许已归档周期且最多十个。
+        as_of_ms: 可选统一观察/回放截止UTC毫秒时间。
+        limit: 每周期最多使用K线根数；高频历史大于资源上限时使用最近样本。
+        user: 认证依赖已经校验的当前用户。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        带发生/确认时间、数据SHA256和本地归档缺失状态的研究结构。
+    """
+    selected=[item for item in intervals.split(',') if item]
+    if not selected or len(selected)>10 or len(set(selected))!=len(selected) or any(item not in STRUCTURE_INTERVALS for item in selected):
+        raise HTTPException(422,'周期列表必须是不重复的原生K线周期')
+    try:
+        return analyze_archived_structure(db,asset_id,selected,as_of_ms,limit)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from None
 
 @router.get('/api/market/archive')
 def market_archive(asset_id:str,interval:str='4h',limit:int=Query(2000,ge=1,le=10000),end_ms:int|None=None,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
