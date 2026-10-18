@@ -71,6 +71,12 @@ npm run build
 
 验证：`cf678fd`与快照哈希修正`dbb3602`的Python3.11隔离backend、frontend、risk-engine与publish-hygiene检查全部success；后端mock覆盖新闭合K线追加、正在形成的K线快照与SHA256、认证和CSRF，前端2 passed且生产构建通过。未访问真实Binance。当前单API进程锁避免本机清单竞争；跨API副本共享节流需在横向部署前增加。受本机Docker下载ARM64 NumPy wheel停滞影响，新容器尚未重建，当前运行容器仍为旧版；网络可达后运行`bash scripts/platform.sh up`、`bash scripts/platform.sh test`，再以隔离账号验收页面和连续刷新。当前功能仅在已选中的三年缓存图表可用，关闭页面/切换到90天缓存后停止轮询。
 
+### Phase2 总体结构周期摘要（WIP，2026-10-19）
+
+新增本地只读`GET /api/market/sentiment`草稿，默认聚合四个优先标的及15m/1h/4h/1d趋势。分数以方向指数呈现：趋势70%、道氏30%，最近八根K线内的已确认RSI背离最多±0.2；总体按各资产等权汇总。20根已收盘对数收益波动率只作背景展示、不改变分数。4h与1d反向或高周期趋势线破坏为TRANSITIONING；缺档保留UNKNOWN。UI会披露每项趋势、道氏、背离、波浪候选、20根波动、支撑/压力及来源哈希，分数明确不是胜率。
+
+本段代码与测试尚未在Python3.11隔离CI验证；测试采用模拟结构响应和隔离数据库。仍需检查跨标的混合/转折边界并运行隔离浏览器验收。不得把未通过测试的WIP标为完成。
+
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
 - Docker：Python3.11.17；FastAPI0.143.3；SQLAlchemy2.1.5；RQ2.12.0；PostgreSQL15、Redis6。基础镜像摘要、完整Python约束锁和npm锁文件已固定。

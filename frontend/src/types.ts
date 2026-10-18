@@ -73,6 +73,41 @@ export interface LiveMarketResult {
   refresh_error?: string;
   new_segments?: { sha256: string }[];
 }
+/** Transparent structural cycle summary; the signed score is not a probability. */
+export interface MarketSentiment {
+  schema_version: number;
+  algorithm: string;
+  as_of_ms: number;
+  regime: "UPTREND" | "DOWNTREND" | "MIXED" | "TRANSITIONING" | "UNKNOWN" | string;
+  signed_score: number | null;
+  score_meaning: string;
+  known_asset_count: number;
+  unknown_asset_count: number;
+  research_only: boolean;
+  assets: {
+    asset_id: string;
+    symbol: string;
+    name: string;
+    status: string;
+    regime: string;
+    signed_score: number | null;
+    missing_archives: string[];
+    timeframes: {
+      timeframe: string;
+      score: number;
+      trend_component: number;
+      dow123_component: number;
+      recent_divergence_component: number;
+      trendline_break_state: string;
+      volatility_20_bar_pct: number | null;
+      last_closed_at: number;
+      source_sha256: string | null;
+      support_resistance: Record<string, { state: string; price: string | null }>;
+      recent_events: { kind: string; occurred_at: number; confirmed_at: number }[];
+      wave_candidate: string;
+    }[];
+  }[];
+}
 /** Per-cycle structure output; all price values cross the API as Decimal strings. */
 export interface StructureLine {
   state: string;

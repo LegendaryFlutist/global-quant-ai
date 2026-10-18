@@ -11,6 +11,7 @@ from app.adapters.public_binance import INTERVALS, PublicDataError
 from app.services.long_history import read_archive, validate_archive_identity
 from app.services.live_market import read_live_snapshot, refresh_latest_candle
 from app.services.structure_analysis import STRUCTURE_INTERVALS, analyze_archived_structure
+from app.services.market_sentiment import PRIORITY_INTERVALS, aggregate_priority_sentiment
 
 
 router=APIRouter()
@@ -19,6 +20,27 @@ class LiveRefreshRequest(BaseModel):
     """Validated selection for one current authenticated chart refresh."""
     asset_id:str
     interval:str='15m'
+
+@router.get('/api/market/sentiment')
+def market_sentiment(intervals:str=Query('15m,1h,4h,1d',max_length=30),as_of_ms:int|None=None,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """汇总四个优先标的的本地多周期结构状态与总体市场周期。
+
+    Args:
+        intervals: 逗号分隔的15m/1h/4h/1d原生周期子集。
+        as_of_ms: 可选统一UTC毫秒回放截止时点。
+        user: 认证依赖已经校验的当前用户。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        透明的方向分、UNKNOWN清单、趋势/背离证据、支撑压力和数据SHA256。
+    """
+    selected=[item for item in intervals.split(',') if item]
+    if not selected or len(selected)>4 or len(set(selected))!=len(selected) or any(item not in PRIORITY_INTERVALS for item in selected):
+        raise HTTPException(422,'周期列表只允许15m、1h、4h、1d且不能重复')
+    try:
+        return aggregate_priority_sentiment(db,selected,as_of_ms)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from None
 
 @router.post('/api/market/live')
 def market_live(payload:LiveRefreshRequest,user:User=Depends(current_user),db:DBSession=Depends(get_db)):

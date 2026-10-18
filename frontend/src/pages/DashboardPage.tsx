@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import type { Asset, Overview, Provider } from "../types";
-import { date } from "../services/api";
+import type { MarketSentiment } from "../types";
+import { api, date } from "../services/api";
 import { badge } from "../components/StatusBadge";
 
 /** 展示真实数据覆盖、优先标的及连接状态；没有模型数据时不制造风险结论。 */
@@ -18,6 +20,29 @@ export default function DashboardPage({
   onChart: (asset: Asset) => void;
   onVerify: () => Promise<void>;
 }) {
+  const [sentiment, setSentiment] = useState<MarketSentiment | null>(null);
+  const [sentimentError, setSentimentError] = useState("");
+  useEffect(() => {
+    let active = true;
+    /** Refresh the local-only structural summary once per minute without using live private data. */
+    async function refreshSentiment() {
+      try {
+        const value = await api<MarketSentiment>("/market/sentiment");
+        if (active) {
+          setSentiment(value);
+          setSentimentError("");
+        }
+      } catch (error) {
+        if (active) setSentimentError((error as Error).message);
+      }
+    }
+    void refreshSentiment();
+    const timer = window.setInterval(() => void refreshSentiment(), 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
   return (
     <>
       <header className="page-heading">
@@ -37,7 +62,7 @@ export default function DashboardPage({
             `${overview?.datasets ?? 0} 份原生行情集`,
           ],
           ["数据窗口", "90 天", "保留真实来源与文件校验"],
-          ["全球风险状态", "UNKNOWN", "Phase 3 待接入情绪数据"],
+          ["本地结构周期", sentiment?.regime ?? "UNKNOWN", sentimentError ? "情绪摘要暂不可用" : `${sentiment?.known_asset_count ?? 0}/4 个优先标的有本地结构缓存`],
         ].map(([title, value, detail]) => (
           <section className="stat" key={title}>
             <span>{title}</span>
@@ -78,6 +103,38 @@ export default function DashboardPage({
           </button>
         ))}
       </div>
+      <section className="panel">
+        <div className="section-title">
+          <div>
+            <h2>总体情绪面 · 结构周期</h2>
+            <small>{sentiment?.score_meaning ?? "只汇总本地已收盘趋势、道氏状态和近期确认背离，不构成交易信号。"}</small>
+          </div>
+          <span>方向分 {sentiment?.signed_score ?? "—"} · 更新时间 {date(sentiment?.as_of_ms, timezone)}</span>
+        </div>
+        <p>
+          当前状态：<strong>{sentiment?.regime ?? "UNKNOWN"}</strong> · 已知 {sentiment?.known_asset_count ?? 0} / 4 · 缺行情 {sentiment?.unknown_asset_count ?? 4}。
+          缺失周期保持 UNKNOWN，不按其他资产补值。
+        </p>
+        {sentiment?.assets.map((item) => (
+          <div className="provider-row" key={item.asset_id}>
+            <div>
+              <strong>{item.symbol} · {item.regime}{item.signed_score === null ? "" : ` (${item.signed_score})`}</strong>
+              <small>
+                {item.timeframes.length
+                  ? item.timeframes.map((frame) => {
+                    const support = frame.support_resistance.support?.price ?? "—";
+                    const resistance = frame.support_resistance.resistance?.price ?? "—";
+                    const divergence = frame.recent_events.map((event) => event.kind.replace("_RSI_DIVERGENCE", "背离")).join("/") || "无近期背离";
+                    const volatility = frame.volatility_20_bar_pct === null ? "—" : `${frame.volatility_20_bar_pct.toFixed(2)}%`;
+                    return `${frame.timeframe} ${frame.trend_component > 0 ? "上行" : frame.trend_component < 0 ? "下行" : "中性"} / 道氏${frame.dow123_component > 0 ? "+" : ""}${frame.dow123_component} / 趋势线${frame.trendline_break_state} / ${divergence} / 波浪${frame.wave_candidate} / 20根波幅${volatility} / 支撑${support}压力${resistance}`;
+                  }).join(" · ")
+                  : `本地结构缓存不足：${item.missing_archives.join(", ") || "未核验或尚未采集"}`}
+              </small>
+            </div>
+            <span className="badge neutral">{item.status === "OK" ? `${item.timeframes.length} 周期` : "UNKNOWN"}</span>
+          </div>
+        ))}
+      </section>
       <div className="two-col">
         <section className="panel">
           <div className="section-title">

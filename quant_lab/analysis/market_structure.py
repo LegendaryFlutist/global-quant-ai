@@ -245,9 +245,12 @@ def multitimeframe_structure(bars_by_timeframe,as_of_ms=None,source_hashes=None,
             lines[name]=dict(state=str(latest[name+'_state']),value=float(latest[name]),slope_per_bar=float(slope),anchors=anchors,
                 confirmed_at=max(point['confirmed_at'] for point in anchors))
         trend=int(features.analysis_trend.iloc[-1]);dow_direction=int(latest.dow123_signal)
+        log_returns=np.diff(np.log(bars.close.to_numpy(dtype=float)))
+        volatility_20_bar_pct=float(np.std(log_returns[-20:],ddof=0)*100) if len(log_returns)>=20 else None
         summaries[timeframe]=dict(status='OK',bars=len(bars),last_closed_at=int(last_bar.close_time),close=float(last_bar.close),
             source_sha256=digest,trend=trend,trendline_break_state='BROKEN' if any(lines[name]['state']=='BROKEN' for name in lines) else 'HOLDING_OR_UNAVAILABLE',
             trend_lines=lines,dow123_state=dow_direction,wave=wave_candidate(turns),latest_divergence=divergences[-1] if divergences else None,
+            volatility_20_bar_pct=volatility_20_bar_pct,
             pivots=[dict(kind=p['kind'],price=float(p['price']),occurred_at=int(p['time']),confirmed_at=int(p['confirmed_at']),index=int(p['index'])) for p in pivots[-20:]])
     events.sort(key=lambda event:(event['confirmed_at'],event['timeframe'],event['kind']))
     return dict(schema_version=1,algorithm='confirmed_structure_divergence_v1',as_of_ms=cutoff,timeframes=summaries,events=events)

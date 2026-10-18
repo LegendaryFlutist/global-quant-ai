@@ -50,6 +50,8 @@ class MarketStructureTests(unittest.TestCase):
         self.assertEqual(prefix,extended)
         self.assertEqual(prefix['schema_version'],1)
         self.assertEqual(prefix['timeframes']['15m']['bars'],220)
+        self.assertGreaterEqual(prefix['timeframes']['15m']['volatility_20_bar_pct'],0)
+        self.assertEqual(prefix['timeframes']['15m']['volatility_20_bar_pct'],extended['timeframes']['15m']['volatility_20_bar_pct'])
         self.assertIn(prefix['timeframes']['15m']['trend_lines']['support']['state'],('HOLDING','BROKEN','UNAVAILABLE'))
         self.assertTrue(all(event['confirmed_at']<cutoff for event in prefix['events']))
         self.assertTrue(all(event['source_sha256']==digest for event in prefix['events']))
