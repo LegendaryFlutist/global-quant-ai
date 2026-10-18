@@ -9,6 +9,11 @@ SOURCE = Path(__file__).resolve().parents[1]
 
 class CheckpointTests(unittest.TestCase):
     def setUp(self):
+        """为当前用例建立独立临时Git仓库与基线，不操作用户项目。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         self.temporary=tempfile.TemporaryDirectory(prefix='quant-checkpoint-test-')
         self.addCleanup(self.temporary.cleanup)
         self.root=Path(self.temporary.name)
@@ -25,11 +30,25 @@ class CheckpointTests(unittest.TestCase):
         self.before=self.run_command('git','rev-parse','HEAD').stdout
 
     def run_command(self,*args,expected=0):
+        """仅在临时测试仓库执行命令并核对预期退出码。
+
+        Args:
+            expected: 当前测试/接口参数，含义见该函数的具体场景。
+            *args: 透传的额外位置参数，按当前接口契约解释。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         result=subprocess.run(args,cwd=self.root,text=True,capture_output=True)
         self.assertEqual(result.returncode,expected,result.stdout+result.stderr)
         return result
 
     def test_only_selected_work_is_committed(self):
+        """验证检查点只提交指定文件并保留其他工作。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         (self.root/'unit.txt').write_text('verified unit\n')
         (self.root/'other.txt').write_text('pending unrelated work\n')
         (self.root/'PROJECT_PROGRESS.md').write_text('Verified result recorded\n')
@@ -41,6 +60,11 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual((self.root/'other.txt').read_text(),'pending unrelated work\n')
 
     def test_unrelated_staged_change_is_rejected(self):
+        """验证其他已暂存文件不会被误纳入检查点。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         (self.root/'unit.txt').write_text('verified unit\n')
         (self.root/'other.txt').write_text('someone else\n')
         self.run_command('git','add','other.txt')
@@ -50,10 +74,20 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(self.run_command('git','diff','--cached','--name-only').stdout.strip(),'other.txt')
 
     def test_noop_creates_no_commit(self):
+        """验证无修改的检查点不生成空提交。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         self.run_command('bash','scripts/checkpoint.sh','test: no changes','AGENTS.md')
         self.assertEqual(self.run_command('git','rev-parse','HEAD').stdout,self.before)
 
     def test_resume_reads_documents_without_changing_git(self):
+        """验证恢复入口只读交接文件且不修改Git状态。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         (self.root/'AGENTS.md').write_text('User edit to preserve\n')
         before=self.run_command('git','status','--porcelain').stdout
         result=self.run_command('bash','scripts/resume.sh')
@@ -64,6 +98,11 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(self.run_command('git','rev-parse','HEAD').stdout,self.before)
 
     def test_environment_file_cannot_be_committed(self):
+        """验证本机.env不能进入检查点提交。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         (self.root/'.env').write_text('TEST_PLACEHOLDER=not-a-credential\n')
         result=self.run_command('bash','scripts/checkpoint.sh','test: must reject','.env',expected=1)
         self.assertIn('BLOCKED: .env',result.stdout)

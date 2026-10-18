@@ -11,6 +11,14 @@ from pattern_features import (FEATURE_COLUMNS, MINUTES, aggregate_closed,
 
 def source_candles(size=4096):
     # Start on a 16-hour boundary: all lower and upper research intervals align.
+    """生成可复用的连续15分钟合成源行情。
+
+    Args:
+        size: 当前测试/接口参数，含义见该函数的具体场景。
+
+    Returns:
+        测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+    """
     largest_step = 16 * 60 * 60 * 1000
     start = (1609459200000 // largest_step) * largest_step
     i = np.arange(size)
@@ -27,10 +35,27 @@ def source_candles(size=4096):
 
 class FakeClassifier:
     def __init__(self, classes, probabilities):
+        """为测试替身保存指定类别顺序和固定概率。
+
+        Args:
+            classes: 当前测试/接口参数，含义见该函数的具体场景。
+            probabilities: 当前测试/接口参数，含义见该函数的具体场景。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         self.classes_ = np.asarray(classes)
         self.probabilities = np.asarray(probabilities, dtype=float)
 
     def predict_proba(self, features):
+        """让测试替身按指定类别顺序返回固定概率，不训练模型。
+
+        Args:
+            features: 输入特征维度或测试中的特征表，取决于当前函数契约。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         if len(features) != len(self.probabilities):
             raise AssertionError('Features/probabilities length mismatch')
         return self.probabilities
@@ -39,11 +64,21 @@ class FakeClassifier:
 class PatternFeatureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        """准备可复用的确定性合成行情或小样本训练前置条件。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         cls.bars = source_candles()
         cls.marks = cls.bars.copy()
         cls.marks[['open', 'high', 'low', 'close']] *= 1.0007
 
     def test_every_timeframe_aggregates_exact_ohlcv_and_mark_prices(self):
+        """验证全部周期精确聚合成交和标记OHLCV。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for timeframe, minutes in MINUTES.items():
             with self.subTest(timeframe=timeframe):
                 frame = prepare_timeframe(self.bars, self.marks, timeframe)
@@ -63,6 +98,11 @@ class PatternFeatureTests(unittest.TestCase):
                         self.assertAlmostEqual(actual['mark_' + name], actual[name] * 1.0007)
 
     def test_higher_context_only_appears_at_its_close(self):
+        """验证大周期上下文仅在其收盘时出现。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for timeframe, minutes in MINUTES.items():
             with self.subTest(timeframe=timeframe):
                 frame = prepare_timeframe(self.bars, self.marks, timeframe)
@@ -84,6 +124,11 @@ class PatternFeatureTests(unittest.TestCase):
                 self.assertEqual(frame.higher_trend.iloc[191], int(np.sign(gaps.iloc[47])))
 
     def test_features_are_prefix_invariant_even_with_incomplete_upper_bars(self):
+        """验证存在不完整大周期边界时特征仍保持前缀不变。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for timeframe in MINUTES:
             full = prepare_timeframe(self.bars, self.marks, timeframe)
             columns = [c for c in full if c not in ('label', 'label_end_time')]
@@ -93,6 +138,11 @@ class PatternFeatureTests(unittest.TestCase):
                     pd.testing.assert_frame_equal(full.loc[:len(prefix)-1, columns], prefix[columns])
 
     def test_feature_contract_excludes_labels_and_future_prices(self):
+        """验证特征契约不含标签或未来价格列。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         self.assertEqual(len(FEATURE_COLUMNS), len(set(FEATURE_COLUMNS)))
         self.assertTrue(set(PATTERN_COLUMNS).issubset(FEATURE_COLUMNS))
         self.assertTrue({'bullish_count', 'bearish_count', 'higher_ema_gap'}.issubset(FEATURE_COLUMNS))
@@ -103,6 +153,11 @@ class PatternFeatureTests(unittest.TestCase):
         self.assertTrue(np.isfinite(frame[list(FEATURE_COLUMNS)].iloc[250:]).all().all())
 
     def test_costaware_label_uses_next_open_to_fourth_future_close(self):
+        """验证成本标签采用下一开盘到指定未来收盘。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         fee, slip = .0007, .0003
         for timeframe in MINUTES:
             with self.subTest(timeframe=timeframe):
@@ -125,6 +180,11 @@ class PatternFeatureTests(unittest.TestCase):
     def test_entry_requires_pattern_and_matching_higher_trend(self):
         # Includes bullish/bearish candidates, opposing higher trend, abstention,
         # and inconsistent external metadata without an actual signed pattern.
+        """验证入场同时需要反转形态与同向大周期。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = pd.DataFrame(0., index=range(8), columns=FEATURE_COLUMNS)
         frame['candidate_direction'] = [1, -1, 1, -1, 0, 1, 1, -1]
         frame['higher_trend'] = [1, -1, -1, 1, 1, 1, 1, -1]
@@ -142,6 +202,11 @@ class PatternFeatureTests(unittest.TestCase):
         self.assertTrue((signals.pattern.iloc[2:] == '').all())
 
     def test_model_probability_gate_handles_class_order_and_absent_class(self):
+        """验证模型类别顺序及缺类概率不会错位。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = pd.DataFrame(0., index=range(5), columns=FEATURE_COLUMNS)
         frame['candidate_direction'] = [1, -1, 1, -1, 1]
         frame['higher_trend'] = frame.candidate_direction
@@ -158,6 +223,11 @@ class PatternFeatureTests(unittest.TestCase):
                                       [0, -1, 0, -1, 0])
 
     def test_source_alignment_and_incomplete_bucket_validation(self):
+        """验证成交/标记源对齐并排除不完整聚合桶。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         incomplete = self.bars.iloc[:19]
         self.assertEqual(len(aggregate_closed(incomplete, 60)), 4)
         self.assertEqual(len(aggregate_closed(incomplete, 240)), 1)

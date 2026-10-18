@@ -7,6 +7,11 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
+    """创建Phase1已交付的初始表、外键和唯一约束。
+
+    Returns:
+        无返回值；DDL与revision不因补充注释而改变。
+    """
     op.create_table('users', sa.Column('id', sa.Integer, primary_key=True), sa.Column('username', sa.String(80), unique=True, nullable=False), sa.Column('password_hash', sa.String(300), nullable=False), sa.Column('role', sa.String(20), nullable=False), sa.Column('created_at', sa.DateTime(timezone=True), nullable=False))
     op.create_table('sessions', sa.Column('token_hash', sa.String(64), primary_key=True), sa.Column('user_id', sa.Integer, sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False), sa.Column('csrf_token', sa.String(80), nullable=False), sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False))
     op.create_table('security_audit_logs', sa.Column('id', sa.Integer, primary_key=True), sa.Column('actor', sa.String(80), nullable=False), sa.Column('action', sa.String(80), nullable=False), sa.Column('detail', sa.JSON, nullable=False), sa.Column('created_at', sa.DateTime(timezone=True), nullable=False))
@@ -23,5 +28,10 @@ def upgrade():
     op.create_table('system_events', sa.Column('id', sa.Integer, primary_key=True), sa.Column('kind', sa.String(60), nullable=False), sa.Column('detail', sa.JSON, nullable=False), sa.Column('created_at', sa.DateTime(timezone=True), nullable=False))
 
 def downgrade():
+    """按依赖逆序撤销Phase1表结构；仅供明确授权的迁移回退。
+
+    Returns:
+        无返回值；会删除表，恢复会话时禁止自动调用。
+    """
     for name in ['system_events','system_settings','scheduled_tasks','market_data_metadata','sector_membership','asset_aliases','assets','providers','security_audit_logs','sessions','users']:
         op.drop_table(name)

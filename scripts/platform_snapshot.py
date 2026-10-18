@@ -24,6 +24,11 @@ with SessionLocal() as db:
 '''
 
 def main():
+    """从正在运行的API容器收集不含凭据的交付证据。
+
+    Returns:
+        无返回值；核对真实文件哈希后保存本机runtime-check.json。
+    """
     result=subprocess.run(['docker','exec','-i','quant-lab-api-1','python','-'],input=CODE,text=True,capture_output=True,check=True)
     runtime=json.loads(result.stdout)
     assert not runtime['source_image_contains_local_env'] and not runtime['source_image_contains_runtime']

@@ -7,17 +7,38 @@ from candlestick_patterns import PATTERN_COLUMNS, PATTERN_NAMES, reversal_patter
 
 
 def prefix():
+    """构造形态前置趋势的合成K线前缀。
+
+    Returns:
+        测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+    """
     close = 120. - np.arange(20)
     return pd.DataFrame({'open': close + .4, 'high': close + .7,
                          'low': close - .3, 'close': close})
 
 
 def fixture(rows):
+    """构造当前报告/行情测试所需的独立临时输入和冻结边界。
+
+    Args:
+        rows: 原始K线/记录列表；字段契约由当前领域函数校验。
+
+    Returns:
+        测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+    """
     return pd.concat([prefix(), pd.DataFrame(rows, columns=['open', 'high', 'low', 'close'])],
                      ignore_index=True)
 
 
 def mirror(bars):
+    """对价格做镜像以验证多空规则对称性。
+
+    Args:
+        bars: 按时间升序排列的OHLCV表，时间戳单位为毫秒。
+
+    Returns:
+        测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+    """
     out = bars.copy()
     out['open'] = 250 - bars.open
     out['close'] = 250 - bars.close
@@ -28,6 +49,11 @@ def mirror(bars):
 
 class PatternTests(unittest.TestCase):
     def test_all_twelve_bullish_and_bearish_families(self):
+        """验证12类反转形态的多空镜像样本。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         cases = {
             'hammer_hanging_man': [(100, 100.55, 98.5, 100.5)],
             'inverted_hammer_shooting_star': [(100, 102, 99.95, 100.5)],
@@ -64,6 +90,11 @@ class PatternTests(unittest.TestCase):
         self.assertEqual(reversal_patterns(lower_tail_up).pattern_hammer_hanging_man.iloc[-1], -1)
 
     def test_causal_prefix_and_future_perturbation(self):
+        """验证追加或扰动未来K线不改变过去形态。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         rng = np.random.default_rng(123)
         close = np.exp(np.cumsum(rng.normal(0, .01, 180))) * 100
         opens = np.r_[close[0], close[:-1]]
@@ -77,6 +108,11 @@ class PatternTests(unittest.TestCase):
         pd.testing.assert_frame_equal(full.iloc[:90], reversal_patterns(changed).iloc[:90])
 
     def test_pattern_requires_a_preceding_trend(self):
+        """验证反转形态需要此前已知的前置趋势。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         bars = fixture([(101, 101.2, 98.8, 99), (98.9, 101.4, 98.7, 101.2)])
         bars.loc[:19, 'close'] = 101
         bars.loc[:19, 'open'] = 101.4
@@ -85,6 +121,11 @@ class PatternTests(unittest.TestCase):
         self.assertEqual(reversal_patterns(bars).pattern_engulfing.iloc[-1], 0)
 
     def test_counts_and_abstention(self):
+        """验证形态投票计数及不满足条件时观望。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         result = reversal_patterns(fixture([(101, 101.2, 98.8, 99), (98.9, 101.4, 98.7, 101.2)]))
         events = result[list(PATTERN_COLUMNS)]
         pd.testing.assert_series_equal(result.bullish_count, (events == 1).sum(axis=1).astype('int8'),
@@ -97,12 +138,22 @@ class PatternTests(unittest.TestCase):
         self.assertEqual(result.candidate_direction.iloc[-1], 1)
 
     def test_abandoned_baby_needs_strict_gaps(self):
+        """验证弃婴形态要求严格价格跳空。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         bars = fixture([(102, 102.2, 98.8, 99), (98.3, 98.5, 98.1, 98.31),
                         (99, 101.5, 98.9, 101.3)])
         bars.loc[21, 'high'] = 98.8
         self.assertEqual(reversal_patterns(bars).pattern_abandoned_baby.iloc[-1], 0)
 
     def test_invalid_and_empty_input(self):
+        """验证非法及空行情输入得到明确处理。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for field, value in [('close', np.nan), ('high', 1), ('low', -1)]:
             with self.subTest(field=field):
                 bars = prefix()

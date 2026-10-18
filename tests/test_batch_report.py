@@ -12,6 +12,16 @@ from batch_report import export_batch_report
 
 class BatchReportTests(unittest.TestCase):
     def fixture(self, source, symbol='BTCUSDT', all_options=False):
+        """构造当前报告/行情测试所需的独立临时输入和冻结边界。
+
+        Args:
+            source: 已知来源元数据，或对齐函数中的源K线表。
+            symbol: 精确产品代码；股票、ETF与相关永续不能混用。
+            all_options: 当前测试/接口参数，含义见该函数的具体场景。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         source.mkdir(parents=True)
         start = 1_787_616_000_000
         periods = ('15m', '30m', '1h', '2h', '4h') if all_options else ('15m',)
@@ -60,10 +70,23 @@ class BatchReportTests(unittest.TestCase):
         return report
 
     def snapshot(self, root):
+        """计算待保护来源文件的指纹，供测试确认报告没有改写原件。
+
+        Args:
+            root: 当前任务的项目/数据根目录路径；不会自动读取其他目录。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         return {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in root.rglob('*') if path.is_file()}
 
     def test_scopes_preserve_all_timeframes_exits_without_modifying_sources(self):
+        """验证分层报告保留全部周期/退出配置且不改写来源文件。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             batch = Path(directory)/'batch'
             source = batch/'raw'/'btc'
@@ -99,6 +122,11 @@ class BatchReportTests(unittest.TestCase):
             self.assertTrue((all_accounts.net_return-.009).abs().max() < 1e-12)
 
     def test_holdout_is_only_copied_to_the_original_selected_model(self):
+        """验证留出结果只属于原先选定的模型。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             batch = Path(directory)/'batch'
             source = Path(directory)/'source'
@@ -118,6 +146,11 @@ class BatchReportTests(unittest.TestCase):
             self.assertTrue((scopes/'mlp'/'symbols'/'BTCUSDT'/'selected_holdout_trades.csv').exists())
 
     def test_economics_separates_price_margin_and_account_returns(self):
+        """验证标的价格、保证金与账户收益口径分离。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             batch = Path(directory)/'batch'
             source = batch/'btc'
@@ -139,6 +172,11 @@ class BatchReportTests(unittest.TestCase):
                 self.assertIn('slippage', trade.price_basis)
 
     def test_waiting_and_failed_records_still_have_a_report_and_repeat_is_cached(self):
+        """验证等待/失败状态仍有报告且重复渲染命中缓存。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             batch = Path(directory)/'batch'
             records = [dict(symbol='BTCUSDT', status='WAITING'),
@@ -154,6 +192,11 @@ class BatchReportTests(unittest.TestCase):
             self.assertEqual(first, second)
 
     def test_new_swing_policy_and_raw_prices_are_explicit(self):
+        """验证新持仓策略与不含滑点的原价字段明确展示。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         with tempfile.TemporaryDirectory() as directory:
             batch = Path(directory)/'batch'
             source = batch/'btc'

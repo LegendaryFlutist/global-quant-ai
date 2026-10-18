@@ -5,6 +5,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
 def utcnow():
+    """为持久记录生成带UTC时区的当前时间。
+
+    Returns:
+        timezone-aware datetime。
+    """
     return datetime.now(timezone.utc)
 
 class User(Base):

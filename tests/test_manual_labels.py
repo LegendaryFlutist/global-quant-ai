@@ -12,6 +12,14 @@ HOUR = 3_600_000
 
 
 def market_candles(size=1024):
+    """生成时间对齐的确定性合成K线，用于标签因果性验证。
+
+    Args:
+        size: 当前测试/接口参数，含义见该函数的具体场景。
+
+    Returns:
+        测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+    """
     index = np.arange(size)
     close = 100 + .025*index + 2*np.sin(index/23)
     opening = np.r_[close[0], close[:-1]] + .03*np.cos(index/11)
@@ -25,17 +33,38 @@ def market_candles(size=1024):
 class ManualLabelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        """准备可复用的确定性合成行情或小样本训练前置条件。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         cls.bars = market_candles()
         cls.marks = cls.bars.copy()
         cls.marks[['open', 'high', 'low', 'close']] *= 1.0007
 
     def prepare(self, timeframe='15m', bars=None, marks=None, **kwargs):
+        """以当前测试参数构造特征/标签表，不访问真实账户。
+
+        Args:
+            timeframe: 源或目标周期名称，例如15m/4h。
+            bars: 按时间升序排列的OHLCV表，时间戳单位为毫秒。
+            marks: 与成交K线逐行同时间对齐的标记价格OHLC表。
+            **kwargs: 透传的命名参数；不能绕过当前调用的校验。
+
+        Returns:
+            测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+        """
         return prepare_timeframe(
             self.bars if bars is None else bars,
             self.marks if marks is None else marks, timeframe,
             execution_delay_ms=STEP, label_holding_ms=12*HOUR, **kwargs)
 
     def test_all_timeframes_label_actual_delayed_15m_open_to_twelve_hour_close(self):
+        """验证所有入场周期都用真实延迟15分钟成交及固定结束时刻标注。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         opening = self.bars.set_index('open_time').open
         closing = self.bars.set_index('close_time').close
         fee, slip = .0007, .0003
@@ -60,6 +89,11 @@ class ManualLabelTests(unittest.TestCase):
                 self.assertTrue(frame.loc[~valid, 'label_end_time'].isna().all())
 
     def test_four_hour_label_is_not_filled_at_next_four_hour_open(self):
+        """验证4小时信号不伪造为下一根4小时开盘才成交。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = self.prepare('4h', fee=0., slip=0.)
         row = frame.iloc[14]
         expected_entry = 15*4*HOUR+STEP
@@ -71,6 +105,11 @@ class ManualLabelTests(unittest.TestCase):
         self.assertNotEqual(actual_open, next_four_hour_open)
 
     def test_non_grid_delay_rounds_up_to_first_real_fifteen_minute_open(self):
+        """验证非整周期响应延迟向后取首个真实15分钟开盘。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = prepare_timeframe(self.bars, self.marks, '1h',
                                   execution_delay_ms=5*60_000,
                                   label_holding_ms=12*HOUR)
@@ -78,6 +117,11 @@ class ManualLabelTests(unittest.TestCase):
         self.assertEqual(frame.label_end_time.iloc[0], HOUR+STEP+12*HOUR-1)
 
     def test_label_end_time_rejects_every_training_example_reaching_cut(self):
+        """验证标签结束触及验证边界的样本被训练集清除。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = self.prepare('15m')
         cut = frame.close_time.iloc[700]
         train = frame[(frame.close_time < cut) & (frame.label_end_time < cut)]
@@ -89,6 +133,11 @@ class ManualLabelTests(unittest.TestCase):
 
     def test_risk_atr_floor_matches_only_completed_four_hour_ohlc(self):
         # Compute the 4h reference independently from raw blocks of 16 candles.
+        """验证风险ATR下限只来自完整已收盘4小时行情。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         raw = self.bars
         blocks = len(raw)//16
         highs = raw.high.to_numpy().reshape(blocks, 16).max(axis=1)
@@ -113,6 +162,11 @@ class ManualLabelTests(unittest.TestCase):
         self.assertTrue(np.isfinite(lower.atr.iloc[223:]).all())
 
     def test_unclosed_four_hour_spike_cannot_change_floor_early(self):
+        """验证未收盘4小时尖峰不提前改变风险ATR。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         altered = self.bars.copy()
         altered.loc[230, 'high'] += 1000
         changed = self.prepare('15m', bars=altered, marks=self.marks,
@@ -124,6 +178,11 @@ class ManualLabelTests(unittest.TestCase):
         self.assertEqual(changed.risk_atr_floor.iloc[230], original.risk_atr_floor.iloc[223])
 
     def test_non_label_features_and_risk_floor_are_prefix_causal(self):
+        """验证非标签特征和风险ATR满足前缀因果性。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for timeframe in MINUTES:
             full = self.prepare(timeframe, risk_atr_floor_minutes=240)
             feature_columns = [name for name in full if not name.startswith('label')]

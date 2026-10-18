@@ -11,6 +11,14 @@ from pattern_features import prepare_timeframe,FEATURE_COLUMNS
 from trend_report import load_bars
 
 def audit(root):
+    """逐折审查冻结研究的权重、可知时间、信号、成交和账本守恒。
+
+    Args:
+        root: 当前任务的项目/数据根目录路径；不会自动读取其他目录。
+
+    Returns:
+        无返回值；任何审计不一致会通过断言失败，不重新训练模型。
+    """
     root=Path(root);results=[];torch.set_num_threads(1)
     torch.backends.cuda.matmul.fp32_precision='ieee';torch.backends.cudnn.rnn.fp32_precision='ieee'
     for symbol in ['KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT']:

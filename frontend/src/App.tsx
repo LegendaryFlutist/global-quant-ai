@@ -1,40 +1,138 @@
-import {useEffect,useState,useRef,type FormEvent} from 'react';
-import type {Asset,Overview,Job,Provider,Capability,Settings,Display} from './types';
-import {api,post,setCSRF,date} from './services/api';
-import ChartPage from './pages/ChartPage';
+import { useEffect, useRef, useState } from "react";
+import type { Asset, Job, PageId, User } from "./types";
+import { post } from "./services/api";
+import { useAuth } from "./hooks/useAuth";
+import { useWorkspaceData } from "./hooks/useWorkspaceData";
+import WorkspaceLayout from "./layout/WorkspaceLayout";
+import LoginPage from "./pages/LoginPage";
+import DashboardPage from "./pages/DashboardPage";
+import AssetsPage from "./pages/AssetsPage";
+import ChartPage from "./pages/ChartPage";
+import JobsPage from "./pages/JobsPage";
+import CapabilitiesPage from "./pages/CapabilitiesPage";
+import SettingsPage from "./pages/SettingsPage";
 
-type User={username:string;role:string;csrf_token:string};
-const statuses:Record<string,string>={SUCCEEDED:'已完成',QUEUED:'等待执行',RUNNING:'执行中',RETRYING:'等待重试',FAILED:'失败',QUEUE_ERROR:'入队失败',VERIFIED:'已实时核验',VERIFIED_SNAPSHOT:'公开元数据快照',RESEARCH_ONLY:'仅研究登记',UNVERIFIED:'未核验',UNAVAILABLE:'连接不可用',UNKNOWN:'未知',CONNECTED:'已连接',REGISTERED_RESEARCH_ONLY:'仅登记'};
-const label=(s:string)=>statuses[s]??s;
-const badge=(s:string)=><span className={'badge '+(['SUCCEEDED','VERIFIED','CONNECTED'].includes(s)?'positive':['FAILED','QUEUE_ERROR','UNAVAILABLE'].includes(s)?'negative':'neutral')}>{label(s)}</span>;
-const nav=[['dashboard','◈','总览'],['assets','▤','全球资产'],['charts','⌁','多周期 K 线'],['jobs','◷','后台任务'],['roadmap','▦','模型与平台能力'],['settings','⚙','系统设置']];
-function Login({onLogin}:{onLogin:(u:User)=>void}){
- const[username,setUsername]=useState('admin');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);
- async function submit(e:FormEvent){e.preventDefault();setBusy(true);setError('');try{const status=await api<{csrf_token:string}>('/auth/status');setCSRF(status.csrf_token);const user=await post<User>('/auth/login',{username,password});setCSRF(user.csrf_token);setPassword('');onLogin(user);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- return <main className="login-shell"><div className="login-intro"><div className="brand-mark">GQ</div><span className="eyebrow">PERSONAL RESEARCH TERMINAL</span><h1>Global<br/>Quant AI<span>.</span></h1><p>以真实数据研究全球市场。<br/>从资产结构到多周期价格，建立可追溯的研究工作流。</p><div className="login-line"><span>01 / 基础平台</span><span>RESEARCH ONLY</span></div></div><form className="login-card" onSubmit={submit}><span className="eyebrow">SECURE WORKSPACE</span><h2>登录研究工作台</h2><p>本机部署 · 服务端会话 · 实盘执行关闭</p><label>用户名<input autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} required maxLength={80}/></label><label>密码<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required maxLength={256}/></label>{error&&<div className="error">{error}</div>}<button className="primary" disabled={busy}>{busy?'验证中…':'进入工作台 →'}</button><small>初始登录信息保存在本机<br/><code>.runtime/bootstrap-admin.txt</code><br/>登录后可在系统设置修改密码。</small></form></main>;
-}
-export default function App(){
- const initializedDefaults=useRef(false);
- const[user,setUser]=useState<User|null>(null);const[checking,setChecking]=useState(true);const[page,setPage]=useState('dashboard');const[assets,setAssets]=useState<Asset[]>([]);const[overview,setOverview]=useState<Overview|null>(null);const[jobs,setJobs]=useState<Job[]>([]);const[providers,setProviders]=useState<Provider[]>([]);const[capabilities,setCapabilities]=useState<Capability[]>([]);const[settings,setSettings]=useState<Settings|null>(null);const[error,setError]=useState('');const[notice,setNotice]=useState('');const[theme,setTheme]=useState('全部');const[search,setSearch]=useState('');const[chartAsset,setChartAsset]=useState('binance_usdm:KORUUSDT');
- async function refresh(){try{const result=await Promise.all([api<Asset[]>('/assets'),api<Overview>('/dashboard'),api<Job[]>('/tasks'),api<Provider[]>('/providers'),api<Capability[]>('/capabilities'),api<Settings>('/settings')]);setAssets(result[0]);setOverview(result[1]);setJobs(result[2]);setProviders(result[3]);setCapabilities(result[4]);setSettings(result[5]);if(!initializedDefaults.current){setChartAsset(result[5].display.default_asset);initializedDefaults.current=true;}setError('');}catch(e){setError((e as Error).message);}}
- useEffect(()=>{api<User>('/auth/me').then(u=>{setUser(u);setCSRF(u.csrf_token);}).catch(()=>{}).finally(()=>setChecking(false));const expire=()=>{setUser(null);setCSRF('');};window.addEventListener('session-expired',expire);return()=>window.removeEventListener('session-expired',expire);},[]);
- useEffect(()=>{if(!user)return;void refresh();const timer=window.setInterval(()=>void refresh(),10000);return()=>window.clearInterval(timer);},[user]);
- if(checking)return <div className="empty">正在连接研究工作台…</div>;
- if(!user)return <Login onLogin={u=>{setUser(u);setPage('dashboard');}}/>;
- const timezone=settings?.display.timezone??'Asia/Shanghai';
- function openChart(a:Asset){setChartAsset(a.id);setPage('charts');}
- async function task(kind:string,asset_id?:string){try{const t=await post<{id:string}>('/tasks',{kind,asset_id});setNotice('任务已创建：'+t.id.slice(0,8));await refresh();}catch(e){setError((e as Error).message);}}
- const themes=['全部',...Array.from(new Set(assets.flatMap(a=>a.themes))).sort()];
- return <div className="app-shell"><aside className="sidebar"><a className="brand" href="#" onClick={e=>{e.preventDefault();setPage('dashboard');}}><span className="brand-mark small">GQ</span><div>GLOBAL QUANT<span>AI RESEARCH PLATFORM</span></div></a><div className="nav-label">研究工作台</div><nav>{nav.map(([id,icon,title])=><button key={id} className={page===id?'active':''} onClick={()=>{setPage(id);setNotice('');}}><span>{icon}</span>{title}</button>)}</nav><div className="sidebar-bottom"><span className="status-dot"/>内部研究环境<p>Phase 1 · V2.0</p><small>账户同步、模拟账本和实盘审批<br/>将在后续阶段开发。</small></div></aside><div className="workspace"><div className="topbar"><span>个人量化研究 / <b>{nav.find(n=>n[0]===page)?.[2]}</b></span><div><span className="mode-tag">RESEARCH ONLY</span><span>{user.username}</span><button onClick={async()=>{try{await post('/auth/logout',{});setUser(null);setCSRF('');}catch(e){setError((e as Error).message);}}}>退出</button></div></div><main className="content">{error&&<div role="alert" className="alert error">{error}</div>}{notice&&<div role="status" className="alert">{notice}</div>}
- {page==='dashboard'&&<><header className="page-heading"><div><span className="eyebrow">RESEARCH OVERVIEW</span><h1>市场研究总览</h1><p>优先资产、数据覆盖与系统运行状态</p></div><button onClick={()=>void refresh()}>刷新数据</button></header><div className="stat-grid">{[['登记资产',overview?.asset_count??'—','全球资产与相关合约'],['历史 K 线',overview?.candle_count.toLocaleString()??'—',`${overview?.datasets??0} 份原生行情集`],['数据窗口','90 天','保留真实来源与文件校验'],['全球风险状态','UNKNOWN','Phase 3 待接入情绪数据']].map(([title,value,detail])=><section className="stat" key={title}><span>{title}</span><strong>{value}</strong><small>{detail}</small></section>)}</div><div className="section-title"><h2>优先观察</h2><span>韩国 · 能源 · AI · 加密货币</span></div><div className="asset-cards">{overview?.priority_assets.map((a,i)=><button key={a.id} className="asset-card" onClick={()=>openChart(a)}><span className="asset-number">0{i+1}</span><div className="asset-title"><strong>{a.symbol}</strong><span>↗</span></div><p>{a.name}</p><div className="tags">{a.themes.map(t=><span key={t}>{t}</span>)}</div><div className="asset-card-footer">{a.datasets.length?<span>{a.datasets[0].rows.toLocaleString()} 根 · {a.datasets[0].interval}</span>:<span>暂无历史数据</span>}<span>打开图表 →</span></div></button>)}</div><div className="two-col"><section className="panel"><div className="section-title"><h3>数据连接</h3><button onClick={()=>void task('VERIFY_ASSETS')}>重新核验</button></div>{providers.map(p=><div className="provider-row" key={p.id}><div><strong>{p.name}</strong><small>{String(p.detail.error??p.detail.last_success_at??'已注册来源，状态见标记')}</small></div>{badge(p.status)}</div>)}<p className="muted">快照核验保留来源时间；连接不可用时显示缓存，不视为实时行情。</p></section><section className="panel"><h3>运行边界</h3><ul className="plain-list"><li><span>当前运行模式</span><b>行情研究</b></li><li><span>实盘执行</span><b className="green">服务端禁用</b></li><li><span>行情覆盖截止</span><b>{date(overview?.as_of_ms,timezone)}</b></li><li><span>完成的后台任务</span><b>{overview?.successful_tasks??0}</b></li></ul><p>历史研究报告与 NGC GPU 容器保留。Web 模型训练、账户、邮件与审批能力按阶段接入。</p></section></div></>}
- {page==='assets'&&<><header className="page-heading"><div><span className="eyebrow">ASSET REGISTRY</span><h1>全球资产注册表</h1><p>同一底层资产可归属多个主题；股票、ETF 与相关永续独立登记</p></div><button onClick={()=>void task('VERIFY_ASSETS')}>核验 Binance 合约</button></header><div className="filters"><input placeholder="搜索代码、名称或底层资产" aria-label="搜索资产" value={search} onChange={e=>setSearch(e.target.value)}/><select value={theme} onChange={e=>setTheme(e.target.value)} aria-label="资产主题">{themes.map(t=><option key={t}>{t}</option>)}</select></div><section className="panel table-panel"><table><thead><tr><th>标的 / 底层资产</th><th>市场与类型</th><th>主题</th><th>核验与数据</th><th>操作</th></tr></thead><tbody>{assets.filter(a=>(theme==='全部'||a.themes.includes(theme))&&`${a.symbol} ${a.name} ${a.underlying_id}`.toLowerCase().includes(search.toLowerCase())).map(a=><tr key={a.id}><td><strong>{a.symbol}</strong><small>{a.name}</small><small className="mono">{a.underlying_id}</small></td><td>{a.venue}<small>{a.asset_type}</small></td><td><div className="tags">{a.themes.map(t=><span key={t}>{t}</span>)}</div></td><td>{badge(a.verification)}<small>{a.datasets.length?`${a.datasets[0].rows} 根历史 K 线`:'未接入行情'}</small><small>{date(a.verified_at,timezone)}</small></td><td><button onClick={()=>openChart(a)}>查看图表</button></td></tr>)}</tbody></table></section></>}
- {page==='charts'&&<ChartPage key={chartAsset} assets={assets} initialAsset={chartAsset} initialInterval={settings?.display.default_interval??'4h'} timezone={timezone} onTask={setNotice}/>}
- {page==='jobs'&&<><header className="page-heading"><div><span className="eyebrow">BACKGROUND WORKERS</span><h1>后台任务</h1><p>独立工作进程 · 持久记录 · 自动重试 · 10 秒刷新</p></div><button onClick={()=>void refresh()}>立即刷新</button></header><section className="panel table-panel"><table><thead><tr><th>任务</th><th>标的 / 周期</th><th>状态</th><th>尝试</th><th>结果</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{jobs.map(j=><tr key={j.id}><td>{j.kind}<small className="mono">{j.id.slice(0,8)}</small></td><td>{j.parameters.asset_id??'资产核验'}<small>{j.parameters.interval??''}</small></td><td>{badge(j.status)}</td><td>{j.attempts} / 3</td><td className="job-result">{j.result.error?String(j.result.error):j.result.rows?`${j.result.rows} 根真实 K 线`:'—'}</td><td>{date(j.created_at,timezone)}</td><td>{['FAILED','QUEUE_ERROR'].includes(j.status)&&<button onClick={async()=>{try{await post('/tasks',{kind:j.kind,...j.parameters});setNotice('已重新入队');await refresh();}catch(e){setError((e as Error).message);}}}>重试</button>}</td></tr>)}</tbody></table></section></>}
- {page==='roadmap'&&<><header className="page-heading"><div><span className="eyebrow">PLATFORM CAPABILITIES</span><h1>模型与平台能力</h1><p>已实现、离线已有与后续计划分别标明</p></div></header><div className="capability-grid">{capabilities.map(c=><section className="panel" key={c.id}><span className="eyebrow">PHASE {c.phase}</span><h3>{c.name}</h3><span className={'badge '+(c.status==='IMPLEMENTED'?'positive':'neutral')}>{c.status==='IMPLEMENTED'?'本阶段已实现':'后续计划'}</span><p>{c.detail}</p></section>)}</div></>}
- {page==='settings'&&settings&&<SettingsPage settings={settings} assets={assets} onSaved={async()=>{await refresh();setNotice('设置已保存');}} onLogout={()=>{setUser(null);setCSRF('');}}/>}
- <footer className="workspace-footer"><span>GLOBAL QUANT AI / PERSONAL RESEARCH</span><span>Phase 1 · 不生成收益承诺 · 实盘执行未实现</span></footer></main></div></div>;
-}
-function SettingsPage({settings,assets,onSaved,onLogout}:{settings:Settings;assets:Asset[];onSaved:()=>Promise<void>;onLogout:()=>void}){
- const[display,setDisplay]=useState<Display>(settings.display);const[old,setOld]=useState('');const[next,setNext]=useState('');const[error,setError]=useState('');
- return <><header className="page-heading"><div><span className="eyebrow">WORKSPACE SETTINGS</span><h1>系统设置</h1><p>基础偏好与账户安全</p></div></header>{error&&<div className="alert error">{error}</div>}<div className="two-col"><form className="panel settings-form" onSubmit={async e=>{e.preventDefault();try{await api('/settings/display',{method:'PUT',body:JSON.stringify(display)});await onSaved();setError('');}catch(e){setError((e as Error).message);}}}><h3>显示偏好</h3><label>显示时区<select value={display.timezone} onChange={e=>setDisplay({...display,timezone:e.target.value as Display['timezone']})}><option>Asia/Shanghai</option><option>UTC</option></select></label><label>默认周期<select value={display.default_interval} onChange={e=>setDisplay({...display,default_interval:e.target.value})}>{['15m','30m','1h','2h','4h','6h','12h','1d','1w','1M'].map(i=><option key={i}>{i}</option>)}</select></label><label>默认标的<select value={display.default_asset} onChange={e=>setDisplay({...display,default_asset:e.target.value})}>{assets.map(a=><option key={a.id} value={a.id}>{a.symbol} · {a.venue}</option>)}</select></label><button className="primary">保存偏好</button></form><form className="panel settings-form" onSubmit={async e=>{e.preventDefault();try{await post('/auth/password',{current_password:old,new_password:next});setOld('');setNext('');onLogout();}catch(e){setError((e as Error).message);}}}><h3>修改登录密码</h3><label>当前密码<input type="password" autoComplete="current-password" value={old} onChange={e=>setOld(e.target.value)} required/></label><label>新密码（至少12个字符）<input type="password" autoComplete="new-password" value={next} onChange={e=>setNext(e.target.value)} minLength={12} maxLength={256} required/></label><p>修改后全部会话立即失效，需要重新登录。本机初始密码文件不会随密码修改而更新。</p><button>修改密码并退出</button></form><section className="panel"><h3>交易与 API</h3><p>当前仅使用公开行情，无 API Key 输入或保存功能。实盘下单服务尚未实现，不能通过页面、环境变量或模型启用。</p><span className="badge neutral">Phase 6 / 7 待开发</span></section><section className="panel"><h3>邮件与通知</h3><p>既有研究脚本继续记录模拟邮件。Web SMTP 配置、凭据加密与通知投递将在 Phase 6 实现。</p><span className="badge neutral">模拟研究记录</span></section></div></>;
+/** 工作台路由协调层；身份、轮询与各页面分离，业务能力由后端再次授权。 */
+export default function App() {
+  const auth = useAuth();
+  const data = useWorkspaceData(Boolean(auth.user));
+  const [page, setPage] = useState<PageId>("dashboard");
+  const [notice, setNotice] = useState("");
+  const [chartAsset, setChartAsset] = useState("binance_usdm:KORUUSDT");
+  const initializedDefaults = useRef(false);
+  useEffect(() => {
+    if (data.settings && !initializedDefaults.current) {
+      setChartAsset(data.settings.display.default_asset);
+      initializedDefaults.current = true;
+    }
+  }, [data.settings]);
+  /** 接受认证结果并回到总览，密码已在登录组件清空。 */
+  function loginComplete(user: User) {
+    auth.acceptLogin(user);
+    setPage("dashboard");
+  }
+  /** 页面切换时清除上一个任务提示，不改变任何运行中任务。 */
+  function navigate(next: PageId) {
+    setPage(next);
+    setNotice("");
+  }
+  /** 只选择研究图表的标的，不提交交易。 */
+  function openChart(asset: Asset) {
+    setChartAsset(asset.id);
+    setPage("charts");
+  }
+  /** 提交受限后台任务并刷新持久状态；由后端完成CSRF、去重和白名单校验。 */
+  async function createTask(kind: string, asset_id?: string) {
+    try {
+      const result = await post<{ id: string }>("/tasks", { kind, asset_id });
+      setNotice("任务已创建：" + result.id.slice(0, 8));
+      await data.refresh();
+    } catch (error) {
+      data.setError((error as Error).message);
+    }
+  }
+  /** 使用原任务的已保存参数重新入队；不会把旧失败记录改为成功。 */
+  async function retryTask(job: Job) {
+    try {
+      await post("/tasks", { kind: job.kind, ...job.parameters });
+      setNotice("已重新入队");
+      await data.refresh();
+    } catch (error) {
+      data.setError((error as Error).message);
+    }
+  }
+  /** 撤销当前服务端会话并处理网络错误。 */
+  async function logout() {
+    try {
+      await auth.logout();
+    } catch (error) {
+      data.setError((error as Error).message);
+    }
+  }
+  /** 保存偏好后重读实际服务器状态，页面不自行伪造已保存值。 */
+  async function settingsSaved() {
+    await data.refresh();
+    setNotice("设置已保存");
+  }
+  if (auth.checking) return <div className="empty">正在连接研究工作台…</div>;
+  if (!auth.user) return <LoginPage onLogin={loginComplete} />;
+  const timezone = data.settings?.display.timezone ?? "Asia/Shanghai";
+  return (
+    <WorkspaceLayout
+      user={auth.user}
+      page={page}
+      onNavigate={navigate}
+      onLogout={() => void logout()}
+      error={data.error}
+      notice={notice}
+    >
+      {page === "dashboard" && (
+        <DashboardPage
+          overview={data.overview}
+          providers={data.providers}
+          timezone={timezone}
+          onRefresh={data.refresh}
+          onChart={openChart}
+          onVerify={() => createTask("VERIFY_ASSETS")}
+        />
+      )}
+      {page === "assets" && (
+        <AssetsPage
+          assets={data.assets}
+          timezone={timezone}
+          onChart={openChart}
+          onVerify={() => createTask("VERIFY_ASSETS")}
+        />
+      )}
+      {page === "charts" && (
+        <ChartPage
+          key={chartAsset}
+          assets={data.assets}
+          initialAsset={chartAsset}
+          initialInterval={data.settings?.display.default_interval ?? "4h"}
+          timezone={timezone}
+          onTask={setNotice}
+        />
+      )}
+      {page === "jobs" && (
+        <JobsPage
+          jobs={data.jobs}
+          timezone={timezone}
+          onRefresh={data.refresh}
+          onRetry={retryTask}
+        />
+      )}
+      {page === "roadmap" && (
+        <CapabilitiesPage capabilities={data.capabilities} />
+      )}
+      {page === "settings" && data.settings && (
+        <SettingsPage
+          settings={data.settings}
+          assets={data.assets}
+          onSaved={settingsSaved}
+          onLogout={auth.clearUser}
+        />
+      )}
+    </WorkspaceLayout>
+  );
 }

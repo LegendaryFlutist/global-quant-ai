@@ -16,6 +16,15 @@ router=APIRouter()
 
 @router.get('/api/auth/status')
 def auth_status(request:Request,response:Response):
+    """建立一次性登录CSRF握手并设置严格同站HttpOnly Cookie。
+
+    Args:
+        request: FastAPI请求对象；只读取当前路由需要的Cookie/来源等字段。
+        response: 用于写入或清除Cookie的响应对象。
+
+    Returns:
+        握手token和本机初始化说明；不返回初始密码。
+    """
     token=secrets.token_urlsafe(32)
     response.set_cookie('gq_precsrf',token,httponly=True,secure=COOKIE_SECURE,samesite='strict',max_age=600,path='/api/auth')
     return {'csrf_token':token,'registration_enabled':False,'bootstrap':'本机 .runtime/bootstrap-admin.txt 保存初始登录信息'}
@@ -26,6 +35,17 @@ class Login(BaseModel):
 
 @router.post('/api/auth/login')
 def login(payload:Login,request:Request,response:Response,db:DBSession=Depends(get_db)):
+    """校验来源握手、Redis限流和Argon2密码后建立服务端会话。
+
+    Args:
+        payload: 通过API schema校验的请求数据或报告绘图数据。
+        request: FastAPI请求对象；只读取当前路由需要的Cookie/来源等字段。
+        response: 用于写入或清除Cookie的响应对象。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        用户名、角色及会话CSRF；失败统一HTTP状态且不记录密码。
+    """
     if not secrets.compare_digest(request.cookies.get('gq_precsrf','!'),request.headers.get('x-csrf-token','')):
         raise HTTPException(403,'登录 CSRF 校验失败')
     key='login:'+digest((request.client.host if request.client else '')+payload.username)
@@ -51,10 +71,30 @@ def login(payload:Login,request:Request,response:Response,db:DBSession=Depends(g
 
 @router.get('/api/auth/me')
 def me(user:User=Depends(current_user),session:Session=Depends(current_session)):
+    """读取依赖层已验证的当前登录身份和CSRF值。
+
+    Args:
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        session: 已验证且尚未过期的服务端会话。
+
+    Returns:
+        当前会话的用户名、角色和CSRF，不返回会话原始令牌。
+    """
     return {'username':user.username,'role':user.role,'csrf_token':session.csrf_token}
 
 @router.post('/api/auth/logout')
 def logout(response:Response,user:User=Depends(current_user),session:Session=Depends(current_session),db:DBSession=Depends(get_db)):
+    """删除当前服务端会话，清理浏览器会话Cookie并记录审计。
+
+    Args:
+        response: 用于写入或清除Cookie的响应对象。
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        session: 已验证且尚未过期的服务端会话。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        成功确认字典。
+    """
     db.delete(session);db.add(Audit(actor=user.username,action='LOGOUT',detail={}));db.commit();response.delete_cookie('gq_session',path='/api');return {'ok':True}
 
 class PasswordChange(BaseModel):
@@ -63,6 +103,17 @@ class PasswordChange(BaseModel):
 
 @router.post('/api/auth/password')
 def password_change(payload:PasswordChange,response:Response,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """核验旧密码并保存新哈希，同时撤销该用户的全部会话。
+
+    Args:
+        payload: 通过API schema校验的请求数据或报告绘图数据。
+        response: 用于写入或清除Cookie的响应对象。
+        user: 认证依赖已经校验的当前用户，不从请求正文接受替代身份。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        成功及重新登录提示；不保存或回显明文密码。
+    """
     if not verify_password(user.password_hash,payload.current_password):raise HTTPException(400,'原密码错误')
     user.password_hash=hasher.hash(payload.new_password)
     db.execute(delete(Session).where(Session.user_id==user.id));db.add(Audit(actor=user.username,action='PASSWORD_CHANGED',detail={}));db.commit()

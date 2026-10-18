@@ -23,6 +23,7 @@ RUN python -m venv --system-site-packages "$VIRTUAL_ENV" \
 
 WORKDIR /workspace/quant_lab
 COPY --chown=${APP_UID}:${APP_GID} *.py requirements*.txt watchlist.json ./
+COPY --chown=${APP_UID}:${APP_GID} quant_lab/ ./quant_lab/
 COPY --chown=${APP_UID}:${APP_GID} tests/ ./tests/
 COPY --chown=${APP_UID}:${APP_GID} scripts/ ./scripts/
 COPY --chown=${APP_UID}:${APP_GID} config/ ./config/

@@ -11,6 +11,15 @@ app=FastAPI(title='Global Quant AI',version='2.0.0-phase1',docs_url='/api/docs',
 
 @app.middleware('http')
 async def boundaries(request:Request,call_next):
+    """拦截非法写请求Origin并为API响应添加安全与禁止缓存头。
+
+    Args:
+        request: FastAPI请求对象；只读取当前路由需要的Cookie/来源等字段。
+        call_next: 由ASGI框架注入的下一层请求处理器。
+
+    Returns:
+        下游响应或HTTP403；不放宽Cookie和交易边界。
+    """
     origin=request.headers.get('origin')
     if request.method not in ('GET','HEAD','OPTIONS') and origin and origin not in ALLOWED_ORIGINS:
         return JSONResponse({'detail':'请求来源不被允许'},status_code=403)
@@ -23,6 +32,14 @@ async def boundaries(request:Request,call_next):
 
 @app.get('/api/health')
 def health(db:DBSession=Depends(get_db)):
+    """检查数据库可访问性和Redis连通性。
+
+    Args:
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        健康/降级状态及固定关闭的实盘标志。
+    """
     db.execute(text('SELECT 1'))
     try: redis_ok=Redis.from_url(REDIS_URL,socket_connect_timeout=2).ping()
     except Exception: redis_ok=False

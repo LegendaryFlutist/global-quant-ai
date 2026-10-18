@@ -13,6 +13,17 @@ HOUR = 3_600_000
 
 
 def candles(rows=None, count=8, interval=900_000, atr=10.):
+    """构造当前技术分析或执行测试所需的合成OHLCV样本。
+
+    Args:
+        rows: 原始K线/记录列表；字段契约由当前领域函数校验。
+        count: 当前测试/接口参数，含义见该函数的具体场景。
+        interval: 精确K线周期名称，月线1M区别于分钟。
+        atr: 当前测试/接口参数，含义见该函数的具体场景。
+
+    Returns:
+        测试夹具、构造结果或断言辅助返回值；不影响真实数据。
+    """
     if rows is None:
         rows = [(100., 101., 99., 100.)] * count
     frame = pd.DataFrame(rows, columns=['open', 'high', 'low', 'close'])
@@ -27,6 +38,11 @@ def candles(rows=None, count=8, interval=900_000, atr=10.):
 
 class SwingFeatureTests(unittest.TestCase):
     def test_historical_range_needs_seven_complete_days_and_excludes_partial_four_hours(self):
+        """验证历史波幅需完整观察窗口且排除未完成4小时K线。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles(count=1000)
         frame.loc[680, 'high'] = frame.loc[680, 'mark_high'] = 150.
         result = prepare_timeframe(frame, frame, '15m', swing_lookback_hours=168)
@@ -38,6 +54,11 @@ class SwingFeatureTests(unittest.TestCase):
         self.assertTrue((result.loc[known, 'swing_close_time'] <= result.loc[known, 'close_time']).all())
 
     def test_swing_features_and_entry_signals_are_prefix_invariant(self):
+        """验证波段特征与入场信号不依赖未来样本。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles(count=4096)
         i = np.arange(len(frame))
         frame['close'] = 100+.003*i+np.sin(i/17)
@@ -60,6 +81,11 @@ class SwingFeatureTests(unittest.TestCase):
                     pd.testing.assert_frame_equal(actual, expected)
 
     def test_entry_filter_uses_observed_range_with_inclusive_bounds_and_rejects_warmup(self):
+        """验证历史波幅边界可包含且预热不足必须观望。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = pd.DataFrame(0., index=range(5), columns=FEATURE_COLUMNS)
         frame['candidate_direction'] = frame['higher_trend'] = 1
         frame['bullish_count'] = 1
@@ -71,6 +97,11 @@ class SwingFeatureTests(unittest.TestCase):
         self.assertNotIn('swing_range_pct', FEATURE_COLUMNS)
 
     def test_invalid_swing_parameters_fail_explicitly(self):
+        """验证非法波段窗口与上下限被明确拒绝。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles(count=700)
         for lookback in (0, 3, 5, float('nan')):
             with self.assertRaises(ValueError):
@@ -80,6 +111,11 @@ class SwingFeatureTests(unittest.TestCase):
             entry_signals(prepared,swing_min_range=.02)
 
     def test_delayed_swing_labels_use_actual_entry_end_and_two_percent_cost_floor(self):
+        """验证波段标签用真实延迟成交且覆盖最低价格变动与成本。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for direction in (1,-1):
             frame=candles(count=1000)
             frame['open']=frame['close']=100+direction*.005*np.arange(len(frame))
@@ -104,6 +140,11 @@ class SwingFeatureTests(unittest.TestCase):
 
 class SwingExecutionTests(unittest.TestCase):
     def test_percent_targets_measure_long_and_short_actual_fills_after_slippage(self):
+        """验证百分比目标按多空实际滑点成交价衡量。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for side, row in ((1, (100, 108, 99, 106)), (-1, (100, 101, 92, 94))):
             with self.subTest(side=side):
                 frame = candles([(100, 101, 99, 100), row])
@@ -118,6 +159,11 @@ class SwingExecutionTests(unittest.TestCase):
                 self.assertAlmostEqual(trade.exit_price, trade.exit_raw_price*(1-side*.001))
 
     def test_percent_mode_uses_tighter_price_or_atr_stop_and_risk_can_exit_before_day(self):
+        """验证百分比模式采用更紧的价格/ATR止损且风险可提前退出。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for atr, expected in ((10., 97.), (1., 98.5)):
             with self.subTest(atr=atr):
                 frame = candles([(100, 101, 99, 100), (100, 106, 96, 100)] +
@@ -130,6 +176,11 @@ class SwingExecutionTests(unittest.TestCase):
                 self.assertLess(trade.holding_hours, 24)
 
     def test_percent_target_waits_for_day_and_maximum_is_twenty_one_days(self):
+        """验证获利退出等待最低时长且最长持仓不越策略上限。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles(count=2200)
         frame.loc[2, 'high'] = frame.loc[2, 'mark_high'] = 106
         frame.loc[99, 'high'] = frame.loc[99, 'mark_high'] = 106
@@ -147,6 +198,11 @@ class SwingExecutionTests(unittest.TestCase):
         self.assertEqual(trade.holding_hours, 504.)
 
     def test_fixed_rr_is_raised_to_two_percent_including_slippage(self):
+        """验证固定盈亏比目标满足最低实际价格收益。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         for side, row in ((1, (100, 104, 99.5, 102)), (-1, (100, 100.5, 96, 98))):
             frame = candles([(100, 100.1, 99.9, 100), row], atr=.5)
             trade = simulate_patterns(frame, [side, 0], exit_mode='fixed_rr', fee=0.,
@@ -155,6 +211,11 @@ class SwingExecutionTests(unittest.TestCase):
             self.assertAlmostEqual(trade.directional_price_return, .02)
 
     def test_three_bar_profit_level_below_threshold_is_not_filled_at_old_target(self):
+        """验证三根K线旧目标低于盈利门槛时不会成交。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles([(100, 101, 99, 100)]*3 + [(100, 104, 99, 103)])
         for mode in ('three_bar_breakout', 'fixed_three_bar_target'):
             with self.subTest(mode=mode):
@@ -164,6 +225,11 @@ class SwingExecutionTests(unittest.TestCase):
                 self.assertEqual(trade.exit_price, 103.)
 
     def test_atr_trailing_does_not_activate_inside_minimum_profit_move(self):
+        """验证ATR获利跟踪不在最低利润幅度内提前激活。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles([(100,101,99,100),(100,103,99,102),
                          (102,102.5,100.5,102),(102,102.5,101.5,102)],atr=1.)
         trade = simulate_patterns(frame,[1,0,0,0],exit_mode='atr_trailing',
@@ -179,6 +245,11 @@ class SwingExecutionTests(unittest.TestCase):
         self.assertAlmostEqual(trade.directional_price_return,.02)
 
     def test_profit_gate_does_not_delay_opposite_signal_or_raise_loss_stop(self):
+        """验证利润门槛不延迟风险/反向退出或放宽亏损止损。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles(count=105)
         signals = [1, -1]+[0]*103
         trade = simulate_patterns(frame, signals, exit_mode='swing_percent', fee=0.,
@@ -189,6 +260,11 @@ class SwingExecutionTests(unittest.TestCase):
         self.assertEqual(trade.directional_price_return, 0.)
 
     def test_partial_exit_price_return_uses_original_notional_and_reconciles_account(self):
+        """验证分批减仓价格收益使用原始名义金额且账户守恒。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles([(100, 101, 99, 100)] + [(104, 105, 103, 104)]*180,
                         interval=HOUR, atr=1.)
         # Enter at 100, then keep the ATR reference wide enough that a price
@@ -214,6 +290,11 @@ class SwingExecutionTests(unittest.TestCase):
         self.assertAlmostEqual(trade.margin_return, trade.net_pnl/trade.allocated_margin)
 
     def test_invalid_price_policy_parameters_are_rejected(self):
+        """验证非法价格目标、止损及最低利润参数被拒绝。
+
+        Returns:
+            无返回值；任一断言失败会使测试失败。
+        """
         frame = candles()
         for parameter in ({'price_target_pct': .01}, {'price_target_pct': .51},
                           {'price_stop_pct': 0.}, {'price_stop_pct': 1.},

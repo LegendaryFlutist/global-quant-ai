@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**Phase 1 已交付；GitHub发布与长期恢复机制已完成，远程CI通过；Phase2尚未开始。Phase 2 尚未开始。**
+**Phase1及GitHub恢复机制已交付。当前按用户新要求分包、完整函数文档、页面清晰化，并开发入场评分/波动率仓位/减仓研究；风险模块尚在进行中。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -74,3 +74,11 @@ bash scripts/platform.sh status
 ### 下一次继续开发的具体入口
 
 先阅读三个根目录交接文件和Git状态；确认远程CI后创建`feature/phase2-analysis-contract`分支。复用现有technical.py和market_structure.py，定义可序列化的确认时间分析契约，并补充未来追加数据不改变过去确认结果的测试。先不接入训练、账户或实盘模块。
+
+## 本轮用户任务：领域分包、函数说明与评分/风险页面
+
+- 已验证单元：24个研究模块迁移到quant_lab的10个领域包；根入口/导入和旧可信pickle兼容；后端catalog/ingestion/jobs拆分；前端页面/layout/hooks分离。
+- 全部379个当时具名Python函数有docstring；新增文档检查脚本纳入CI。具名TS函数/组件已有JSDoc。
+- 2026-10-18实际结果：研究引擎144 passed、后端21 passed、前端2 passed、生产构建成功；24模块函数/类AST行为与旧版相同，迁移DDL不变。日志归档runs/maintenance/20261018-refactor。
+- 接着开发：独立风险策略版本、实际GRU入场质量分、波动率杠杆/仓位预算、保守分级减仓、同条件回放对比与清晰Web页面。只限研究/模拟，不承诺更大收益，不修改原冻结留出或实际账户。
+- 当前分支：refactor/domain-packages-and-function-docs。保存本单元检查点后继续，未验证风险功能不能勾选完成。
