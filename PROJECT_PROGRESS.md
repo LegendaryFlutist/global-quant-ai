@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**Phase 1 已交付；GitHub 基线已发布；正在核验CI并完成长期恢复交接。Phase 2 尚未开始。**
+**Phase 1 已交付；GitHub发布与长期恢复机制已完成，远程CI通过；Phase2尚未开始。Phase 2 尚未开始。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -33,6 +33,7 @@ Git分支：`main`。准确最新提交以`git log -1 --oneline`为准；本文�
 | 2026-10-18 | 分享准备：`bash scripts/platform.sh build`、`test` | 构建成功；21 passed（含新克隆采集路径）；1项Starlette TestClient弃用提示 | `/tmp/quant_github_build.log`、`/tmp/quant_github_backend_tests.log`，已归档本机`runs/maintenance/20261018/` |
 | 2026-10-18 | 匿名邮箱：`docker exec quant-lab-lab-1 python -m unittest tests.test_notifications tests.test_futures -q` | 14 passed，SMTP均为测试mock，无真实投递 | `/tmp/quant_github_mail_tests.log`，已归档本机`runs/maintenance/20261018/` |
 | 2026-10-18 | `python3 scripts/check_publish.py --staged` | 首个提交141文件扫描通过；每次新增提交均重新扫描 | 见本阶段交接记录 |
+| 2026-10-18 | 全新远程克隆 + `bash scripts/resume.sh` + 发布扫描 | PASS，提交05af517；私人状态不存在，工作区干净 | 本机`runs/maintenance/20261018/remote-clone-recovery.json` |
 | 2026-10-18 | `python3 -m unittest discover -s tests -p test_checkpoint.py -v` | 5 passed：显式文件、无操作、只读恢复、拒绝其他暂存工作、拒绝.env | 本机`runs/maintenance/20261018/checkpoint-tests.log` |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
@@ -47,17 +48,17 @@ Git分支：`main`。准确最新提交以`git log -1 --oneline`为准；本文�
 
 ## 进行中与下一步
 
-- 本次：完成恢复文档/脚本验证 → 本地基线提交 → 推送公开仓库 → 检查Actions实际状态 → 记录交接。
-- 下次：先按TASKS.md完成GitHub CI或恢复验证中仍未解决的P0任务，再进入Phase2。
+- 本次已完成：恢复文档/脚本、独立本地提交、公开推送、两次远程CI通过、全新远程克隆恢复验证。当前仅保存最终文档交接。
+- 下次：先按恢复入口检查Git/CI及任何新改动；当前P0已完成，可从TASKS.md的Phase2第一项开始，或处理维护者指定的更高优先级任务。
 - Phase2：复用离线市场结构模块，先以确认时间和prefix不变性测试锁定无未来数据，再接Web道氏/波浪/支撑压力/趋势线/回放。
 
 ## 发布交接记录
 
 - GitHub已通过官方CLI登录；不在此文件记录任何授权码或Token。
 - 公开仓库已创建并核验PUBLIC/main；首个提交`b7e3330`已推送且远程HEAD一致。
-- 基线CI：https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39120035942 。结果检查进行中，尚不能声称远程通过。
+- 基线CI：https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39120035942 。**已完成，success**（backend、frontend、publish-hygiene均通过）。
 - 恢复/检查点5项回归已通过；脚本拒绝混入其他已暂存文件，恢复过程保持用户工作区不变。
-- 即将保存并推送检查点保护回归与交接更新；最新提交以`git log -1`为准。私人完整备份/隔离恢复演练仍未执行，保留未完成项。
+- 检查点保护提交`05af517`已保存并推送；新增5项恢复回归。其远程CI也已success：https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39120227472 （backend、frontend、publish-hygiene均通过）。独立临时目录从GitHub克隆该提交、执行resume和发布扫描均通过，私人状态未被克隆，工作区保持干净。最新提交以`git log -1`为准。私人完整备份/隔离恢复演练仍未执行，保留未完成项。
 
 ## 新会话首先运行
 
@@ -69,3 +70,7 @@ bash scripts/platform.sh status
 ```
 
 需要启动已停止服务时：`bash scripts/platform.sh up`。需要测试时：`bash scripts/platform.sh test`，前端进入frontend运行`npm test && npm run build`。禁止为了恢复而删除卷、覆盖.env或重建冻结数据计划。
+
+### 下一次继续开发的具体入口
+
+先阅读三个根目录交接文件和Git状态；确认远程CI后创建`feature/phase2-analysis-contract`分支。复用现有technical.py和market_structure.py，定义可序列化的确认时间分析契约，并补充未来追加数据不改变过去确认结果的测试。先不接入训练、账户或实盘模块。
