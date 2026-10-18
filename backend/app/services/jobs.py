@@ -11,6 +11,7 @@ from app.domains.models import Task, utcnow
 from app.services.ingestion import import_local, verify_assets, fetch_history
 from app.services.long_history import fetch_three_year_archive
 from app.services.derivative_history import fetch_derivative_history
+from app.services.simulation_backtest import run_simulation_backtest
 
 def queue():
     """构造具有统一超时的market-data持久RQ队列连接。
@@ -61,6 +62,7 @@ def execute(task_id: str):
             elif task.kind=='FETCH_HISTORY': result=fetch_history(db,task.parameters)
             elif task.kind=='FETCH_ARCHIVE': result=fetch_three_year_archive(db,task.parameters['asset_id'],task.parameters['interval'])
             elif task.kind=='FETCH_DERIVATIVE_DATA': result=fetch_derivative_history(db,task.parameters['asset_id'],task.parameters['interval'],task.parameters['start_ms'],task.parameters['end_ms'])
+            elif task.kind=='RUN_SIMULATION_BACKTEST': result=run_simulation_backtest(db,task.id,task.parameters)
             else: raise ValueError('未知任务类型')
             task.status='SUCCEEDED';task.result=result;task.updated_at=utcnow();db.commit()
             return result

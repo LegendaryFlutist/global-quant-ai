@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,7 @@ from app.core.security import current_user
 from app.domains.models import Asset, SimulationAccount, Task, User
 from app.services.jobs import enqueue
 from app.services.long_history import three_year_start, validate_archive_identity
+from app.services.simulation_backtest import read_backtest_artifact
 
 router = APIRouter()
 INTERVALS = {"15m", "30m", "1h", "2h", "4h", "1d"}
@@ -56,6 +57,7 @@ class SimulationPolicy(BaseModel):
     entry_threshold: Decimal = Field(ge=0, le=1)
     max_leverage: Decimal = Field(ge=1, le=20)
     max_margin_fraction: Decimal = Field(gt=0, le=Decimal("0.25"))
+    min_holding_hours: int = Field(default=24, ge=24, le=504)
     max_holding_hours: int = Field(ge=24, le=504)
     exit_mode: Literal["three_bar_trailing", "atr", "fixed_rr", "time"]
     deep_model_version: str | None = Field(default=None, max_length=120)
@@ -103,6 +105,8 @@ class SimulationPolicy(BaseModel):
             raise ValueError("深度模型权重大于0时必须指定已登记模型版本")
         if self.weights.deep_model == 0 and self.deep_model_version:
             raise ValueError("不使用深度模型时应清除模型版本绑定")
+        if self.max_holding_hours < self.min_holding_hours:
+            raise ValueError("最长持仓小时必须大于或等于最短持仓小时")
         return self
 
 
@@ -131,6 +135,20 @@ class DatasetRequest(BaseModel):
         return self
 
 
+class BacktestRequest(BaseModel):
+    """提交指定UTC毫秒区间的账号策略回测请求。"""
+    model_config = ConfigDict(extra="forbid")
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        """确保回测时间窗方向正确，动态三年边界在API请求中复核。"""
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms必须晚于start_ms")
+        return self
+
+
 def _config_hash(configuration):
     """对标准化策略配置计算SHA256以固定本次账号版本。
 
@@ -153,18 +171,19 @@ def _account_response(account):
     Returns:
         配置账号字典；没有余额、成交或交易执行状态字段。
     """
+    configuration = SimulationPolicy.model_validate(account.configuration).model_dump(mode="json")
     return {
         "id": account.id,
         "name": account.name,
         "initial_equity": format(account.initial_equity, "f"),
         "base_currency": account.base_currency,
-        "configuration": account.configuration,
+        "configuration": configuration,
         "configuration_sha256": account.configuration_sha256,
         "revision": account.revision,
         "created_at": account.created_at,
         "updated_at": account.updated_at,
         "research_only": True,
-        "backtest_implemented": False,
+        "backtest_implemented": True,
     }
 
 
@@ -333,16 +352,204 @@ def request_account_datasets(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     for asset_id, interval in pairs:
-        parameters = {
+        derivative_parameters = {
             "asset_id": asset_id,
             "interval": interval,
             "start_ms": start_ms,
             "end_ms": end_ms,
         }
-        active = next((candidate for candidate in db.scalars(select(Task).where(
-            Task.kind == "FETCH_DERIVATIVE_DATA",
-            Task.status.in_(["QUEUED", "RUNNING", "RETRYING"]),
-        )) if candidate.parameters == parameters), None)
-        task = active or enqueue(db, "FETCH_DERIVATIVE_DATA", parameters)
-        jobs.append({"id": task.id, "asset_id": asset_id, "interval": interval, "status": task.status})
+        task_specs = [
+            ("FETCH_ARCHIVE", {"asset_id": asset_id, "interval": interval}),
+            ("FETCH_DERIVATIVE_DATA", derivative_parameters),
+        ]
+        for kind, parameters in task_specs:
+            active = next((candidate for candidate in db.scalars(select(Task).where(
+                Task.kind == kind,
+                Task.status.in_(["QUEUED", "RUNNING", "RETRYING"]),
+            )) if candidate.parameters == parameters), None)
+            task = active or enqueue(db, kind, parameters)
+            jobs.append({"id": task.id, "kind": kind, "asset_id": asset_id, "interval": interval, "status": task.status})
     return {"tasks": jobs, "start_ms": start_ms, "end_ms": end_ms, "research_only": True}
+
+
+@router.post("/api/simulation/accounts/{account_id}/backtests", status_code=202)
+def request_account_backtest(
+    account_id: str,
+    request: BacktestRequest,
+    user: User = Depends(current_user),
+    db: DBSession = Depends(get_db),
+):
+    """按当前账号配置版本排队一个最多三年且仅使用本地数据的合约回测。
+
+    Args:
+        account_id: 用户自有模拟配置账号UUID。
+        request: 用户选择的回测左闭时间范围UTC毫秒值。
+        user: 会话认证依赖返回的用户记录。
+        db: 当前认证请求的数据库会话。
+
+    Returns:
+        持久RQ任务UUID及绑定的账号修订/配置摘要，不触发真实委托。
+
+    Raises:
+        HTTPException: 账号不属于当前用户、时间越界或深度模型版本不可用。
+    """
+    account = db.scalar(select(SimulationAccount).where(
+        SimulationAccount.id == account_id,
+        SimulationAccount.owner_user_id == user.id,
+    ))
+    if account is None:
+        raise HTTPException(404, "模拟账号不存在")
+    now_ms = int(time.time() * 1000)
+    if request.start_ms < three_year_start(now_ms) or request.end_ms > now_ms:
+        raise HTTPException(422, "回测仅支持最近三年内的历史数据")
+    if Decimal(str(account.configuration["weights"].get("deep_model", "0"))) > 0:
+        raise HTTPException(422, "Web深度模型注册/加载器尚未实现，不能将未验证模型用于回测")
+    parameters = {
+        "account_id": account.id,
+        "owner_user_id": user.id,
+        "account_revision": account.revision,
+        "configuration_sha256": account.configuration_sha256,
+        "start_ms": request.start_ms,
+        "end_ms": request.end_ms,
+    }
+    active = next((candidate for candidate in db.scalars(select(Task).where(
+        Task.kind == "RUN_SIMULATION_BACKTEST",
+        Task.status.in_(["QUEUED", "RUNNING", "RETRYING"]),
+    )) if candidate.parameters == parameters), None)
+    task = active or enqueue(db, "RUN_SIMULATION_BACKTEST", parameters)
+    return {
+        "id": task.id,
+        "status": task.status,
+        "account_revision": account.revision,
+        "configuration_sha256": account.configuration_sha256,
+        "research_only": True,
+    }
+
+
+def _owned_backtest(db, account, user, run_id):
+    """验证回测任务同时属于当前用户和指定账号。
+
+    Args:
+        db: 当前请求的SQLAlchemy数据库会话。
+        account: 已验证属于当前用户的模拟配置账号。
+        user: 当前会话认证用户。
+        run_id: 稳定的回测任务UUID。
+
+    Returns:
+        对应的持久回测Task；不暴露其他账号或用户的任务存在性。
+
+    Raises:
+        HTTPException: 回测任务不存在或不属于当前账号用户。
+    """
+    task = db.get(Task, run_id)
+    if (task is None or task.kind != "RUN_SIMULATION_BACKTEST"
+            or task.parameters.get("account_id") != account.id
+            or task.parameters.get("owner_user_id") != user.id):
+        raise HTTPException(404, "回测记录不存在")
+    return task
+
+
+@router.get("/api/simulation/accounts/{account_id}/backtests")
+def list_account_backtests(account_id: str, user: User = Depends(current_user), db: DBSession = Depends(get_db)):
+    """列出当前用户账号的回测状态、汇总收益和数据来源摘要。
+
+    Args:
+        account_id: 用户自有模拟配置账号UUID。
+        user: 当前会话认证用户。
+        db: 当前认证请求的数据库会话。
+
+    Returns:
+        最近20次账号策略回测，不包含交易凭据或其他用户记录。
+    """
+    account = db.scalar(select(SimulationAccount).where(
+        SimulationAccount.id == account_id,
+        SimulationAccount.owner_user_id == user.id,
+    ))
+    if account is None:
+        raise HTTPException(404, "模拟账号不存在")
+    tasks = db.scalars(select(Task).where(Task.kind == "RUN_SIMULATION_BACKTEST").order_by(Task.created_at.desc()).limit(200))
+    values = [task for task in tasks if task.parameters.get("account_id") == account.id
+              and task.parameters.get("owner_user_id") == user.id][:20]
+    return [{
+        "id": task.id,
+        "status": task.status,
+        "parameters": {key: task.parameters[key] for key in ("start_ms", "end_ms", "account_revision", "configuration_sha256")},
+        "result": task.result or {},
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "research_only": True,
+    } for task in values]
+
+
+@router.get("/api/simulation/accounts/{account_id}/backtests/{run_id}/equity")
+def account_backtest_equity(
+    account_id: str,
+    run_id: str,
+    limit: int = Query(5000, ge=1, le=5000),
+    user: User = Depends(current_user),
+    db: DBSession = Depends(get_db),
+):
+    """按SHA256校验并读取账号回测组合USDT净值曲线本地文件。
+
+    Args:
+        account_id: 当前用户自有的模拟配置账号UUID。
+        run_id: 当前账号内已完成的回测任务UUID。
+        limit: 最近最多返回5000个K线收盘权益点。
+        user: 当前会话认证用户。
+        db: 当前认证请求的数据库会话。
+
+    Returns:
+        UTC毫秒、USDT净值和回撤显示字符串列表。
+    """
+    account = db.scalar(select(SimulationAccount).where(
+        SimulationAccount.id == account_id,
+        SimulationAccount.owner_user_id == user.id,
+    ))
+    if account is None:
+        raise HTTPException(404, "模拟账号不存在")
+    task = _owned_backtest(db, account, user, run_id)
+    artifact = task.result.get("equity_artifact")
+    if task.status != "SUCCEEDED" or not artifact:
+        raise HTTPException(409, "回测尚未完成或没有净值曲线")
+    try:
+        points = read_backtest_artifact(run_id, artifact, limit)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return {"run_id": run_id, "points": points, "sha256": artifact["sha256"], "research_only": True}
+
+
+@router.get("/api/simulation/accounts/{account_id}/backtests/{run_id}/trades")
+def account_backtest_trades(
+    account_id: str,
+    run_id: str,
+    limit: int = Query(1000, ge=1, le=5000),
+    user: User = Depends(current_user),
+    db: DBSession = Depends(get_db),
+):
+    """读取经过路径/哈希校验的逐笔模拟成交和持仓时长账本。
+
+    Args:
+        account_id: 当前用户自有模拟配置账号UUID。
+        run_id: 当前账号内已完成的回测任务UUID。
+        limit: 最近最多返回5000笔模拟成交记录。
+        user: 当前会话认证用户。
+        db: 当前认证请求的数据库会话。
+
+    Returns:
+        按模拟器成交时序记录的标的、方向、入出场、费用和持仓字段。
+    """
+    account = db.scalar(select(SimulationAccount).where(
+        SimulationAccount.id == account_id,
+        SimulationAccount.owner_user_id == user.id,
+    ))
+    if account is None:
+        raise HTTPException(404, "模拟账号不存在")
+    task = _owned_backtest(db, account, user, run_id)
+    artifact = task.result.get("trades_artifact")
+    if task.status != "SUCCEEDED" or not artifact:
+        raise HTTPException(409, "回测尚未完成或没有逐笔文件")
+    try:
+        trades = read_backtest_artifact(run_id, artifact, limit)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return {"run_id": run_id, "trades": trades, "sha256": artifact["sha256"], "research_only": True}

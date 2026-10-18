@@ -24,6 +24,8 @@
 |---|---|---|
 | simulation_accounts | id, owner_user_id, name, initial_equity NUMERIC(28,8), base_currency, configuration JSON, configuration_sha256, revision, created_at, updated_at | 每用户名称唯一；资金使用Decimal/NUMERIC；配置绑定标的、周期、理论权重和风险上限；revision/hash便于回测引用；仅研究配置，不是资金余额、成交或订单账本 |
 
+回测执行由`scheduled_tasks`的`RUN_SIMULATION_BACKTEST`任务承载；任务参数固定账号所有者、配置修订/哈希和UTC时间窗，结果保存算法及行情来源哈希与报告相对路径。组合权益、回撤和逐笔数据作为按任务UUID隔离的本地不可变Parquet，不新增交易账本数据库表，也不记录模拟账号余额变更。
+
 ## Phase2–8 其他规划表（尚未迁移创建）
 
 以下是完整领域规划，不表示存在业务功能；除上方明确列出的revision 0002配置账号表外，其他表都还不存在。后续迁移会补齐更精确字段、外键和并发约束。

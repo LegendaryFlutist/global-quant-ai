@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。Phase2已实现三年历史K线本地归档、多周期技术结构API/图表和当前选中标的5秒刷新（道氏123、趋势线破坏、波浪候选、RSI背离、因果收盘确认）；PR #11 后端、前端、研究、发布检查全通过。本机API镜像仍待包下载恢复后重建。下一步为总体情绪/周期汇总和隔离模拟账户。行情只覆盖注册表中精确核验的标的，按需采集，不推测未核验符号。**
+**Phase1及GitHub恢复机制已交付。Phase2已实现三年历史K线/标记价/资金费按需本地归档，多周期结构分析与总体周期摘要，隔离多策略账号及只读多理论合约回测报告（逐笔、净值/回撤、分标的统计和来源哈希）。本轮变更本机47项隔离后端测试、前端2项测试/生产构建、文档及发布扫描通过；仍需创建本地提交、推送PR #11并核实GitHub CI，然后重建本机镜像。真实Binance数据尚未由用户点击回填，无真实行情收益结论；未实现Web深度模型加载或持续纸面执行。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -58,13 +58,16 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 | 2026-10-19 | `cd frontend && npm test && npm run build`、文档/发布/py_compile检查 | 2 passed；TS类型检查及Vite构建成功；498个Python函数有docstring；222文件发布扫描通过；本次涉及模块语法通过 | 本机控制台 |
 | 2026-10-19 | GitHub PR #11 commit `5d2a028` | backend、frontend、risk-engine、publish-hygiene四项CI均success | Actions run 39145561898；https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39145561898 |
 | 2026-10-19 | `bash scripts/platform.sh up` + `/api/health`、首页、OpenAPI路由检查 | 新API/Web镜像已启动且healthy；健康端点和首页HTTP 200；模拟账号数据归档route已注册；worker可导入新采集服务 | 本机Docker控制台；没有真实Binance网络请求 |
+| 2026-10-19 | 多理论回测：`bash scripts/platform.sh test` | 47 passed，使用隔离PostgreSQL/Redis和合成归档；覆盖多周期时间因果、账号修订绑定、用户隔离、数据SHA及不可变报告。1项既有Starlette/httpx弃用提示 | 本机Docker测试控制台；没有外部行情请求 |
+| 2026-10-19 | `cd frontend && npm test && npm run build` | 2 passed，TypeScript检查及Vite生产构建成功；净值/回撤图复用项目已有ECharts依赖 | 本机控制台 |
+| 2026-10-19 | `python3 scripts/check_docs.py`、`python3 scripts/check_publish.py`、`python3 -m py_compile ...`、`git diff --check` | 函数文档、公开内容扫描、涉及模块语法与差异格式检查通过；224文件、1,919,449字节无禁止路径/凭据模式 | 本机控制台；最终提交前会再运行staged扫描 |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
 
 ## 当前问题与边界
 
 1. 容器对fapi.binance.com DNS解析失败；宿主先前也曾返回HTTP451。自动更新不可用，已有真实历史快照可研究；不切换来源绕过限制、不伪造行情。
-2. 三年标记价/费率采集已通过本地与GitHub CI并部署；尚未由用户点击请求真实行情，因此真实上游连通性/数据可用范围未知。合约回测成交/权益账本、对比收益曲线、模型注册/训练、SMTP/私有API凭据、2FA审批与实盘执行均未完成。禁止虚构数据或擅自启用。
+2. 三年标记价/费率采集已通过本地与GitHub CI并部署；尚未由用户点击请求真实行情，因此真实上游连通性/数据可用范围未知。本地回测报告已实现，但还没有真实回填数据的收益结果；深度模型注册/加载、跨账号曲线并列比较、滚动/样本外评估、持续纸面账户、SMTP/私有API凭据、2FA审批与实盘执行均未完成。禁止虚构数据或擅自启用。
 3. 原模型结果未达晋升门槛；不能把最高样本收益称为稳定盈利模型，不能因为恢复会话而重新使用冻结留出集。
 4. 本机账号、历史数据、权重和数据库不在GitHub；重启后应保留原持久卷/目录。磁盘丢失必须依赖另行备份，不能靠Git恢复。
 5. 单人本机环境，不等于公网生产系统；测试提示未来需迁移Starlette TestClient到httpx2；项目暂未选择开源许可证。
@@ -81,7 +84,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 实时刷新单元提交`cf678fd`及SHA256展示修正提交`dbb3602`已通过PR #11四项GitHub CI（Python3.11后端隔离PostgreSQL/Redis、前端、研究、发布扫描全success）；新服务/API测试包含闭合K线只追加Parquet、未闭合快照独立SHA256、会话/CSRF、无外部网络mock。前端2 passed/构建成功；本机py_compile、448个函数docstring检查通过。实例只在三年缓存视图刷新当前周期，错误退避至60秒。Docker本机镜像仍未重建：BuildKit ARM64 NumPy下载无进度后手动取消，当前运行API/Web还是旧镜像；恢复需在包索引可达后`bash scripts/platform.sh up`、`bash scripts/platform.sh test`和隔离账号浏览器验收。单进程锁适用于当前单机服务；若横向多API副本，需要Redis级共享节流。
 - 总体结构周期摘要提交`9225ecc`的PR #11四项GitHub CI全部success：Python3.11 backend (mock结构、本地隔离测试库)、frontend、risk-engine和publish-hygiene；研究容器`bash scripts/container.sh test`为156 passed，前端2 passed/生产构建，本机`py_compile`、文档检查457函数、发布扫描全过。方向分明确为趋势70%+道氏30%并叠加最近八根周期内确认RSI背离（±0.2）；20根收盘对数波动只作背景；4h/1d冲突或破位为TRANSITIONING，缺档UNKNOWN。来源hash和支撑/压力透明显示；无公网行情读取。
 - 已完成并部署：提交`5d2a028`的标记价格K线与资金费率按需采集service/API任务/账号UI、本地不可变Parquet/SHA256、跨worker文件锁、分段校验和重叠时间窗续传；用户可按账号内核验资产/周期点击排队最近三年公开行情。Python3.11隔离44 passed；前端2 passed/构建成功；文档/发布扫描通过；GitHub Actions run 39145561898四项success；`platform.sh up`健康检查及新路由注册通过。没有发起真实Binance请求，尚无采集成功样本。
-- 下一步：浏览器认证后验证按钮/任务状态（不重置现有凭据；真实网络只在用户显式点击时发生）；随后实现合约历史回测账本/净值、费用与资金费、逐笔、回撤、分标的和持仓时长比较。报告需绑定合约标记价/资金费manifest SHA256、策略配置版本和时间窗，不能把普通K线收益冒充合约净收益或保证未来盈利。
+- 本轮新增本地合约回测服务/API/UI：多理论加权信号、最高周期趋势门控、账号持仓窗口、标记价格执行及资金费/费率假设、跳过缺档标的、逐笔和组合曲线/回撤、每资产统计。报告在运行时`DATA_ROOT/simulation_runs/<task_uuid>/`保存不可变Parquet，并绑定账号revision/config hash、算法SHA和来源数据SHA；账号API按所有者隔离。隔离后端47 passed、前端2 passed/构建成功、文档/发布扫描通过。没有真实行情回填和收益结论；本轮修改待本地提交与GitHub CI。
+- 下一步：检查显式diff和staged发布扫描，提交本单元并push到PR #11、等待真实GitHub CI；通过后重建平台镜像并检查API/worker健康。再以隔离用户浏览器验证报告UI；仅在用户点击时才采集Binance数据。后续再做账号间曲线比较、验证/消融及深度模型注册。
 
 ## 发布交接记录
 

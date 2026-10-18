@@ -217,6 +217,7 @@ export interface SimulationAccount {
     entry_threshold: string;
     max_leverage: string;
     max_margin_fraction: string;
+    min_holding_hours: number;
     max_holding_hours: number;
     exit_mode: "three_bar_trailing" | "atr" | "fixed_rr" | "time";
     deep_model_version: string | null;
@@ -227,6 +228,37 @@ export interface SimulationAccount {
   updated_at: string;
   research_only: true;
   backtest_implemented: boolean;
+}
+/** Durable status and result summary for one local account strategy backtest. */
+export interface SimulationBacktestRun {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "RETRYING" | "FAILED" | "SUCCEEDED";
+  parameters: {
+    start_ms: number;
+    end_ms: number;
+    account_revision: number;
+    configuration_sha256: string;
+  };
+  result: {
+    status?: "COMPLETED" | "NO_DATA";
+    initial_equity?: string;
+    final_equity?: string;
+    net_return_pct?: string;
+    max_drawdown_pct?: string;
+    trade_count?: number;
+    algorithm_sha256?: string;
+    skipped_assets?: { asset_id: string; status: string; reason: string }[];
+    per_asset?: { asset_id: string; metrics: Record<string, string | number>; dataset_hashes: Record<string, unknown> }[];
+  };
+  created_at: string;
+  updated_at: string;
+  research_only: true;
+}
+/** One combined-account equity point; amount fields remain decimal strings for display. */
+export interface SimulationEquityPoint {
+  close_time: number;
+  equity: string;
+  drawdown: string;
 }
 export type PageId =
   | "dashboard"

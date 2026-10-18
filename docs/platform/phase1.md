@@ -45,7 +45,7 @@ npm run build
 - 当前容器对Binance域名DNS解析失败，宿主机先前公开REST探测也曾返回451；公开行情自动更新存在网络/上游访问限制；任务显示实际失败原因，13个合约元数据快照与四个真实历史行情仍可研究。其他登记资产无行情时显示缺失。
 - 本机8080是HTTP，仅绑定127.0.0.1。远程访问需要SSH转发或自行配置TLS/私网代理；使用HTTPS时配置Secure Cookie和Origin。
 - 图表历史以本地已收盘行情为主，不提供逐笔盘口或WebSocket。选中三年缓存视图时每五秒刷新当前标的/周期，并独立标记未收盘K线；1m/3m/5m需各自公开采集，不从15m伪造。
-- 总体周期摘要仅使用本地结构数据；无新闻、宏观事件或跨市场传导源。多模拟配置尚无回测账本/收益曲线，离线既有回测与原模型结果未因本平台改写。
+- 总体周期摘要仅使用本地结构数据；无新闻、宏观事件或跨市场传导源。多模拟配置现可读取本地已归档数据生成离线回测权益/逐笔文件；没有已采集行情时不会生成模拟收益，离线既有回测与原模型结果未因本平台改写。
 - 当前没有Web训练、实盘信号循环、SMTP/私有API凭据、2FA或实盘交易。原脚本与离线报告可继续使用，未重跑或改变原回测。
 - 单人本机版不等于公网多租户生产版。生产需TLS、备份恢复演练、监控、严格角色授权、密钥服务与后续审批/账本测试。
 
@@ -79,15 +79,17 @@ npm run build
 
 ### 多模拟回测配置账号（2026-10-19）
 
-Alembic 0002草稿新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存模型/技术理论权重、精确已核验永续标的、周期、最大杠杆/保证金、24小时至21天持仓策略、退出方式、revision与configuration SHA256。React工作台可创建、查看和编辑多个账号配置；新账号默认研究用途，不建成交/权益记录，不下单，不声称回测收益。
+Alembic 0002草稿新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存模型/技术理论权重、精确已核验永续标的、周期、杠杆/保证金、24小时至21天最短/最长持仓策略、退出方式、revision与configuration SHA256。React工作台可创建、查看和编辑多个账号配置，并按用户显式请求三年交易价、标记价与资金费数据。
 
-新增Python3.11后端测试覆盖Decimal精度、配置hash变更、修订号、权重/周期/杠杆/深度模型绑定约束、标的核验、CSRF和所有者隔离；测试只用`quant_test`和mock。提交`e9cbc3c`四项GitHub CI通过。本地页面可编辑账号、点击创建三年行情任务；后台尚无回测运行器或收益曲线，不能把普通价K线复制成标记价格或忽略资金费后标记净合约收益。
+新增Python3.11后端回测服务：以已收盘原生周期为基础，按收盘可知时点对齐高周期趋势/道氏/波浪/背离，融合已实现反转形态分数，并强制方向服从最高配置周期趋势；下根K线执行时使用真实归档标记价、资金费，显式计入固定手续费/滑点/维持保证金假设，支持持仓时间门槛和提前止损。模型权重含未登记深度模型时明确拒绝，不会自动加载或训练。每个用户账号保存单独的净值和逐笔Parquet、收益/回撤/持仓摘要、跳过资产原因以及配置/算法/数据SHA256，API所有者校验后才可读取；前端展示组合曲线、逐笔和每标的结果。缺少本地行情时资产留现金并显示跳过原因；不联网拉取，不下单，不代表持续纸面账户。
+
+验证：`bash scripts/platform.sh test`使用隔离PostgreSQL/Redis及合成归档，回测端到端、时间前缀不变性、资金/哈希文件和API所有权覆盖共47项通过（最终验证记录见`PROJECT_PROGRESS.md`）。前端2项测试、TypeScript与Vite构建通过；`scripts/check_docs.py`及发布扫描通过。真实Binance三年数据尚未由用户点击回填，因此没有真实资产回测收益结果；深度模型注册/加载及账号间叠图比较保留在后续Phase3/4。
 
 ### 按需采集合约标记价格与资金费（2026-10-19）
 
 新增固定Binance公开GET适配器、持久`FETCH_DERIVATIVE_DATA`任务和账号页面按钮。按精确核验产品、原生周期、最长三年UTC时间窗采集标记价格K线与实际结算资金费率；数据分流写入本机`DATA_ROOT/derivatives/<symbol>/<interval>/mark|funding/`不可变Parquet，分页后原子更新manifest并校验每段SHA256。采集失败保留已成功页面以便续传；只在用户点击后联网。重叠或扩展请求可沿用既有窗口；不支持向更早时间扩展。
 
-验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；Python3.11 ARM64镜像构建成功，隔离PostgreSQL/Redis 44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；498个具名Python函数文档检查、发布扫描和语法检查通过。提交`5d2a028`的GitHub backend、frontend、risk-engine、publish-hygiene CI全success（run 39145561898）。`bash scripts/platform.sh up`后API健康端点/首页HTTP 200且新route已注册。未发起真实Binance请求。模拟净值账本、模型比较、逐笔和收益曲线仍未实现。
+验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；Python3.11 ARM64镜像构建成功，隔离PostgreSQL/Redis 44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；498个具名Python函数文档检查、发布扫描和语法检查通过。提交`5d2a028`的GitHub backend、frontend、risk-engine、publish-hygiene CI全success（run 39145561898）。`bash scripts/platform.sh up`后API健康端点/首页HTTP 200且新route已注册。未发起真实Binance请求；随后开发的离线回测/曲线实现详见上一节，本机实际行情收益仍未知。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 

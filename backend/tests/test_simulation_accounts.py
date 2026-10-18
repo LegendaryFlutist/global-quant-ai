@@ -59,7 +59,8 @@ def test_simulation_accounts_preserve_decimal_capital_and_policy_revision(logged
     assert created["initial_equity"] == "10000.12345678"
     assert len(created["configuration_sha256"]) == 64
     assert created["research_only"] is True
-    assert created["backtest_implemented"] is False
+    assert created["backtest_implemented"] is True
+    assert created["configuration"]["min_holding_hours"] == 24
 
     changed = _payload("conservative", "9000.25")
     changed["configuration"]["max_leverage"] = "2"
@@ -153,10 +154,11 @@ def test_simulation_account_dataset_request_queues_only_configured_public_data(l
     first = logged_in.post(f"/api/simulation/accounts/{created['id']}/datasets", json=request)
     assert first.status_code == 202
     jobs = first.json()["tasks"]
-    assert len(jobs) == 3
+    assert len(jobs) == 6
     assert {job["interval"] for job in jobs} == {"15m", "1h", "4h"}
     assert all(job["asset_id"] == "binance_usdm:BTCUSDT" for job in jobs)
     assert all(job["status"] == "QUEUED" for job in jobs)
+    assert {job["kind"] for job in jobs} == {"FETCH_ARCHIVE", "FETCH_DERIVATIVE_DATA"}
 
     repeated = logged_in.post(f"/api/simulation/accounts/{created['id']}/datasets", json=request)
     assert [job["id"] for job in repeated.json()["tasks"]] == [job["id"] for job in jobs]
@@ -164,3 +166,42 @@ def test_simulation_account_dataset_request_queues_only_configured_public_data(l
     assert logged_in.post(
         f"/api/simulation/accounts/{created['id']}/datasets", json=invalid_range
     ).status_code == 422
+
+
+def test_simulation_backtest_binds_account_revision_and_rejects_unavailable_model(logged_in):
+    """验证回测任务绑定当前配置版本、队列幂等和模型不可用边界。
+
+    Args:
+        logged_in: 当前认证用户且已获得有效CSRF请求头的客户端。
+
+    Returns:
+        无返回值；跨账号读写、非法日期或假深度模型被接受时测试失败。
+    """
+    created = logged_in.post("/api/simulation/accounts", json=_payload()).json()
+    now_ms = int(time.time() * 1000)
+    backtest_range = {"start_ms": now_ms - 7 * 86_400_000, "end_ms": now_ms - 86_400_000}
+    first = logged_in.post(f"/api/simulation/accounts/{created['id']}/backtests", json=backtest_range)
+    assert first.status_code == 202
+    queued = first.json()
+    assert queued["account_revision"] == created["revision"]
+    assert queued["configuration_sha256"] == created["configuration_sha256"]
+    second = logged_in.post(f"/api/simulation/accounts/{created['id']}/backtests", json=backtest_range)
+    assert second.json()["id"] == queued["id"]
+    listed = logged_in.get(f"/api/simulation/accounts/{created['id']}/backtests")
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == queued["id"]
+    assert listed.json()[0]["status"] == "QUEUED"
+
+    invalid_range = {"start_ms": 0, "end_ms": now_ms}
+    assert logged_in.post(
+        f"/api/simulation/accounts/{created['id']}/backtests", json=invalid_range
+    ).status_code == 422
+    unavailable_model = _payload("deep-model")
+    unavailable_model["configuration"]["weights"]["deep_model"] = "0.10"
+    unavailable_model["configuration"]["weights"]["trend"] = "0.30"
+    unavailable_model["configuration"]["deep_model_version"] = "model-not-registered"
+    model_account = logged_in.post("/api/simulation/accounts", json=unavailable_model).json()
+    assert logged_in.post(
+        f"/api/simulation/accounts/{model_account['id']}/backtests", json=backtest_range
+    ).status_code == 422
+    assert len(logged_in.get(f"/api/simulation/accounts/{created['id']}/backtests").json()) == 1
