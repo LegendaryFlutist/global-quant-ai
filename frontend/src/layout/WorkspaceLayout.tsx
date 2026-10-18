@@ -4,6 +4,7 @@ const nav: [PageId, string, string][] = [
   ["dashboard", "◈", "总览"],
   ["assets", "▤", "全球资产"],
   ["charts", "⌁", "多周期 K 线"],
+  ["risk", "◉", "评分与仓位风控"],
   ["jobs", "◷", "后台任务"],
   ["roadmap", "▦", "模型与平台能力"],
   ["settings", "⚙", "系统设置"],

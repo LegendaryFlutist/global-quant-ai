@@ -14,7 +14,7 @@ precision label. Mark liquidation has conservative priority over other exits
 when both could occur in one candle. This uses a fixed maintenance rate, not
 Binance's tiered liquidation calculation.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 
 import numpy as np
@@ -59,6 +59,10 @@ class _Position:
     pending_exit: str = ''
     signal_price: float = math.nan
     entry_raw_price: float = math.nan
+    risk_sizing: dict = field(default_factory=dict)
+    risk_actions: set = field(default_factory=set)
+    entry_volatility: float = 0.
+    entry_quality: float = 0.
 
 
 def _validate(data, signals, exit_mode, parameters):
@@ -229,7 +233,7 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
                       scale_out_interval_ms=86_400_000,
                       scale_out_fraction=.25, scale_out_deviation_atr=3.,
                       price_target_pct=.05, price_stop_pct=.03,
-                      min_profit_move_pct=0.):
+                      min_profit_move_pct=0., risk_policy=None, risk_plan=None, risk_reductions=False):
     """逐根回放反转入场、多止盈、人工延迟、逐仓风控和分批减仓。
 
     Args:
@@ -259,6 +263,9 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
         price_target_pct: 目标标的价格方向收益比例。
         price_stop_pct: 标的价格方向止损比例。
         min_profit_move_pct: 允许获利退出的最低标的价格变动比例，不限制强制风险退出。
+        risk_policy: 可选RiskPolicy；None严格保留原固定仓位行为。
+        risk_plan: 与源K线逐行对应的score/daily_volatility表，仅使用已收盘行。
+        risk_reductions: 是否启用一次性分级利润/波动/评分恶化减仓。
 
     Returns:
         指标、权益路径、回撤路径、完整仓位账本和逐笔事件；不访问交易账户。
@@ -306,6 +313,19 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
         levels. Risk stops, reversals, duration limits, dataset cutoffs and gradual
         position reductions remain possible below that profit threshold.
     """
+    from quant_lab.risk.policy import RiskPolicy
+    from quant_lab.risk.sizing import position_budget
+    from quant_lab.risk.reductions import reduction_decision
+    if isinstance(risk_policy, dict):risk_policy=RiskPolicy(**risk_policy)
+    if risk_policy is not None and not isinstance(risk_policy,RiskPolicy):raise ValueError('Invalid risk_policy')
+    risk_lookup={};risk_times=np.array([],dtype=np.int64)
+    if risk_policy is not None:
+        if not math.isclose(maintenance_rate,risk_policy.maintenance_rate_assumption):raise ValueError('Maintenance assumption differs from risk policy')
+        if not isinstance(risk_plan,pd.DataFrame) or len(risk_plan)!=len(data) or not {'score','daily_volatility'}.issubset(risk_plan):raise ValueError('Risk plan must align with source candles')
+        if 'close_time' in risk_plan and not np.array_equal(risk_plan.close_time,data.close_time):raise ValueError('Risk plan timestamp mismatch')
+        risk_times=data.close_time.to_numpy(dtype=np.int64)
+        risk_lookup=dict(zip(map(int,risk_times),risk_plan.to_dict('records')))
+    elif risk_plan is not None or risk_reductions:raise ValueError('Risk overlay requires an explicit policy')
     data = data.reset_index(drop=True).copy()
     if signals is None:
         if 'direction' not in data:
@@ -499,6 +519,11 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
             net_pnl=float(pnl), account_return=float(pnl/p.account_before),
             margin_return=float(pnl/p.allocated),
             account_equity_before=p.account_before, account_equity_after=float(free))
+        if risk_policy is not None:
+            record.update(entry_score=p.entry_quality,entry_daily_volatility=p.entry_volatility,
+                leverage_at_entry=p.risk_sizing['leverage'],margin_fraction_at_entry=p.risk_sizing['margin_fraction'],
+                nominal_exposure_at_entry=p.risk_sizing['nominal_exposure'],risk_budget_fraction=p.risk_sizing['risk_budget_fraction'],
+                risk_actions='|'.join(sorted(p.risk_actions)),risk_policy_version=risk_policy.version)
         ledger.append(record)
         events.append(dict(time=int(timestamp), event=reason, position_id=p.position_id,
             direction=p.direction, quantity=abs(p.quantity), remaining_quantity=0.,
@@ -512,24 +537,26 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
             timestamp_precision=precision, bar=int(bar)))
         position = None
 
-    def reduce_position(raw_price, timestamp, bar):
+    def reduce_position(raw_price, timestamp, bar, initial_fraction=None, reduction_reason=None):
         """按初始仓位比例减掉部分持仓并按数量分摊保证金和成本。
 
         Args:
             raw_price: 尚未计入本次退出滑点的原始行情价格。
             timestamp: 当前模拟事件的真实或近似发生时刻，单位毫秒。
             bar: 当前执行K线的整数位置索引。
+            initial_fraction: 本次减掉初始数量的比例；None使用原时间减仓参数。
+            reduction_reason: 可选风险动作标签；None保留原时间偏离标签。
 
         Returns:
             无返回值；只减仓、不加仓，余额过小时转为完整退出。
         """
         nonlocal free, total_fees
         p = position
-        amount = min(abs(p.initial_quantity)*scale_out_fraction, abs(p.quantity))
+        amount = min(abs(p.initial_quantity)*(scale_out_fraction if initial_fraction is None else initial_fraction), abs(p.quantity))
         favorable = p.direction*(raw_price-p.entry) >= 0
         suffix = 'FAVORABLE' if favorable else 'ADVERSE'
         if amount >= abs(p.quantity)-1e-14:
-            finish(raw_price, timestamp, bar, 'TIME_SCALE_OUT_COMPLETE_'+suffix)
+            finish(raw_price, timestamp, bar, reduction_reason+'_COMPLETE' if reduction_reason else 'TIME_SCALE_OUT_COMPLETE_'+suffix)
             return
         fraction = amount/abs(p.quantity)
         signed = p.direction*amount
@@ -560,7 +587,7 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
             remaining_quantity=abs(p.quantity), price=float(fill), fee=float(charge),
             gross_pnl=float(gross), net_pnl=float(pnl), pattern=p.pattern,
             funding_paid=float(funding_paid), entry_fee=float(entry_fee),
-            reason='TIME_DEVIATION_'+suffix, holding_ms=held,
+            reason=reduction_reason or 'TIME_DEVIATION_'+suffix, holding_ms=held,
             holding_hours=held/3_600_000, cash_after=float(free),
             equity_after=float(nav(raw_price)), timestamp_precision='bar_open', bar=int(bar)))
 
@@ -696,6 +723,28 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
                   (held_ms >= max_holding_bars*source_duration if duration_mode else bar-position.entry_bar >= max_holding_bars)):
                 finish(row.open, row.open_time, bar, 'TIME_EXIT')
                 closed_this_bar = True
+        if position is not None and risk_policy is not None and risk_reductions:
+            p=position
+            index=int(np.searchsorted(risk_times,int(row.open_time)-1,side='right'))-1
+            latest=risk_lookup[int(risk_times[index])] if index>=0 else None
+            if latest and all(math.isfinite(float(latest[k])) for k in ('score','daily_volatility')) and float(latest['daily_volatility'])>0:
+                distance=max(abs(p.entry-p.initial_stop),np.finfo(float).tiny)
+                current_r=p.direction*(row.open-p.entry)/distance
+                peak_r=p.direction*(p.extreme-p.entry)/distance
+                action=reduction_decision(current_r,peak_r,float(latest['score']),p.entry_quality,
+                    float(latest['daily_volatility']),p.entry_volatility,p.risk_actions,risk_policy)
+                if action:
+                    p.risk_actions.add(action['key']);p.risk_actions.update(action.get('consume',[]))
+                    fraction=action.get('fraction',action.get('remaining_fraction',0)*abs(p.quantity)/abs(p.initial_quantity))
+                    reduce_position(row.open,row.open_time,bar,initial_fraction=fraction,reduction_reason='RISK_'+action['key'])
+                    if position is not None and action.get('protect_stop'):
+                        # Protection uses known costs and the current open, never a future high/low.
+                        buffer=position.entry*2*(fee+slip)+max(0.,position.funding)/max(abs(position.quantity),1e-15)
+                        candidate=position.entry+position.direction*buffer
+                        if position.direction>0:position.stop=max(position.stop,min(row.open,candidate))
+                        else:position.stop=min(position.stop,max(row.open,candidate))
+                    closed_this_bar=position is None
+
         if (position is not None and scale_out_after_ms is not None and voluntary_exit_allowed
                 and held_ms >= scale_out_after_ms
                 and row.open_time-position.last_scale_time >= scale_out_interval_ms
@@ -715,12 +764,29 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
             known_atr = float(aligned['entry_atr'][bar] if aligned else atr_values[bar-1])
             if math.isfinite(known_atr) and known_atr > 0:
                 fill = row.open * (1+requested*slip)
-                allocated = free * margin_fraction
-                quantity = requested*allocated*leverage/fill
-                charge = abs(quantity)*fill*fee
                 distance = known_atr*atr_stop
                 if exit_mode == 'swing_percent':
                     distance=min(distance,fill*price_stop_pct)
+                selected_leverage,selected_margin=leverage,margin_fraction
+                sizing={};quality=0.;volatility=0.
+                if risk_policy is not None:
+                    decision_time=int(aligned['signal_times'][bar] if aligned else close_times[bar-1])
+                    observed=risk_lookup.get(decision_time)
+                    if observed is None or not all(math.isfinite(float(observed[k])) for k in ('score','daily_volatility')) or float(observed['daily_volatility'])<=0:
+                        events.append(dict(time=int(row.open_time),event='ENTRY_SKIPPED_RISK',reason='RISK_WARMUP_OR_MISSING_DECISION',signal_time=decision_time))
+                        observe(row.mark_close);path.append(dict(close_time=int(row.close_time),equity=float(nav(row.mark_close))))
+                        continue
+                    quality=float(observed['score']);volatility=float(observed['daily_volatility'])
+                    sizing=position_budget(quality,volatility,distance/fill,requested,
+                        max(0.,1-free/stress_peak) if stress_peak else 0.,fee,slip,risk_policy)
+                    if not sizing['allowed']:
+                        events.append(dict(time=int(row.open_time),event='ENTRY_SKIPPED_RISK',reason=';'.join(sizing['reasons']),signal_time=decision_time))
+                        observe(row.mark_close);path.append(dict(close_time=int(row.close_time),equity=float(nav(row.mark_close))))
+                        continue
+                    selected_leverage=sizing['leverage'];selected_margin=sizing['margin_fraction']
+                allocated = free * selected_margin
+                quantity = requested*allocated*selected_leverage/fill
+                charge = abs(quantity)*fill*fee
                 stop = fill-requested*distance
                 # A nonpositive long stop is outside the tradable price domain.
                 stop = max(np.finfo(float).tiny, stop)
@@ -737,6 +803,9 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
                     int(aligned['signal_times'][bar] if aligned else close_times[bar-1]),
                     str(aligned['patterns'][bar] if aligned else patterns[bar-1]),
                     free, stop, stop, target, fill)
+                position.risk_sizing=sizing
+                position.entry_volatility=volatility
+                position.entry_quality=quality
                 position.position_id = entries+1
                 position.initial_quantity = quantity
                 position.entry_atr = known_atr
@@ -751,7 +820,8 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
                     price=float(fill), quantity=float(abs(quantity)), fee=float(charge),
                     raw_price=float(row.open), signal_price=position.signal_price,
                     pattern=position.pattern, signal_time=position.signal_time,
-                    bar=int(bar), timestamp_precision='bar_open'))
+                    bar=int(bar), timestamp_precision='bar_open',
+                    **(dict(entry_score=quality,leverage=selected_leverage,margin_fraction=selected_margin,risk_policy_version=risk_policy.version) if risk_policy else {})))
                 # Trade and mark prices are distinct feeds. A position can be
                 # undercollateralized immediately after an unusual basis gap.
                 closed_this_bar = liquidate_if_needed(row.mark_open, row.open_time, bar, opening=True)
@@ -807,6 +877,9 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
                 candidate_move=price_move(candidate)
                 if min_profit_move_pct<=0 or candidate_move<=0 or candidate_move+1e-12>=min_profit_move_pct:
                     p.stop = max(p.stop, candidate) if p.direction > 0 else min(p.stop, candidate)
+        if position is not None and risk_reductions:
+            # This completed bar's favorable price may only influence the NEXT open.
+            position.extreme=max(position.extreme,row.high) if position.direction>0 else min(position.extreme,row.low)
         if bar == len(data)-1 and position is not None:
             finish(row.close, row.close_time, bar, 'FINAL_EXIT', 'bar_close')
         observe(row.mark_close)
@@ -832,6 +905,12 @@ def simulate_patterns(data, signals=None, exit_mode='fixed_rr', leverage=5.,
         leverage=float(leverage), margin_fraction=float(margin_fraction), exit_mode=exit_mode,
         bars=len(data), funding_events_consumed=int(funding_index),
         initial_nominal_exposure=float(leverage*margin_fraction))
+    if risk_policy is not None:
+        metrics.update(leverage=None,margin_fraction=None,initial_nominal_exposure=None,
+            leverage_mode='SCORE_VOLATILITY',risk_policy=risk_policy.to_dict(),risk_reductions=bool(risk_reductions),
+            actual_max_leverage=max((t['leverage_at_entry'] for t in ledger),default=0),
+            actual_mean_leverage=float(np.mean([t['leverage_at_entry'] for t in ledger])) if ledger else 0.,
+            actual_mean_margin_fraction=float(np.mean([t['margin_fraction_at_entry'] for t in ledger])) if ledger else 0.)
     durations = np.array([trade['holding_hours'] for trade in ledger], dtype=float)
     short = [trade for trade in ledger if trade['holding_ms']+1 < min_holding_ms]
     risk_reasons = ('STOP_LOSS', 'ATR_TRAILING_STOP', 'LIQUIDATION')

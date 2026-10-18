@@ -102,4 +102,5 @@ export type PageId =
   | "charts"
   | "jobs"
   | "roadmap"
-  | "settings";
+  | "settings"
+  | "risk";

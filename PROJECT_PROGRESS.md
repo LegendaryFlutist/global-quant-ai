@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。当前按用户新要求分包、完整函数文档、页面清晰化，并开发入场评分/波动率仓位/减仓研究；风险模块尚在进行中。**
+**Phase1及GitHub恢复机制已交付。研究代码已按领域分包并补齐具名函数文档；风险评分、波动率仓位、保守减仓和研究页面已完成本地验证，等待本分支提交与远程CI。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
-Git分支：`main`。准确最新提交以`git log -1 --oneline`为准；本文件与代码一起提交，不能在自身内容里保存自身提交哈希。已发布与CI状态见下方交接记录。
+Git分支：`refactor/domain-packages-and-function-docs`。准确最新提交以`git log -1 --oneline`为准；本文件与代码一起提交，不能在自身内容里保存自身提交哈希。风险模块提交前，远程PR/CI尚未创建。
 
 ## 已完成功能
 
@@ -16,7 +16,7 @@ Git分支：`main`。准确最新提交以`git log -1 --oneline`为准；本文�
 - 数据：PostgreSQL/Alembic 0001、Redis/RQ、不可变Decimal Parquet/SHA256；公开Binance精确代码核验、分页采集、断点恢复、异常重试；不伪造小周期或缺失行情。
 - 身份：Argon2id、服务端过期会话、CSRF/Origin检查、登录限流、密码变更撤销会话；本机loopback部署。无实盘执行能力。
 - 资产：80项登记、13个真实精确合约代码的公开元数据快照；四个优先标的KORUUSDT、CLUSDT、NVDAUSDT、BTCUSDT。本机保留34,544根真实15m行情，最近90天大周期严格聚合。
-- 离线研究：既有12类反转信号、多周期、经典道氏与1-2-3、波浪候选、GRU等模型、杠杆合约回测、持仓统计、分层报告、模拟邮件。Web集成尚未完成。策略配置`config/swing.json`、模型代码与冻结数据计划保持原状。
+- 离线研究：既有12类反转信号、多周期、经典道氏与1-2-3、波浪候选、GRU等模型、杠杆合约回测、持仓统计、分层报告、模拟邮件。风险研究复用冻结GRU与已使用验证窗，按GRU方向支持/大周期趋势/道氏/波浪/反转形态生成质量分，结合波动率、止损、回撤预算限制杠杆和仓位，并仅减仓。策略配置`config/swing.json`、原模型权重与冻结数据计划保持原状。
 - 容器：保留NVIDIA NGC PyTorch 25.11 GPU lab；独立Python3.11 API、worker、Web、PostgreSQL、Redis。镜像摘要与依赖锁固定。
 - 分享准备：匿名配置/示例邮箱、凭据和私人数据排除、发布扫描、贡献指南、安全说明、Issue/PR模板、固定官方Actions摘要的CI、Dependabot。
 - 新克隆：没有私人历史目录时改为公开采集任务；不把不存在的本机数据标为导入成功。
@@ -35,6 +35,15 @@ Git分支：`main`。准确最新提交以`git log -1 --oneline`为准；本文�
 | 2026-10-18 | `python3 scripts/check_publish.py --staged` | 首个提交141文件扫描通过；每次新增提交均重新扫描 | 见本阶段交接记录 |
 | 2026-10-18 | 全新远程克隆 + `bash scripts/resume.sh` + 发布扫描 | PASS，提交05af517；私人状态不存在，工作区干净 | 本机`runs/maintenance/20261018/remote-clone-recovery.json` |
 | 2026-10-18 | `python3 -m unittest discover -s tests -p test_checkpoint.py -v` | 5 passed：显式文件、无操作、只读恢复、拒绝其他暂存工作、拒绝.env | 本机`runs/maintenance/20261018/checkpoint-tests.log` |
+| 2026-10-18 | `python3 scripts/check_docs.py` | PASS：404个具名Python函数/嵌套函数均有docstring | 控制台结果；`scripts/check_docs.py`纳入CI |
+| 2026-10-18 | `docker compose ... exec -T lab env PYTHONPATH=tests python -m unittest test_risk -v` | 10 passed；覆盖评分门控、波动杠杆、资金预算、时间对齐和减仓账本 | 本机命令结果；合成行情，不修改冻结报告 |
+| 2026-10-18 | `docker compose ... exec -T lab python -m quant_lab.services.risk_research --timeframe 1h` | 四标的均完成；对照固定5倍、评分/波动仓位、评分/波动+减仓；未触碰保留留出集、未重训 | 私人只读产物`runs/risk_latest/report.json`及时间戳归档；不得提交Git |
+| 2026-10-18 | 风险回放（同一已使用验证区间） | 带减仓方案压力回撤：KORU 0.72%、CL 0.72%、NVDA 0.20%、BTC 0.59%；固定5倍分别7.49%、3.47%、1.28%、2.80%。带减仓净收益分别-0.09%、-0.64%、-0.01%、0.18%，低于部分固定方案；四模型仍为`NO_CANDIDATE` | `runs/risk_latest/report.json`；探索性验证，不代表独立样本外或未来表现 |
+| 2026-10-18 | `bash scripts/platform.sh test` | 24 passed；仅使用隔离`quant_test`数据库和Redis测试服务；1项既有Starlette弃用提示 | 控制台结果；测试服务已停止 |
+| 2026-10-18 | `bash scripts/container.sh test` | 154 passed，GPU容器研究/模型/回测/报告及恢复回归 | 控制台结果 |
+| 2026-10-18 | `cd frontend && npm test && npm run build` | 2 passed；TypeScript和Vite生产构建成功 | 控制台结果 |
+| 2026-10-18 | `bash scripts/platform.sh up`及健康检查 | API/Web重建；`/api/health`为200，风险研究未认证访问为401；现有lab与PostgreSQL/Redis保留 | 控制台结果 |
+| 2026-10-18 | `node scripts/platform_browser_check.mjs 9223` | 未通过：旧bootstrap密码已失效，登录页拒绝认证；没有继续浏览器页面断言，不修改数据库凭据 | 本机控制台；需要独立测试账号后才能完成完整浏览器截图验证 |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
 
@@ -48,9 +57,11 @@ Git分支：`main`。准确最新提交以`git log -1 --oneline`为准；本文�
 
 ## 进行中与下一步
 
-- 本次已完成：恢复文档/脚本、独立本地提交、公开推送、两次远程CI通过、全新远程克隆恢复验证。当前仅保存最终文档交接。
-- 下次：先按恢复入口检查Git/CI及任何新改动；当前P0已完成，可从TASKS.md的Phase2第一项开始，或处理维护者指定的更高优先级任务。
-- Phase2：复用离线市场结构模块，先以确认时间和prefix不变性测试锁定无未来数据，再接Web道氏/波浪/支撑压力/趋势线/回放。
+- 已完成：24个研究模块迁移到`quant_lab`领域包，保留根兼容入口；404个具名Python函数/嵌套函数有文档；前端页面按职责拆分。分包提交`b868d1f`已本地保存。
+- 已实现但待本地检查点：版本化风险配置、真实GRU质量评分、波动率感知预算、保守只减仓回测、认证只读风险API及Web风险页面。所有回归与容器构建通过，尚未做远程CI。
+- 当前Git状态是风险单元未提交改动；先审查差异并按`checkpoint.sh`提交，再推送分支、创建PR、等待CI。不要合并到main前把远程CI标成通过。
+- 浏览器验证需解决：本机保存的初始bootstrap凭据与现存密码不一致。使用独立临时测试账户/隔离测试数据库完成新页面端到端检查；不得重置当前用户密码或更改生产数据库。
+- 随后优先完成同一回放窗的风险指标页面/CLI周期选择、实时数据时效提示及更长独立验证设计；新训练/独立留出未获批准前不晋升模型。继续按TASKS.md推进。
 
 ## 发布交接记录
 
