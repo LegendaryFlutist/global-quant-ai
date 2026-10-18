@@ -83,11 +83,11 @@ Alembic 0002草稿新增用户隔离配置表；起始资本为NUMERIC(28,8)，�
 
 新增Python3.11后端测试覆盖Decimal精度、配置hash变更、修订号、权重/周期/杠杆/深度模型绑定约束、标的核验、CSRF和所有者隔离；测试只用`quant_test`和mock。提交`e9cbc3c`四项GitHub CI通过。本地页面可编辑账号、点击创建三年行情任务；后台尚无回测运行器或收益曲线，不能把普通价K线复制成标记价格或忽略资金费后标记净合约收益。
 
-### 按需采集合约标记价格与资金费（WIP，2026-10-19）
+### 按需采集合约标记价格与资金费（2026-10-19）
 
 新增固定Binance公开GET适配器、持久`FETCH_DERIVATIVE_DATA`任务和账号页面按钮。按精确核验产品、原生周期、最长三年UTC时间窗采集标记价格K线与实际结算资金费率；数据分流写入本机`DATA_ROOT/derivatives/<symbol>/<interval>/mark|funding/`不可变Parquet，分页后原子更新manifest并校验每段SHA256。采集失败保留已成功页面以便续传；只在用户点击后联网。重叠或扩展请求可沿用既有窗口；不支持向更早时间扩展。
 
-验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；本机现已重建Python3.11 ARM64镜像，使用隔离PostgreSQL/Redis为44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；497个具名Python函数文档检查、发布扫描和语法检查通过。未发起真实Binance请求；此前运行服务没有因镜像构建而重启。新单元的GitHub CI待提交后运行。模拟净值账本、模型比较、逐笔和收益曲线仍未实现。
+验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；Python3.11 ARM64镜像构建成功，隔离PostgreSQL/Redis 44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；498个具名Python函数文档检查、发布扫描和语法检查通过。提交`5d2a028`的GitHub backend、frontend、risk-engine、publish-hygiene CI全success（run 39145561898）。`bash scripts/platform.sh up`后API健康端点/首页HTTP 200且新route已注册。未发起真实Binance请求。模拟净值账本、模型比较、逐笔和收益曲线仍未实现。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
