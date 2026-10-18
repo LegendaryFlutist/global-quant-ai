@@ -98,6 +98,10 @@ services:
       REDIS_URL: redis://redis-test:6379/0
       DATA_ROOT: /tmp/market-data-tests
     command: [pytest, -q, tests]
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/tests:/app/tests:ro
+      - ./quant_lab:/app/quant_lab:ro
     depends_on:
       postgres-test: {condition: service_healthy}
       redis-test: {condition: service_started}

@@ -1,6 +1,7 @@
 """隔离验证多模拟回测配置账号的资金精度与用户边界。"""
 
 from decimal import Decimal
+import time
 
 from app.core.db import SessionLocal
 from app.domains.models import SimulationAccount, User
@@ -129,4 +130,37 @@ def test_simulation_account_update_cannot_access_another_owner(logged_in):
 
     response = logged_in.put("/api/simulation/accounts/other-owner-account", json=_payload("overwrite"))
     assert response.status_code == 404
+    now_ms = int(time.time() * 1000)
+    data_request = {"start_ms": now_ms - 2 * 86_400_000, "end_ms": now_ms - 86_400_000}
+    assert logged_in.post(
+        "/api/simulation/accounts/other-owner-account/datasets", json=data_request
+    ).status_code == 404
     assert len(logged_in.get("/api/simulation/accounts").json()) == 0
+
+
+def test_simulation_account_dataset_request_queues_only_configured_public_data(logged_in):
+    """验证显式点击按配置标的/周期排队三年内标记价和资金费率归档。
+
+    Args:
+        logged_in: 当前用户已认证且请求带有有效CSRF令牌的API客户端。
+
+    Returns:
+        无返回值；无效范围、未配置资产或队列任务数量错误时测试失败。
+    """
+    created = logged_in.post("/api/simulation/accounts", json=_payload()).json()
+    now_ms = int(time.time() * 1000)
+    request = {"start_ms": now_ms - 2 * 86_400_000, "end_ms": now_ms - 86_400_000}
+    first = logged_in.post(f"/api/simulation/accounts/{created['id']}/datasets", json=request)
+    assert first.status_code == 202
+    jobs = first.json()["tasks"]
+    assert len(jobs) == 3
+    assert {job["interval"] for job in jobs} == {"15m", "1h", "4h"}
+    assert all(job["asset_id"] == "binance_usdm:BTCUSDT" for job in jobs)
+    assert all(job["status"] == "QUEUED" for job in jobs)
+
+    repeated = logged_in.post(f"/api/simulation/accounts/{created['id']}/datasets", json=request)
+    assert [job["id"] for job in repeated.json()["tasks"]] == [job["id"] for job in jobs]
+    invalid_range = {"start_ms": 0, "end_ms": now_ms}
+    assert logged_in.post(
+        f"/api/simulation/accounts/{created['id']}/datasets", json=invalid_range
+    ).status_code == 422

@@ -34,6 +34,7 @@ export default function SimulationPage() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [loading, setLoading] = useState(false);
+  const [datasetLoadingId, setDatasetLoadingId] = useState<string | null>(null);
   /** 从已认证服务读取当前用户的配置账号。 */
   async function refreshAccounts() {
     setLoading(true);
@@ -71,6 +72,25 @@ export default function SimulationPage() {
       await refreshAccounts();
     } catch (cause) {
       setError((cause as Error).message);
+    }
+  }
+  /** 经账号所有权API按需排队该配置资产/周期的本地标记价与资金费数据。 */
+  async function queueDerivativeData(account: SimulationAccount) {
+    setDatasetLoadingId(account.id);
+    setError("");
+    try {
+      const end = Date.now();
+      const start = new Date(end);
+      start.setUTCFullYear(start.getUTCFullYear() - 3);
+      const result = await post<{ tasks: { id: string; interval: string }[] }>(
+        `/simulation/accounts/${encodeURIComponent(account.id)}/datasets`,
+        { start_ms: start.getTime(), end_ms: end },
+      );
+      setSaved(`已排队 ${result.tasks.length} 个公开数据任务；进度请在“后台任务”查看。任务完成前不会生成回测收益。`);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setDatasetLoadingId(null);
     }
   }
   /** 将指定修订复制到表单；服务器状态仅在显式保存后更改。 */
@@ -147,7 +167,12 @@ export default function SimulationPage() {
             <p>周期：{account.configuration.intervals.join(" / ")} · 最大杠杆 {account.configuration.max_leverage}× · 持仓上限 {account.configuration.max_holding_hours} 小时</p>
             <p>权重：{WEIGHTS.map(({ key, label }) => `${label} ${account.configuration.weights[key]}`).join(" · ")}</p>
             <small className="mono break">配置 SHA256：{account.configuration_sha256}</small>
-            <p className="muted">隔离研究配置 · 暂无回测结果/成交账本</p>
+            <div className="actions">
+              <button onClick={() => void queueDerivativeData(account)} disabled={datasetLoadingId !== null}>
+                {datasetLoadingId === account.id ? "提交中…" : "按需采集三年标记价与资金费率"}
+              </button>
+            </div>
+            <p className="muted">隔离研究配置 · 行情需由你点击后才采集；当前尚未实现回测收益/成交账本。</p>
           </article>)}
         </section>
       </div>

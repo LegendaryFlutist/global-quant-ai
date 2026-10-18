@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -15,7 +16,9 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.core.db import get_db
 from app.core.security import current_user
-from app.domains.models import Asset, SimulationAccount, User
+from app.domains.models import Asset, SimulationAccount, Task, User
+from app.services.jobs import enqueue
+from app.services.long_history import three_year_start, validate_archive_identity
 
 router = APIRouter()
 INTERVALS = {"15m", "30m", "1h", "2h", "4h", "1d"}
@@ -110,6 +113,22 @@ class SimulationAccountPayload(BaseModel):
     initial_equity: Decimal = Field(gt=0, le=Decimal("1000000000000"), max_digits=28, decimal_places=8)
     base_currency: Literal["USDT"] = "USDT"
     configuration: SimulationPolicy
+
+
+class DatasetRequest(BaseModel):
+    """请求一个账号配置内标的和周期的本地合约研究数据归档。"""
+    model_config = ConfigDict(extra="forbid")
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        """在显式提供时间窗时要求开始和结束毫秒同时有效。"""
+        if (self.start_ms is None) != (self.end_ms is None):
+            raise ValueError("start_ms和end_ms必须同时提供")
+        if self.start_ms is not None and self.end_ms <= self.start_ms:
+            raise ValueError("end_ms必须晚于start_ms")
+        return self
 
 
 def _config_hash(configuration):
@@ -268,3 +287,62 @@ def update_account(
         raise HTTPException(409, "该模拟账号名称已存在") from None
     db.refresh(account)
     return _account_response(account)
+
+
+@router.post("/api/simulation/accounts/{account_id}/datasets", status_code=202)
+def request_account_datasets(
+    account_id: str,
+    request: DatasetRequest,
+    user: User = Depends(current_user),
+    db: DBSession = Depends(get_db),
+):
+    """按用户点击排队采集该账号选择资产/周期的三年标记价和资金费率。
+
+    Args:
+        account_id: 用户自有的模拟配置账号稳定ID。
+        request: 可选显式UTC毫秒范围；缺省请求最近三个自然年。
+        user: 会话认证依赖返回的用户记录。
+        db: 当前认证请求的SQLAlchemy数据库会话。
+
+    Returns:
+        已创建或去重的逐资产/周期公开数据任务，不直接访问交易所。
+
+    Raises:
+        HTTPException: 账号不存在、范围超出三年或产品身份不再核验。
+    """
+    account = db.scalar(select(SimulationAccount).where(
+        SimulationAccount.id == account_id,
+        SimulationAccount.owner_user_id == user.id,
+    ))
+    if account is None:
+        raise HTTPException(404, "模拟账号不存在")
+    now_ms = int(time.time() * 1000)
+    start_ms = request.start_ms if request.start_ms is not None else three_year_start(now_ms)
+    end_ms = request.end_ms if request.end_ms is not None else now_ms
+    if start_ms < three_year_start(now_ms) or end_ms > now_ms:
+        raise HTTPException(422, "公开合约数据只允许最近三年内的已发生时间范围")
+    jobs = []
+    pairs = [
+        (asset_id, interval)
+        for asset_id in account.configuration["asset_ids"]
+        for interval in account.configuration["intervals"]
+    ]
+    try:
+        for asset_id, interval in pairs:
+            validate_archive_identity(db, asset_id, interval)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    for asset_id, interval in pairs:
+        parameters = {
+            "asset_id": asset_id,
+            "interval": interval,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+        }
+        active = next((candidate for candidate in db.scalars(select(Task).where(
+            Task.kind == "FETCH_DERIVATIVE_DATA",
+            Task.status.in_(["QUEUED", "RUNNING", "RETRYING"]),
+        )) if candidate.parameters == parameters), None)
+        task = active or enqueue(db, "FETCH_DERIVATIVE_DATA", parameters)
+        jobs.append({"id": task.id, "asset_id": asset_id, "interval": interval, "status": task.status})
+    return {"tasks": jobs, "start_ms": start_ms, "end_ms": end_ms, "research_only": True}

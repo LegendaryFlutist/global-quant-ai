@@ -46,3 +46,30 @@ class BinancePublic:
             最多1000根原始K线列表，分页由采集服务推进。
         """
         return self.get('/fapi/v1/klines', {'symbol':symbol, 'interval':interval, 'startTime':start, 'endTime':end, 'limit':1000})
+
+    def mark_price_klines(self, symbol: str, interval: str, start: int, end: int):
+        """读取公开合约标记价格K线，禁止用成交价K线冒充标记价格。
+
+        Args:
+            symbol: 已核验的精确Binance USDM永续代码。
+            interval: Binance原生K线周期。
+            start: 查询起点UTC毫秒。
+            end: 查询终点UTC毫秒。
+
+        Returns:
+            Binance公开标记价格K线数组；请求只使用无凭据GET。
+        """
+        return self.get('/fapi/v1/markPriceKlines', {'symbol':symbol, 'interval':interval, 'startTime':start, 'endTime':end, 'limit':1000})
+
+    def funding_rates(self, symbol: str, start: int, end: int):
+        """读取公开历史资金费率和交易所返回的结算标记价格。
+
+        Args:
+            symbol: 已核验的精确Binance USDM永续代码。
+            start: 查询起点UTC毫秒。
+            end: 查询终点UTC毫秒。
+
+        Returns:
+            最多1000条带资金费时间戳、费率和标记价的JSON记录。
+        """
+        return self.get('/fapi/v1/fundingRate', {'symbol':symbol, 'startTime':start, 'endTime':end, 'limit':1000})

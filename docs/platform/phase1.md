@@ -44,9 +44,9 @@ npm run build
 
 - 当前容器对Binance域名DNS解析失败，宿主机先前公开REST探测也曾返回451；公开行情自动更新存在网络/上游访问限制；任务显示实际失败原因，13个合约元数据快照与四个真实历史行情仍可研究。其他登记资产无行情时显示缺失。
 - 本机8080是HTTP，仅绑定127.0.0.1。远程访问需要SSH转发或自行配置TLS/私网代理；使用HTTPS时配置Secure Cookie和Origin。
-- 图表为已收盘历史缓存，不是实时报价或盘口。1m/3m/5m需要独立公开采集；不从15m伪造。月线90天只有很少完整K线，不进行趋势预测。
-- 全局风险为UNKNOWN；没有接入新闻、情绪或全球联动计算。图表只实现MA和成交量，其余技术分析与人工标注在Phase2。
-- 当前没有Web训练、实时信号循环、持久模拟账户、SMTP/私有API凭据、2FA或实盘交易。原脚本与离线报告可继续使用，未重跑或改变原回测。
+- 图表历史以本地已收盘行情为主，不提供逐笔盘口或WebSocket。选中三年缓存视图时每五秒刷新当前标的/周期，并独立标记未收盘K线；1m/3m/5m需各自公开采集，不从15m伪造。
+- 总体周期摘要仅使用本地结构数据；无新闻、宏观事件或跨市场传导源。多模拟配置尚无回测账本/收益曲线，离线既有回测与原模型结果未因本平台改写。
+- 当前没有Web训练、实盘信号循环、SMTP/私有API凭据、2FA或实盘交易。原脚本与离线报告可继续使用，未重跑或改变原回测。
 - 单人本机版不等于公网多租户生产版。生产需TLS、备份恢复演练、监控、严格角色授权、密钥服务与后续审批/账本测试。
 
 ## Phase 2 计划
@@ -63,7 +63,7 @@ npm run build
 
 新增已认证只读`GET /api/market/structure`：为所选标的读取本地三年归档，不在查看时请求Binance；每周期最多取配置范围内的真实K线，统一按截止时点分析已收盘样本。返回趋势方向/趋势线和破坏状态、确认版道氏1-2-3、Elliott候选、价格-RSI背离、各事件发生与确认时间、证据及归档manifest SHA256。价格类字段以十进制字符串返回。缓存缺周期时返回缺档清单；页面可叠加当前图表周期线和破位/123/背离标记，并显示多周期状态。相关原理保持研究候选，不代表获利概率，也不调用下单接口。
 
-验证：本机前端`npm test`为2 passed且`npm run build`成功；Python语法检查和`python3 scripts/check_docs.py`通过（437个具名函数）；GitHub PR提交`32f1a9e`的Python3.11隔离backend、frontend、risk-engine和publish-hygiene四项CI全部success。受本机Docker下载ARM64 NumPy wheel停滞影响，新增API的本机容器镜像未成功重建；当前已运行容器仍是旧镜像，部署验证需在可访问包索引环境运行`bash scripts/platform.sh up`。5秒选中标的更新、全市场情绪周期汇总及多模拟账户依然未实现。
+验证：本机前端`npm test`为2 passed且`npm run build`成功；Python语法检查和`python3 scripts/check_docs.py`通过（437个具名函数）；GitHub PR提交`32f1a9e`的Python3.11隔离backend、frontend、risk-engine和publish-hygiene四项CI全部success。该提交时本机Docker构建受ARM64 NumPy下载停滞影响；后续刷新/情绪/配置账号已分单实现，见下方记录。
 
 ### Phase2 当前周期实时刷新（WIP，2026-10-19）
 
@@ -77,11 +77,17 @@ npm run build
 
 验证：提交`9225ecc`的Python3.11 backend、frontend、risk-engine、publish-hygiene四项PR CI全success；后端测试模拟结构响应，使用隔离数据库且不访问外部行情。研究引擎`bash scripts/container.sh test` 156 passed；前端`npm test` 2 passed，`npm run build`成功；457个Python函数docstring检查通过。趋势/道氏分解、背离新近窗口、跨4h/1d方向冲突、缺档UNKNOWN和API周期白名单都有测试。浏览器端到端验收和本机新API镜像启动仍待下载网络恢复；新功能已通过CI但未声称在当前本机容器运行。
 
-### 多模拟回测配置账号（WIP，2026-10-19）
+### 多模拟回测配置账号（2026-10-19）
 
 Alembic 0002草稿新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存模型/技术理论权重、精确已核验永续标的、周期、最大杠杆/保证金、24小时至21天持仓策略、退出方式、revision与configuration SHA256。React工作台可创建、查看和编辑多个账号配置；新账号默认研究用途，不建成交/权益记录，不下单，不声称回测收益。
 
-新增Python3.11后端测试覆盖Decimal精度、配置hash变更、修订号、权重/周期/杠杆/深度模型绑定约束、标的核验、CSRF和所有者隔离；测试只用`quant_test`和mock。此代码尚未CI验证；前端2项测试/构建与473个函数docstring检查、本机Python语法检查通过。回测运行器仍待实现，尤其需要真实标记价格K线与资金费率来源，不允许把普通价格K线复制成标记价格或忽略资金费后标记为净合约收益。
+新增Python3.11后端测试覆盖Decimal精度、配置hash变更、修订号、权重/周期/杠杆/深度模型绑定约束、标的核验、CSRF和所有者隔离；测试只用`quant_test`和mock。提交`e9cbc3c`四项GitHub CI通过。本地页面可编辑账号、点击创建三年行情任务；后台尚无回测运行器或收益曲线，不能把普通价K线复制成标记价格或忽略资金费后标记净合约收益。
+
+### 按需采集合约标记价格与资金费（WIP，2026-10-19）
+
+新增固定Binance公开GET适配器、持久`FETCH_DERIVATIVE_DATA`任务和账号页面按钮。按精确核验产品、原生周期、最长三年UTC时间窗采集标记价格K线与实际结算资金费率；数据分流写入本机`DATA_ROOT/derivatives/<symbol>/<interval>/mark|funding/`不可变Parquet，分页后原子更新manifest并校验每段SHA256。采集失败保留已成功页面以便续传；只在用户点击后联网。重叠或扩展请求可沿用既有窗口；不支持向更早时间扩展。
+
+验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；本机现已重建Python3.11 ARM64镜像，使用隔离PostgreSQL/Redis为44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；497个具名Python函数文档检查、发布扫描和语法检查通过。未发起真实Binance请求；此前运行服务没有因镜像构建而重启。新单元的GitHub CI待提交后运行。模拟净值账本、模型比较、逐笔和收益曲线仍未实现。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
