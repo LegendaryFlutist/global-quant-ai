@@ -204,6 +204,30 @@ export interface User {
   role: string;
   csrf_token: string;
 }
+/** Persistent user-owned backtest configuration; contains no balances or fills. */
+export interface SimulationAccount {
+  id: string;
+  name: string;
+  initial_equity: string;
+  base_currency: "USDT";
+  configuration: {
+    asset_ids: string[];
+    intervals: string[];
+    weights: Record<"trend" | "dow123" | "wave" | "divergence" | "reversal_patterns" | "deep_model", string>;
+    entry_threshold: string;
+    max_leverage: string;
+    max_margin_fraction: string;
+    max_holding_hours: number;
+    exit_mode: "three_bar_trailing" | "atr" | "fixed_rr" | "time";
+    deep_model_version: string | null;
+  };
+  configuration_sha256: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  research_only: true;
+  backtest_implemented: boolean;
+}
 export type PageId =
   | "dashboard"
   | "assets"
@@ -211,4 +235,5 @@ export type PageId =
   | "jobs"
   | "roadmap"
   | "settings"
-  | "risk";
+  | "risk"
+  | "simulation";

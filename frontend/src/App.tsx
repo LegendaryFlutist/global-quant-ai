@@ -12,6 +12,7 @@ import JobsPage from "./pages/JobsPage";
 import CapabilitiesPage from "./pages/CapabilitiesPage";
 import RiskPage from "./pages/RiskPage";
 import SettingsPage from "./pages/SettingsPage";
+import SimulationPage from "./pages/SimulationPage";
 
 /** 工作台路由协调层；身份、轮询与各页面分离，业务能力由后端再次授权。 */
 export default function App() {
@@ -116,6 +117,7 @@ export default function App() {
         />
       )}
       {page === "risk" && <RiskPage />}
+      {page === "simulation" && <SimulationPage />}
       {page === "jobs" && (
         <JobsPage
           jobs={data.jobs}

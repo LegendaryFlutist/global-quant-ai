@@ -443,3 +443,29 @@ def test_live_refresh_api_requires_csrf_and_returns_incremental_snapshot(logged_
     unauthenticated = logged_in.__class__(logged_in.app)
     assert unauthenticated.post("/api/market/live", json=payload).status_code == 401
     unauthenticated.close()
+
+
+def test_priority_sentiment_api_rejects_unsupported_cycles(logged_in, monkeypatch):
+    """验证优先标的情绪API认证后只接受指定分析周期。
+
+    Args:
+        logged_in: 已建立会话并带有效CSRF头的测试客户端。
+        monkeypatch: pytest提供的依赖替换器，避免测试读取行情数据。
+
+    Returns:
+        无返回值；非法周期被接受或合法响应字段缺失时测试失败。
+    """
+    from app.api import market as market_api
+
+    monkeypatch.setattr(
+        market_api,
+        "aggregate_priority_sentiment",
+        lambda db, intervals, as_of_ms: {
+            "regime": "UNKNOWN", "known_asset_count": 0,
+            "unknown_asset_count": 4, "assets": [], "research_only": True,
+        },
+    )
+    response = logged_in.get("/api/market/sentiment?intervals=15m%2C1d")
+    assert response.status_code == 200
+    assert response.json()["unknown_asset_count"] == 4
+    assert logged_in.get("/api/market/sentiment?intervals=5m").status_code == 422

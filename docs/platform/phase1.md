@@ -71,11 +71,17 @@ npm run build
 
 验证：`cf678fd`与快照哈希修正`dbb3602`的Python3.11隔离backend、frontend、risk-engine与publish-hygiene检查全部success；后端mock覆盖新闭合K线追加、正在形成的K线快照与SHA256、认证和CSRF，前端2 passed且生产构建通过。未访问真实Binance。当前单API进程锁避免本机清单竞争；跨API副本共享节流需在横向部署前增加。受本机Docker下载ARM64 NumPy wheel停滞影响，新容器尚未重建，当前运行容器仍为旧版；网络可达后运行`bash scripts/platform.sh up`、`bash scripts/platform.sh test`，再以隔离账号验收页面和连续刷新。当前功能仅在已选中的三年缓存图表可用，关闭页面/切换到90天缓存后停止轮询。
 
-### Phase2 总体结构周期摘要（WIP，2026-10-19）
+### Phase2 总体结构周期摘要（2026-10-19）
 
 新增本地只读`GET /api/market/sentiment`草稿，默认聚合四个优先标的及15m/1h/4h/1d趋势。分数以方向指数呈现：趋势70%、道氏30%，最近八根K线内的已确认RSI背离最多±0.2；总体按各资产等权汇总。20根已收盘对数收益波动率只作背景展示、不改变分数。4h与1d反向或高周期趋势线破坏为TRANSITIONING；缺档保留UNKNOWN。UI会披露每项趋势、道氏、背离、波浪候选、20根波动、支撑/压力及来源哈希，分数明确不是胜率。
 
-本段代码与测试尚未在Python3.11隔离CI验证；测试采用模拟结构响应和隔离数据库。仍需检查跨标的混合/转折边界并运行隔离浏览器验收。不得把未通过测试的WIP标为完成。
+验证：提交`9225ecc`的Python3.11 backend、frontend、risk-engine、publish-hygiene四项PR CI全success；后端测试模拟结构响应，使用隔离数据库且不访问外部行情。研究引擎`bash scripts/container.sh test` 156 passed；前端`npm test` 2 passed，`npm run build`成功；457个Python函数docstring检查通过。趋势/道氏分解、背离新近窗口、跨4h/1d方向冲突、缺档UNKNOWN和API周期白名单都有测试。浏览器端到端验收和本机新API镜像启动仍待下载网络恢复；新功能已通过CI但未声称在当前本机容器运行。
+
+### 多模拟回测配置账号（WIP，2026-10-19）
+
+Alembic 0002草稿新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存模型/技术理论权重、精确已核验永续标的、周期、最大杠杆/保证金、24小时至21天持仓策略、退出方式、revision与configuration SHA256。React工作台可创建、查看和编辑多个账号配置；新账号默认研究用途，不建成交/权益记录，不下单，不声称回测收益。
+
+新增Python3.11后端测试覆盖Decimal精度、配置hash变更、修订号、权重/周期/杠杆/深度模型绑定约束、标的核验、CSRF和所有者隔离；测试只用`quant_test`和mock。此代码尚未CI验证；前端2项测试/构建与473个函数docstring检查、本机Python语法检查通过。回测运行器仍待实现，尤其需要真实标记价格K线与资金费率来源，不允许把普通价格K线复制成标记价格或忽略资金费后标记为净合约收益。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 

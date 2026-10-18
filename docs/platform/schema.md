@@ -18,9 +18,15 @@
 | system_settings | key, value JSON | 当前仅显示偏好；不接受API凭据 |
 | system_events | id, kind, detail JSON, created_at | 预留系统事件记录，目前无监控告警引擎 |
 
-## Phase2–8 规划表（尚未迁移创建）
+## Phase2 已迁移配置表（Alembic 0002）
 
-以下是完整领域规划，不表示存在业务功能。后续迁移会补齐更精确字段、外键和并发约束。
+| 表 | 主键 / 关键字段 | 约束与用途 |
+|---|---|---|
+| simulation_accounts | id, owner_user_id, name, initial_equity NUMERIC(28,8), base_currency, configuration JSON, configuration_sha256, revision, created_at, updated_at | 每用户名称唯一；资金使用Decimal/NUMERIC；配置绑定标的、周期、理论权重和风险上限；revision/hash便于回测引用；仅研究配置，不是资金余额、成交或订单账本 |
+
+## Phase2–8 其他规划表（尚未迁移创建）
+
+以下是完整领域规划，不表示存在业务功能；除上方明确列出的revision 0002配置账号表外，其他表都还不存在。后续迁移会补齐更精确字段、外键和并发约束。
 
 | 阶段 / 表 | 核心字段、关联和关键约束 |
 |---|---|
