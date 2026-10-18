@@ -118,6 +118,141 @@ def structure_features(bars,pivot_width=2,return_details=False):
     return (result,technical,raw,turns) if return_details else result
 
 
+def _rsi_series(closes, period=14):
+    """计算仅依赖当前及过去收盘价的Wilder RSI序列。
+
+    Args:
+        closes: 按时间升序的有限正数收盘价格序列，单位为报价币。
+        period: RSI Wilder平滑周期，单位为K线根数，至少为2。
+
+    Returns:
+        与输入等长的浮点RSI数组；预热不足的位置为NaN。
+
+    Raises:
+        ValueError: 周期长度或输入价格不符合计算要求。
+    """
+    values=np.asarray(closes,dtype=float)
+    if not isinstance(period,int) or period<2 or not np.isfinite(values).all() or (values<=0).any():
+        raise ValueError('RSI周期或收盘价格无效')
+    result=np.full(len(values),np.nan)
+    if len(values)<=period:return result
+    changes=np.diff(values);gains=np.maximum(changes,0.);losses=np.maximum(-changes,0.)
+    average_gain=float(gains[:period].mean());average_loss=float(losses[:period].mean())
+    result[period]=50. if average_loss==0 and average_gain==0 else 100. if average_loss==0 else 100.-100./(1.+average_gain/average_loss)
+    for index in range(period+1,len(values)):
+        average_gain=(average_gain*(period-1)+gains[index-1])/period
+        average_loss=(average_loss*(period-1)+losses[index-1])/period
+        result[index]=50. if average_loss==0 and average_gain==0 else 100. if average_loss==0 else 100.-100./(1.+average_gain/average_loss)
+    return result
+
+
+def multitimeframe_structure(bars_by_timeframe,as_of_ms=None,source_hashes=None,pivot_width=2,rsi_period=14):
+    """汇总每周期已收盘趋势线、道氏123、波浪候选与RSI背离事件。
+
+    Args:
+        bars_by_timeframe: 周期名到真实OHLCV DataFrame的映射；时间戳为UTC毫秒。
+        as_of_ms: 可选统一观察截止UTC毫秒；截止时仍未收盘的K线会被丢弃。
+        source_hashes: 可选周期到原始数据集SHA256的映射，用于事件溯源。
+        pivot_width: 结构摆动点左右确认根数，至少为1。
+        rsi_period: 因果Wilder RSI周期，单位为K线根数。
+
+    Returns:
+        带schema/算法版本、逐周期结构、趋势破坏时间和排序事件的JSON安全字典。
+
+    Raises:
+        ValueError: 时间顺序、OHLCV字段、截止时间或版本参数非法。
+
+    Notes:
+        每个pivot的occurred_at是转折K线收盘时刻，confirmed_at是右侧确认K线收盘时刻。
+        趋势/123及背离事件只在所依据的K线收盘后发布，不把波浪候选解释成获利概率。
+    """
+    required={'open_time','close_time','open','high','low','close','volume'}
+    if not bars_by_timeframe or not isinstance(pivot_width,int) or pivot_width<1:
+        raise ValueError('必须提供周期数据且摆动宽度为正整数')
+    if as_of_ms is not None and (not isinstance(as_of_ms,int) or as_of_ms<0):
+        raise ValueError('观察截止必须为UTC毫秒整数')
+    source_hashes=source_hashes or {};prepared={};observed=[]
+    for timeframe,source in bars_by_timeframe.items():
+        if not isinstance(timeframe,str) or not timeframe or not isinstance(source,pd.DataFrame) or not required.issubset(source.columns):
+            raise ValueError('周期或OHLCV列不完整')
+        frame=source.copy().reset_index(drop=True)
+        frame['open_time']=pd.to_numeric(frame.open_time,errors='raise').astype('int64')
+        frame['close_time']=pd.to_numeric(frame.close_time,errors='raise').astype('int64')
+        if len(frame)>1 and not (np.diff(frame.open_time.to_numpy())>0).all():
+            raise ValueError('周期K线必须按开盘时间严格升序且不重复')
+        if (frame.close_time<frame.open_time).any():raise ValueError('K线收盘时间早于开盘时间')
+        for column in ('open','high','low','close','volume'):
+            frame[column]=pd.to_numeric(frame[column],errors='raise').astype(float)
+        values=frame[['open','high','low','close','volume']].to_numpy()
+        if not np.isfinite(values).all() or (frame[['open','high','low','close']]<=0).any().any() or (frame.volume<0).any():
+            raise ValueError('OHLCV包含非法数值')
+        if ((frame.high<frame[['open','close','low']].max(axis=1))|(frame.low>frame[['open','close','high']].min(axis=1))).any():
+            raise ValueError('OHLC区间无效')
+        observed.append(int(frame.close_time.max())+1 if len(frame) else 0)
+        prepared[timeframe]=frame
+    cutoff=as_of_ms if as_of_ms is not None else max(observed)
+    events=[];summaries={}
+    for timeframe,source in prepared.items():
+        bars=source.loc[source.close_time<cutoff].reset_index(drop=True)
+        digest=source_hashes.get(timeframe)
+        if digest is not None and (not isinstance(digest,str) or len(digest)!=64 or any(ch not in '0123456789abcdef' for ch in digest.lower())):
+            raise ValueError('数据集来源哈希必须为SHA256')
+        if len(bars)<2*pivot_width+3:
+            summaries[timeframe]={'status':'INSUFFICIENT_DATA','bars':len(bars),'source_sha256':digest,'events':[]}
+            continue
+        features,technical,pivots,turns=structure_features(bars,pivot_width,True)
+        rsi=_rsi_series(bars.close.to_numpy(),rsi_period);previous={'high':None,'low':None};divergences=[]
+        for point in pivots:
+            index=point['index'];prior=previous[point['kind']];value=rsi[index]
+            if prior is not None and np.isfinite(value) and np.isfinite(prior['rsi']):
+                if point['kind']=='low' and point['price']<prior['price'] and value>prior['rsi']:
+                    kind='BULLISH_RSI_DIVERGENCE'
+                elif point['kind']=='high' and point['price']>prior['price'] and value<prior['rsi']:
+                    kind='BEARISH_RSI_DIVERGENCE'
+                else:kind=None
+                if kind:
+                    event=dict(kind=kind,timeframe=timeframe,occurred_at=int(point['time']),confirmed_at=int(point['confirmed_at']),
+                        evidence=dict(previous_pivot_at=int(prior['time']),previous_price=float(prior['price']),price=float(point['price']),
+                            previous_rsi=float(prior['rsi']),rsi=float(value),pivot_kind=point['kind']),
+                        invalidation_price=float(point['price']),source_sha256=digest)
+                    divergences.append(event);events.append(event)
+            previous[point['kind']]=dict(time=point['time'],price=point['price'],rsi=value)
+        for index in range(1,len(technical)):
+            for line in ('support','resistance'):
+                if technical[line+'_state'].iloc[index]=='BROKEN' and technical[line+'_state'].iloc[index-1]!='BROKEN':
+                    event=dict(kind='TRENDLINE_BREAK',timeframe=timeframe,occurred_at=int(bars.close_time.iloc[index]),
+                        confirmed_at=int(bars.close_time.iloc[index]),evidence=dict(line=line,close=float(bars.close.iloc[index]),
+                            prior_state=str(technical[line+'_state'].iloc[index-1]),anchors=[int(technical[line+'_anchor1'].iloc[index]),int(technical[line+'_anchor2'].iloc[index])]),
+                        invalidation_price=None,source_sha256=digest)
+                    events.append(event)
+            direction=int(technical.dow123_event.iloc[index])
+            if direction:
+                event=dict(kind='DOW123_CONFIRMED',timeframe=timeframe,occurred_at=int(bars.close_time.iloc[index]),
+                    confirmed_at=int(bars.close_time.iloc[index]),evidence=dict(direction=direction,
+                        bullish_step=int(technical.bullish_step.iloc[index]),bearish_step=int(technical.bearish_step.iloc[index])),
+                    invalidation_price=None,source_sha256=digest)
+                events.append(event)
+        latest=technical.iloc[-1];last_bar=bars.iloc[-1];last_point_by_index={p['index']:p for p in pivots}
+        lines={}
+        for name,column in (('support','low'),('resistance','high')):
+            a=latest[name+'_anchor1'];z=latest[name+'_anchor2']
+            if pd.isna(a) or pd.isna(z):
+                lines[name]=dict(state='UNAVAILABLE',value=None,anchors=[])
+                continue
+            a=int(a);z=int(z);slope=(float(bars[column].iloc[z])-float(bars[column].iloc[a]))/(z-a)
+            anchors=[dict(time=int(bars.close_time.iloc[pos]),price=float(bars[column].iloc[pos]),
+                confirmed_at=int(last_point_by_index[pos]['confirmed_at']) if pos in last_point_by_index else int(bars.close_time.iloc[pos])) for pos in (a,z)]
+            lines[name]=dict(state=str(latest[name+'_state']),value=float(latest[name]),slope_per_bar=float(slope),anchors=anchors,
+                confirmed_at=max(point['confirmed_at'] for point in anchors))
+        trend=int(features.analysis_trend.iloc[-1]);dow_direction=int(latest.dow123_signal)
+        summaries[timeframe]=dict(status='OK',bars=len(bars),last_closed_at=int(last_bar.close_time),close=float(last_bar.close),
+            source_sha256=digest,trend=trend,trendline_break_state='BROKEN' if any(lines[name]['state']=='BROKEN' for name in lines) else 'HOLDING_OR_UNAVAILABLE',
+            trend_lines=lines,dow123_state=dow_direction,wave=wave_candidate(turns),latest_divergence=divergences[-1] if divergences else None,
+            pivots=[dict(kind=p['kind'],price=float(p['price']),occurred_at=int(p['time']),confirmed_at=int(p['confirmed_at']),index=int(p['index'])) for p in pivots[-20:]])
+    events.sort(key=lambda event:(event['confirmed_at'],event['timeframe'],event['kind']))
+    return dict(schema_version=1,algorithm='confirmed_structure_divergence_v1',as_of_ms=cutoff,timeframes=summaries,events=events)
+
+
 def analysis_signals(frame,model=None,confidence=.45,swing_min_range=None,swing_max_range=None):
     """结合结构事件、大周期方向、历史波幅及可选模型概率过滤入场。
 

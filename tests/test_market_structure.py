@@ -4,22 +4,23 @@ import tempfile
 import unittest
 import numpy as np
 import pandas as pd
-from market_structure import structure_features,wave_candidate,impulse,analysis_signals
+from market_structure import structure_features,wave_candidate,impulse,analysis_signals,multitimeframe_structure
 from structure_report import spectral_cycle,analyze_market,support_resistance
 
 
-def candles(n=640):
+def candles(n=640,step_ms=900000):
     """构造当前技术分析或执行测试所需的合成OHLCV样本。
 
     Args:
         n: 合成样本或展示窗口的数量。
+        step_ms: 每根K线的周期长度，单位毫秒。
 
     Returns:
         测试夹具、构造结果或断言辅助返回值；不影响真实数据。
     """
     i=np.arange(n);c=100+.01*i+3*np.sin(i/8);o=np.r_[c[0],c[:-1]]
-    t=1609459200000+i*900000
-    return pd.DataFrame(dict(open_time=t,close_time=t+899999,open=o,high=np.maximum(o,c)+.2+.03*np.sin(i/3),low=np.minimum(o,c)-.2-.02*np.cos(i/5),close=c,volume=10+i%17))
+    t=1609459200000+i*step_ms
+    return pd.DataFrame(dict(open_time=t,close_time=t+step_ms-1,open=o,high=np.maximum(o,c)+.2+.03*np.sin(i/3),low=np.minimum(o,c)-.2-.02*np.cos(i/5),close=c,volume=10+i%17))
 
 
 class MarketStructureTests(unittest.TestCase):
@@ -35,6 +36,39 @@ class MarketStructureTests(unittest.TestCase):
         _,_,pivots,_=structure_features(b,return_details=True)
         self.assertTrue(pivots)
         self.assertTrue(all(p['confirmed_at']>=p['time']+2*900000 for p in pivots))
+
+    def test_multitimeframe_events_are_confirmed_and_prefix_invariant(self):
+        """验证跨周期结构事件因果确认，未来数据不会改写过去报告。
+
+        Returns:
+            无返回值；未来泄漏、事件缺确认时间或不支持趋势线时测试失败。
+        """
+        bars=candles(320);higher=candles(80,4*60*60*1000);cutoff=int(bars.close_time.iloc[219])+1
+        digest='a'*64
+        prefix=multitimeframe_structure({'15m':bars.iloc[:220],'4h':higher.iloc[:14]},cutoff,{'15m':digest,'4h':digest})
+        extended=multitimeframe_structure({'15m':bars,'4h':higher},cutoff,{'15m':digest,'4h':digest})
+        self.assertEqual(prefix,extended)
+        self.assertEqual(prefix['schema_version'],1)
+        self.assertEqual(prefix['timeframes']['15m']['bars'],220)
+        self.assertIn(prefix['timeframes']['15m']['trend_lines']['support']['state'],('HOLDING','BROKEN','UNAVAILABLE'))
+        self.assertTrue(all(event['confirmed_at']<cutoff for event in prefix['events']))
+        self.assertTrue(all(event['source_sha256']==digest for event in prefix['events']))
+
+    def test_bullish_price_rsi_divergence_waits_for_right_pivot_close(self):
+        """验证价格更低低点与RSI更高低点只在右侧K线收盘后确认。
+
+        Returns:
+            无返回值；背离方向或确认时点错误会使测试失败。
+        """
+        close=np.array([110.,100.,90.,100.,110.,105.,88.,100.,110.])
+        time=np.arange(len(close))*900000+1609459200000
+        bars=pd.DataFrame(dict(open_time=time,close_time=time+899999,open=close,high=close+1,low=close-1,close=close,volume=np.ones(len(close))))
+        result=multitimeframe_structure({'15m':bars},int(bars.close_time.iloc[-1])+1,pivot_width=1,rsi_period=2)
+        event=next(item for item in result['events'] if item['kind']=='BULLISH_RSI_DIVERGENCE')
+        self.assertEqual(event['occurred_at'],int(bars.close_time.iloc[6]))
+        self.assertEqual(event['confirmed_at'],int(bars.close_time.iloc[7]))
+        truncated=multitimeframe_structure({'15m':bars.iloc[:7]},int(bars.close_time.iloc[6])+1,pivot_width=1,rsi_period=2)
+        self.assertFalse(any(item['kind']=='BULLISH_RSI_DIVERGENCE' for item in truncated['events']))
 
     def test_impulse_rules_and_ambiguity(self):
         """验证推动浪硬规则及歧义时不强制标浪。
@@ -98,8 +132,10 @@ class MarketStructureTests(unittest.TestCase):
             report=analyze_market('KORUUSDT',source,root/'analysis')
             self.assertEqual(len(report['timeframes']),8)
             self.assertEqual(report['timeframes']['1mo']['status'],'INSUFFICIENT_DATA')
+            self.assertEqual(report['structural_events']['schema_version'],1)
+            self.assertEqual(report['structural_events']['timeframes']['15m']['source_sha256'],report['dataset_sha256'])
             text=(root/'analysis/index.html').read_text()
-            for word in ['支撑','压力','条件情景','波浪','3倍','候选','CSV','<rect','clip_15m']:self.assertIn(word,text)
+            for word in ['支撑','压力','条件情景','波浪','背离','3倍','候选','多周期结构事件','CSV','<rect','clip_15m']:self.assertIn(word,text)
             self.assertTrue((root/'analysis/4h.svg').is_file())
             json.loads((root/'analysis/report.json').read_text())
 

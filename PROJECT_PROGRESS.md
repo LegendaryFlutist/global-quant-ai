@@ -49,6 +49,9 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 | 2026-10-18 | Phase2历史归档：`bash scripts/platform.sh build`、`bash scripts/platform.sh test` | 重建测试镜像后30 passed；1项既有Starlette TestClient/httpx弃用提示 | 本机控制台；mock Binance、临时目录、quant_test数据库；真实网络未请求 |
 | 2026-10-18 | `cd frontend && npm test && npm run build` | 2 passed；TypeScript与Vite生产构建成功 | 本机控制台 |
 | 2026-10-18 | `python3 scripts/check_docs.py`、`git diff --check` | 428个具名Python函数有docstring；差异空白检查通过 | 本机控制台 |
+| 2026-10-18 | `docker compose -p quant-lab -f compose.yaml exec -T lab env PYTHONPATH=tests python -m unittest test_market_structure -v` | 7 passed：新增多周期报告前缀不变性、确认后价格-RSI背离；原道氏/波浪/报告测试通过 | 本机控制台；合成OHLCV，不改既有结果 |
+| 2026-10-18 | `python3 scripts/check_docs.py`（新增结构事件函数后） | PASS：432个具名Python函数均有docstring | 本机控制台 |
+| 2026-10-18 | `bash scripts/container.sh test` | 156 passed；包含结构/背离、研究报告、因果和恢复测试 | 现有NVIDIA研究容器；未改模型权重或冻结回测产物 |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
 
@@ -67,7 +70,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 架构及交接说明已更新并提交；commit `2aefb3f` 的四项CI通过。PR仍因浏览器验证未完成而保持Draft。
 - 浏览器验证需解决：本机保存的初始bootstrap凭据与现存密码不一致。使用独立临时测试账户/隔离测试数据库和新的输出目录完成页面端到端检查；不得重置当前用户密码或更改持久数据库。
 - 已完成Phase2首个开发单元：长期行情独立归档服务、`FETCH_ARCHIVE`后台任务、认证API和图表采集/读取入口；点击后按页写不可变Parquet与SHA256清单，可续传且不影响90天快照。测试运行于mock与隔离库，尚未真实访问Binance，也未浏览器验收。
-- 下一步：先完成技术结构分析契约和因果性测试，再做趋势线/道氏123/波浪候选/背离、多周期趋势打破；然后接整体情绪；随后做单一5秒选中标的刷新和多账户组合回测。注册表中的全部精确核验资产都能按需采集，不对未核验符号推定供应商代码；未收盘K线只能展示，结构信号等收盘确认。
+- 已实现并提交多周期结构归档单元：复用确认摆动点和Dow123，输出各周期趋势线/破位、波浪候选、确认123、RSI顶/底背离，并关联数据SHA256；将事件汇入已有离线HTML/JSON结构报告。目标模块7项测试通过，完整研究套件156项通过；见最新Git记录。
+- 下一步：将结构计算接到长期归档API和交互图表，展示不同周期破位发生/确认时间及趋势线坐标；然后接全市场情绪和多隔离模拟账号/组合回测，再做单一5秒选中标的刷新。注册表中的全部精确核验资产都能按需采集，不对未核验符号推定供应商代码；未收盘K线只能展示，结构信号等收盘确认。
 
 ## 发布交接记录
 

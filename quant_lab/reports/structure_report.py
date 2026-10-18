@@ -1,10 +1,11 @@
 """Multi-period candles, confirmed structure, cycles, Dow123 and wave scenarios."""
 import html
+import hashlib
 import json
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from quant_lab.analysis.market_structure import structure_features,wave_candidate
+from quant_lab.analysis.market_structure import structure_features,wave_candidate,multitimeframe_structure
 from quant_lab.reports.trend_report import load_bars,aggregate
 
 PERIODS=('15m','30m','1h','2h','4h','1d','1w','1mo')
@@ -158,12 +159,13 @@ def analyze_market(symbol,data_dir,out,refresh=False):
         该标的结构分析报告；不把新增观察行情并入冻结训练/回测。
     """
     data_dir=Path(data_dir);out=Path(out);out.mkdir(parents=True,exist_ok=refresh)
-    b=load_bars(data_dir/'bars.csv');source=json.loads((data_dir/'source.json').read_text())
+    b=load_bars(data_dir/'bars.csv');bars_hash=hashlib.sha256((data_dir/'bars.csv').read_bytes()).hexdigest();source=json.loads((data_dir/'source.json').read_text())
     if source.get('symbol')!=symbol:raise ValueError('Analysis source symbol mismatch')
-    report=dict(symbol=symbol,name=NAMES.get(symbol,symbol),source=source,as_of=int(b.close_time.iloc[-1]),latest_price=float(b.close.iloc[-1]),timeframes={},wave_count_is_hypothesis=True,real_orders_enabled=False)
-    sections=[];overview=[]
+    report=dict(symbol=symbol,name=NAMES.get(symbol,symbol),source=source,dataset_sha256=bars_hash,as_of=int(b.close_time.iloc[-1]),latest_price=float(b.close.iloc[-1]),timeframes={},wave_count_is_hypothesis=True,real_orders_enabled=False)
+    sections=[];overview=[];structure_inputs={}
     for tf in PERIODS:
         candles=aggregate(b,tf,'binance_usdm')
+        structure_inputs[tf]=candles
         if len(candles)<5:
             report['timeframes'][tf]=dict(status='INSUFFICIENT_DATA',bars=len(candles),note='不足5根完整K线，不能确认转折/123/波浪或市场周期。')
             section=f'<section id="{tf}"><h2>{tf}</h2><p>仅{len(candles)}根完整K线，样本不足，暂不建立123与波浪判断。图中黑线仅为最新15m快照参考，不是未收盘的大周期K线。</p>'
@@ -221,6 +223,8 @@ def analyze_market(symbol,data_dir,out,refresh=False):
         support=levels['support'][0]['center'] if levels['support'] else None;resistance=levels['resistance'][0]['center'] if levels['resistance'] else None
         section+='<h3>条件情景</h3><p>'+(f'向上：收盘有效突破压力区{resistance:.6g}后，等待下级周期回踩及123确认。' if resistance else '向上：暂无确认上方压力，不虚构突破价位。')+(f' 向下：若收盘跌破支撑区{support:.6g}且反抽失败，再检查下级向下123。' if support else ' 向下：暂无确认下方支撑。')+' 大周期若与小周期相反，先记为分歧；这不是已成交指令。</p>'
         section+=f'<p><a href="{tf}.csv">完整K线、趋势线与确认指标 CSV</a> · <a href="{tf}.svg">独立K线图 SVG</a></p></section>';sections.append(section)
+    structural_report=multitimeframe_structure(structure_inputs,int(b.close_time.iloc[-1])+1,{tf:bars_hash for tf in structure_inputs})
+    report['structural_events']=structural_report
     header='<p><a href="../../analysis/index.html">四标的分析总览</a> · <a href="../../index.html">回测总体报告</a></p>'
     header+=f'<p class="notice">数据截至{local_time(report["as_of"])}（上海时间），为最近90天公开合约K线快照，不是实时行情。支撑压力为区域，波浪为候选，周期为历史描述。</p>'
     if source.get('analysis_only'):header+='<p class="notice">本页观察行情已更新到最新完整K线；模型回测仍保留统一的原90天区间。新增观察K线没有用于本轮拟合或补算收益，不能把本页较新价位当成历史开仓时已知的信息。</p>'
@@ -230,9 +234,14 @@ def analyze_market(symbol,data_dir,out,refresh=False):
     header+=''.join('<tr>'+''.join('<td>'+html.escape(v)+'</td>' for v in row)+'</tr>' for row in overview)+'</table></div>'
     major=[(tf,report['timeframes'][tf]) for tf in ('1h','4h','1d') if report['timeframes'].get(tf,{}).get('status') in ('OK','LIMITED_CONTEXT')]
     header+='<p>重点周期：'+'；'.join(tf+'结构'+TREND[r['structural_trend']] for tf,r in major)+'。多周期出现分歧时，不把小周期反弹自动解释为大趋势反转。</p></section>'
-    footer='<section><h2>方法与来源</h2><p>确认转折需等待右侧两根完整K线，指标与训练均在确认后可见；图上标注原转折位置不代表当时就能提前知道。候选波浪合并连续同类极值，相邻反向转折至少有0.5%价差；计数会随新的确认转折更新。未完成周/月线不参与。月线不足5根时直接报告样本不足。</p>'
+    event_rows=[]
+    for event in structural_report['events'][-16:]:
+        label={'TRENDLINE_BREAK':'趋势线收盘破坏','DOW123_CONFIRMED':'道氏123确认','BULLISH_RSI_DIVERGENCE':'价格-RSI底背离','BEARISH_RSI_DIVERGENCE':'价格-RSI顶背离'}.get(event['kind'],event['kind'])
+        event_rows.append('<tr><td>'+html.escape(event['timeframe'])+'</td><td>'+html.escape(label)+'</td><td>'+local_time(event['occurred_at'])+'</td><td>'+local_time(event['confirmed_at'])+'</td><td>'+html.escape(json.dumps(event['evidence'],ensure_ascii=False,allow_nan=False))+'</td></tr>')
+    event_section='<section><h2>多周期结构事件与背离</h2><p>事件按周期收盘确认时间排序；pivot原点只作回看位置，不表示该处当时已知。每周期使用该周期收盘数据，不将未收盘高周期信息提前泄露。</p><div class="table"><table><tr><th>周期</th><th>事件</th><th>结构发生</th><th>可知确认</th><th>可复核证据</th></tr>'+(''.join(event_rows) if event_rows else '<tr><td colspan="5">当前区间没有已确认的结构破坏、123或RSI背离事件。</td></tr>')+'</table></div></section>'
+    footer='<section><h2>方法与来源</h2><p>确认转折需等待右侧两根完整K线，指标与训练均在确认后可见；图上标注原转折位置不代表当时就能提前知道。RSI背离同时要求价格形成已确认的更高高点/更低低点及RSI相反方向；其确认时间为第二个pivot右侧样本收盘。候选波浪合并连续同类极值，相邻反向转折至少有0.5%价差；计数会随新的确认转折更新。未完成周/月线不参与。月线不足5根时直接报告样本不足。</p>'
     footer+='<p>'+' · '.join(f'<a href="{url}">{html.escape(label)}</a>' for label,url in SOURCES)+'</p><p><a href="report.json">结构分析JSON</a></p></section>'
-    (out/'index.html').write_text(_page(symbol+' · '+report['name']+' · 多周期K线分析',header+''.join(sections)+footer))
+    (out/'index.html').write_text(_page(symbol+' · '+report['name']+' · 多周期K线分析',header+event_section+''.join(sections)+footer))
     (out/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False))
     return report
 
