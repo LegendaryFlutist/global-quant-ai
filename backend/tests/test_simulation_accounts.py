@@ -1,5 +1,7 @@
 """隔离验证多模拟回测配置账号的资金精度与用户边界。"""
 
+from decimal import Decimal
+
 from app.core.db import SessionLocal
 from app.domains.models import SimulationAccount, User
 
@@ -64,7 +66,7 @@ def test_simulation_accounts_preserve_decimal_capital_and_policy_revision(logged
     assert updated.status_code == 200
     assert updated.json()["revision"] == 2
     assert updated.json()["configuration_sha256"] != created["configuration_sha256"]
-    assert updated.json()["initial_equity"] == "9000.25"
+    assert Decimal(updated.json()["initial_equity"]) == Decimal("9000.25")
     assert len(logged_in.get("/api/simulation/accounts").json()) == 2
 
 

@@ -52,6 +52,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 | 2026-10-18 | `docker compose -p quant-lab -f compose.yaml exec -T lab env PYTHONPATH=tests python -m unittest test_market_structure -v` | 7 passed：新增多周期报告前缀不变性、确认后价格-RSI背离；原道氏/波浪/报告测试通过 | 本机控制台；合成OHLCV，不改既有结果 |
 | 2026-10-18 | `python3 scripts/check_docs.py`（新增结构事件函数后） | PASS：432个具名Python函数均有docstring | 本机控制台 |
 | 2026-10-18 | `bash scripts/container.sh test` | 156 passed；包含结构/背离、研究报告、因果和恢复测试 | 现有NVIDIA研究容器；未改模型权重或冻结回测产物 |
+| 2026-10-19 | `bash scripts/platform.sh test`（提交51d82f9之后） | PostgreSQL/Redis隔离服务中30 passed；GitHub Actions失败已定位为测试字符串断言未兼容PostgreSQL `NUMERIC(28,8)` 的八位规范化；改为Decimal数值比较后本机通过。GitHub修复提交CI待运行；1项既有Starlette/httpx弃用提示 | 本机容器控制台；Actions run 39144358043 backend失败日志，仅配置金额小数位断言失败 |
+| 2026-10-19 | `python3 scripts/check_docs.py`、`python3 scripts/check_publish.py`、`git diff --check` | PASS：473个Python函数有docstring；222文件发布扫描通过；差异空白检查通过 | 本机控制台 |
 
 未把本地测试声称为远程CI结果。`/tmp`日志不耐重启，正式阶段结束应归档至`runs/maintenance/`；公开文档仅保留无敏感信息的结果摘要。
 
@@ -74,8 +76,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 多周期结构Web单元已通过PR #11提交`32f1a9e`上的GitHub CI：Python3.11 backend、前端、risk-engine、发布扫描全success；本机npm测试2 passed/生产构建成功、py_compile与437函数文档检查通过。新增API运行容器未在本机重建：Docker BuildKit两次停在ARM64 NumPy wheel下载，第二次约90秒无进度后手动取消（退出码130）；现有服务仍用旧镜像，不声称本机已部署。恢复命令：处理可达的Python包索引/代理后运行`bash scripts/platform.sh up`，随后`bash scripts/platform.sh test`及认证后页面验收。CI结果与限制记录于`docs/platform/phase1.md`。
 - 实时刷新单元提交`cf678fd`及SHA256展示修正提交`dbb3602`已通过PR #11四项GitHub CI（Python3.11后端隔离PostgreSQL/Redis、前端、研究、发布扫描全success）；新服务/API测试包含闭合K线只追加Parquet、未闭合快照独立SHA256、会话/CSRF、无外部网络mock。前端2 passed/构建成功；本机py_compile、448个函数docstring检查通过。实例只在三年缓存视图刷新当前周期，错误退避至60秒。Docker本机镜像仍未重建：BuildKit ARM64 NumPy下载无进度后手动取消，当前运行API/Web还是旧镜像；恢复需在包索引可达后`bash scripts/platform.sh up`、`bash scripts/platform.sh test`和隔离账号浏览器验收。单进程锁适用于当前单机服务；若横向多API副本，需要Redis级共享节流。
 - 总体结构周期摘要提交`9225ecc`的PR #11四项GitHub CI全部success：Python3.11 backend (mock结构、本地隔离测试库)、frontend、risk-engine和publish-hygiene；研究容器`bash scripts/container.sh test`为156 passed，前端2 passed/生产构建，本机`py_compile`、文档检查457函数、发布扫描全过。方向分明确为趋势70%+道氏30%并叠加最近八根周期内确认RSI背离（±0.2）；20根收盘对数波动只作背景；4h/1d冲突或破位为TRANSITIONING，缺档UNKNOWN。来源hash和支撑/压力透明显示；无公网行情读取。
-- WIP（未验证）：模拟账号配置CRUD和Alembic 0002，账号按用户隔离并用NUMERIC保存初始USDT资本、保存核验标的/周期/道氏/波浪/背离/反转/深度模型权重、杠杆/保证金/24小时至21天持仓政策、退出模式、配置hash和修订号；前端可创建/编辑多个策略配置。没有模拟成交/权益账本，也未实现历史回测；后续必须采集真实标记价和资金费率，不能用普通K线伪装合约收益。新增迁移、认证/CSRF、金额精度、所有权、配置约束测试及前端构建尚待完成。
-- 下一步：先验证并提交配置账号迁移/CRUD，再增加标记价格K线和资金费率只读采集/校验；之后复用隔离合约回测器，运行相同数据窗和交易成本的理论组合比较，保存每个账号、各模型及标的净值/回撤/逐笔/持仓时长报告。收益曲线必须清楚标明费用与缺数据，不合成合约结算价格。完成后修复本机包索引下载、重建API/Web镜像并做隔离浏览器端到端验收。注册表精确核验标的按需采集，不推测未核验符号；未收盘K线仅显示，结构信号等收盘确认。
+- WIP（本地已验证、GitHub修复CI待跑）：模拟账号配置CRUD和Alembic 0002，账号按用户隔离并用NUMERIC保存初始USDT资本、保存核验标的/周期/道氏/波浪/背离/反转/深度模型权重、杠杆/保证金/24小时至21天持仓政策、退出模式、配置hash和修订号；前端可创建/编辑多个策略配置。当前修复PostgreSQL对金额显示八位小数时的错误测试断言；`bash scripts/platform.sh test` 30 passed，后端远程CI尚待该修复提交完成。没有模拟成交/权益账本，也未实现历史回测；后续必须采集真实标记价和资金费率，不能用普通K线伪装合约收益。
+- 下一步：确认模拟配置修复提交的GitHub CI通过；再增加标记价格K线和资金费率只读采集/校验；之后复用隔离合约回测器，运行相同数据窗和交易成本的理论组合比较，保存每个账号、各模型及标的净值/回撤/逐笔/持仓时长报告。收益曲线必须清楚标明费用与缺数据，不合成合约结算价格。完成后修复本机包索引下载、重建API/Web镜像并做隔离浏览器端到端验收。注册表精确核验标的按需采集，不推测未核验符号；未收盘K线仅显示，结构信号等收盘确认。
 
 ## 发布交接记录
 
