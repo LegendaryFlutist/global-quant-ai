@@ -71,8 +71,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 浏览器验证需解决：本机保存的初始bootstrap凭据与现存密码不一致。使用独立临时测试账户/隔离测试数据库和新的输出目录完成页面端到端检查；不得重置当前用户密码或更改持久数据库。
 - 已完成Phase2首个开发单元：长期行情独立归档服务、`FETCH_ARCHIVE`后台任务、认证API和图表采集/读取入口；点击后按页写不可变Parquet与SHA256清单，可续传且不影响90天快照。测试运行于mock与隔离库，尚未真实访问Binance，也未浏览器验收。
 - 已实现并提交多周期结构归档单元：复用确认摆动点和Dow123，输出各周期趋势线/破位、波浪候选、确认123、RSI顶/底背离，并关联数据SHA256；将事件汇入已有离线HTML/JSON结构报告。目标模块7项测试通过，完整研究套件156项通过；见最新Git记录。
-- WIP（未验证）：多周期结构API、ECharts趋势线/事件图层已写，新增后端固定NumPy/Pandas依赖；前端测试和构建通过，但Python3.11 API镜像两次都停在ARM64 NumPy wheel下载（第二次BuildKit `--network host`等候约90秒无进度后手动取消，退出码130），不能称API或容器运行通过。已补结构价位字符串序列化，研究NGC环境的Python3.12不能代替API验证。恢复后先重试`docker buildx build --network host --load --tag global-quant-api:phase1 --file backend/Dockerfile .`，成功后运行`bash scripts/platform.sh test`并修复失败；如wheel下载仍停滞，处理Python3.11镜像的可达包索引/代理后再运行测试。
-- 下一步：先验证结构API与前端图层，然后把多周期破位发生/确认时间和趋势线坐标接稳；再接全市场情绪、多隔离模拟账号/组合回测和单一5秒选中标的刷新。注册表中的全部精确核验资产都能按需采集，不对未核验符号推定供应商代码；未收盘K线只能展示，结构信号等收盘确认。
+- 多周期结构Web单元已通过PR #11提交`32f1a9e`上的GitHub CI：Python3.11 backend、前端、risk-engine、发布扫描全success；本机npm测试2 passed/生产构建成功、py_compile与437函数文档检查通过。新增API运行容器未在本机重建：Docker BuildKit两次停在ARM64 NumPy wheel下载，第二次约90秒无进度后手动取消（退出码130）；现有服务仍用旧镜像，不声称本机已部署。恢复命令：处理可达的Python包索引/代理后运行`bash scripts/platform.sh up`，随后`bash scripts/platform.sh test`及认证后页面验收。CI结果与限制记录于`docs/platform/phase1.md`。
+- 下一步：实现单一后台源每5秒刷新当前选中标的并保存新K线、图表显示更新时间/未收盘状态；随后接四个优先标的可解释的整体情绪/周期汇总，再建立隔离可配置模拟账户与逐标的收益/回撤/持仓报告。注册表中的全部精确核验资产按需采集，不推测未核验符号；未收盘K线只展示，结构信号等收盘确认。
 
 ## 发布交接记录
 

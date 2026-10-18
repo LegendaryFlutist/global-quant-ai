@@ -59,6 +59,12 @@ npm run build
 
 接入已有经典道氏和1-2-3作为独立分析器；配置ATR/幅度/成交量/有效期；保存pivot_at与confirmed_at。添加多候选波浪硬规则及失效点、支撑压力、趋势线、多周期共振、手工标注及历史回放。先用确定样本和prefix不变性测试证明无未来数据，再对接Web图表。模型中心与训练调度仍属于Phase3。
 
+### Phase2 多周期结构归档图层（2026-10-18）
+
+新增已认证只读`GET /api/market/structure`：为所选标的读取本地三年归档，不在查看时请求Binance；每周期最多取配置范围内的真实K线，统一按截止时点分析已收盘样本。返回趋势方向/趋势线和破坏状态、确认版道氏1-2-3、Elliott候选、价格-RSI背离、各事件发生与确认时间、证据及归档manifest SHA256。价格类字段以十进制字符串返回。缓存缺周期时返回缺档清单；页面可叠加当前图表周期线和破位/123/背离标记，并显示多周期状态。相关原理保持研究候选，不代表获利概率，也不调用下单接口。
+
+验证：本机前端`npm test`为2 passed且`npm run build`成功；Python语法检查和`python3 scripts/check_docs.py`通过（437个具名函数）；GitHub PR提交`32f1a9e`的Python3.11隔离backend、frontend、risk-engine和publish-hygiene四项CI全部success。受本机Docker下载ARM64 NumPy wheel停滞影响，新增API的本机容器镜像未成功重建；当前已运行容器仍是旧镜像，部署验证需在可访问包索引环境运行`bash scripts/platform.sh up`。5秒选中标的更新、全市场情绪周期汇总及多模拟账户依然未实现。
+
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
 - Docker：Python3.11.17；FastAPI0.143.3；SQLAlchemy2.1.5；RQ2.12.0；PostgreSQL15、Redis6。基础镜像摘要、完整Python约束锁和npm锁文件已固定。
