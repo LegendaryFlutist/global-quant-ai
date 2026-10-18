@@ -69,7 +69,7 @@ npm run build
 
 三年缓存视图打开时仅刷新当前选中标的和周期，UI等待前一请求完成后发出带CSRF的同源POST；后端使用固定无密钥Binance公开GET适配器。已收盘K线作为新的不可变Parquet分段写入长期本地缓存，未收盘快照单独原子替换到`live.json`并附SHA256，页面标记未收盘/最近更新时间；断线保留旧行情并递增退避。行情数据不触发结构信号，结构仍只用闭合K线。
 
-该单元尚未经过Python3.11隔离backend CI和本机容器运行验证；测试使用mock适配器和测试数据库，绝不连接持久业务库或真实Binance。单进程锁可避免同一API进程内manifest竞争；跨API副本的共享刷新节流、多标签浏览器手动验收仍需补充。不要声称本机服务已部署新镜像。
+验证：`cf678fd`的Python3.11隔离backend、frontend、risk-engine与publish-hygiene检查全部success；后端mock覆盖新闭合K线追加、正在形成的K线快照与SHA256、认证和CSRF，前端2 passed且生产构建通过。未访问真实Binance。当前单API进程锁避免本机清单竞争；跨API副本共享节流需在横向部署前增加。受本机Docker下载ARM64 NumPy wheel停滞影响，新容器尚未重建，当前运行容器仍为旧版；网络可达后运行`bash scripts/platform.sh up`、`bash scripts/platform.sh test`，再以隔离账号验收页面和连续刷新。当前功能仅在已选中的三年缓存图表可用，关闭页面/切换到90天缓存后停止轮询。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 

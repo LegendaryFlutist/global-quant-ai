@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。Phase2已实现三年历史K线本地归档和多周期技术结构API/图表（道氏123、趋势线破坏、波浪候选、RSI背离）；PR #11 的后端、前端、研究与发布检查全通过。本机API镜像仍待包下载恢复后重建。下一步为单一选中标的5秒行情刷新；之后做总体情绪与隔离模拟账户。行情只覆盖注册表中精确核验的标的，按需采集，不推测未核验符号。**
+**Phase1及GitHub恢复机制已交付。Phase2已实现三年历史K线本地归档、多周期技术结构API/图表和当前选中标的5秒刷新（道氏123、趋势线破坏、波浪候选、RSI背离、因果收盘确认）；PR #11 后端、前端、研究、发布检查全通过。本机API镜像仍待包下载恢复后重建。下一步为总体情绪/周期汇总和隔离模拟账户。行情只覆盖注册表中精确核验的标的，按需采集，不推测未核验符号。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -72,8 +72,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 已完成Phase2首个开发单元：长期行情独立归档服务、`FETCH_ARCHIVE`后台任务、认证API和图表采集/读取入口；点击后按页写不可变Parquet与SHA256清单，可续传且不影响90天快照。测试运行于mock与隔离库，尚未真实访问Binance，也未浏览器验收。
 - 已实现并提交多周期结构归档单元：复用确认摆动点和Dow123，输出各周期趋势线/破位、波浪候选、确认123、RSI顶/底背离，并关联数据SHA256；将事件汇入已有离线HTML/JSON结构报告。目标模块7项测试通过，完整研究套件156项通过；见最新Git记录。
 - 多周期结构Web单元已通过PR #11提交`32f1a9e`上的GitHub CI：Python3.11 backend、前端、risk-engine、发布扫描全success；本机npm测试2 passed/生产构建成功、py_compile与437函数文档检查通过。新增API运行容器未在本机重建：Docker BuildKit两次停在ARM64 NumPy wheel下载，第二次约90秒无进度后手动取消（退出码130）；现有服务仍用旧镜像，不声称本机已部署。恢复命令：处理可达的Python包索引/代理后运行`bash scripts/platform.sh up`，随后`bash scripts/platform.sh test`及认证后页面验收。CI结果与限制记录于`docs/platform/phase1.md`。
-- WIP（未验证）：三年缓存视图打开时每5秒通过带CSRF POST刷新当前标的/周期；后端仅用Binance公开K线GET，闭合K线追加不可变Parquet，形成中K线单独保存带SHA256的本机live.json，API进程串行更新清单；上游异常显示旧快照并递增退避。前端测试/生产构建、本机py_compile、文档检查通过；新增Python3.11服务/API隔离测试尚未运行，镜像下载同前受ARM64 NumPy wheel停滞影响。推送后须看PR CI；未通过前不勾选TASKS。
-- 下一步：实现单一后台源每5秒刷新当前选中标的并保存新K线、图表显示更新时间/未收盘状态；随后接四个优先标的可解释的整体情绪/周期汇总，再建立隔离可配置模拟账户与逐标的收益/回撤/持仓报告。注册表中的全部精确核验资产按需采集，不推测未核验符号；未收盘K线只展示，结构信号等收盘确认。
+- 实时刷新单元提交`cf678fd`已通过PR #11四项GitHub CI（Python3.11后端隔离PostgreSQL/Redis、前端、研究、发布扫描全success）；新服务/API测试包含闭合K线只追加Parquet、未闭合快照独立SHA256、会话/CSRF、无外部网络mock。前端2 passed/构建成功；本机py_compile、448个函数docstring检查通过。实例只在三年缓存视图刷新当前周期，退避至60秒。Docker本机镜像仍未重建：BuildKit ARM64 NumPy下载无进度后手动取消，当前运行API/Web还是旧镜像；恢复需在包索引可达后`bash scripts/platform.sh up`、`bash scripts/platform.sh test`和隔离账号浏览器验收。单进程锁适用于当前单机服务；若横向多API副本，需要Redis级共享节流。
+- 下一步：接四个优先标的可解释的整体情绪/市场周期汇总（缺数据保留UNKNOWN），再建立可配置且资金隔离的多个模拟账户、按模型组合理论回测并给出总/分标的净值、回撤、操作与持仓报告。完成后重建本机API/Web镜像并做隔离浏览器端到端验收。注册表精确核验标的按需采集，不推测未核验符号；未收盘K线仅显示，结构信号等收盘确认。
 
 ## 发布交接记录
 
