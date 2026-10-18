@@ -65,6 +65,12 @@ npm run build
 
 验证：本机前端`npm test`为2 passed且`npm run build`成功；Python语法检查和`python3 scripts/check_docs.py`通过（437个具名函数）；GitHub PR提交`32f1a9e`的Python3.11隔离backend、frontend、risk-engine和publish-hygiene四项CI全部success。受本机Docker下载ARM64 NumPy wheel停滞影响，新增API的本机容器镜像未成功重建；当前已运行容器仍是旧镜像，部署验证需在可访问包索引环境运行`bash scripts/platform.sh up`。5秒选中标的更新、全市场情绪周期汇总及多模拟账户依然未实现。
 
+### Phase2 当前周期实时刷新（WIP，2026-10-19）
+
+三年缓存视图打开时仅刷新当前选中标的和周期，UI等待前一请求完成后发出带CSRF的同源POST；后端使用固定无密钥Binance公开GET适配器。已收盘K线作为新的不可变Parquet分段写入长期本地缓存，未收盘快照单独原子替换到`live.json`并附SHA256，页面标记未收盘/最近更新时间；断线保留旧行情并递增退避。行情数据不触发结构信号，结构仍只用闭合K线。
+
+该单元尚未经过Python3.11隔离backend CI和本机容器运行验证；测试使用mock适配器和测试数据库，绝不连接持久业务库或真实Binance。单进程锁可避免同一API进程内manifest竞争；跨API副本的共享刷新节流、多标签浏览器手动验收仍需补充。不要声称本机服务已部署新镜像。
+
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
 - Docker：Python3.11.17；FastAPI0.143.3；SQLAlchemy2.1.5；RQ2.12.0；PostgreSQL15、Redis6。基础镜像摘要、完整Python约束锁和npm锁文件已固定。

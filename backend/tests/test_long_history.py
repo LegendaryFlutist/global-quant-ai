@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.core.db import SessionLocal
 from app.domains.models import Asset
 from app.services import long_history
+from app.services import live_market
 
 
 def _raw_candles(start_ms, count, interval_ms=86_400_000):
@@ -326,3 +327,117 @@ def test_structure_api_reports_missing_local_periods_without_network(logged_in, 
     assert logged_in.get(
         "/api/market/structure?asset_id=binance_usdm:BTCUSDT&intervals=15s"
     ).status_code == 422
+
+
+def test_live_refresh_appends_only_closed_rows_and_keeps_open_snapshot(tmp_path):
+    """验证实时刷新只追加已收盘K线，并把当前K线另存为可替换快照。
+
+    Args:
+        tmp_path: pytest提供的隔离临时目录，不读取或改写真实行情缓存。
+
+    Returns:
+        无返回值；数据分段、未收盘标识或SHA256错误会使测试失败。
+    """
+    asset_id = "binance_usdm:BTCUSDT"
+    interval = "15m"
+    start_ms = 1_800_000_000_000
+    start_ms = ((start_ms + 899_999) // 900_000) * 900_000
+    directory = long_history._archive_directory(tmp_path, "BTCUSDT", interval)
+    directory.mkdir(parents=True)
+    first = long_history._parse_closed_row(_raw_candles(start_ms, 1, 900_000)[0], interval, start_ms + 900_000)
+    segment = long_history._persist_page(directory, [first])
+    manifest = {
+        "schema_version": long_history.ARCHIVE_SCHEMA_VERSION,
+        "asset_id": asset_id,
+        "symbol": "BTCUSDT",
+        "interval": interval,
+        "requested_start_ms": start_ms,
+        "first_open_ms": first["open_time"],
+        "last_open_ms": first["open_time"],
+        "last_close_ms": first["close_time"],
+        "row_count": 1,
+        "segments": [segment],
+        "source": "binance_usdm_public_rest_klines",
+        "updated_at_ms": first["close_time"],
+        "status": "LISTING_SHORTER_THAN_THREE_YEARS",
+    }
+    long_history._atomic_manifest(directory, manifest)
+
+    class LiveAdapter:
+        """Return a deterministic response containing one closed and one open bar."""
+
+        def klines(self, symbol, selected_interval, cursor, end):
+            """Simulate public klines without external network access.
+
+            Args:
+                symbol: Exact contract symbol requested by the service.
+                selected_interval: Native candle interval.
+                cursor: Inclusive requested UTC millisecond start.
+                end: Exclusive current-time UTC millisecond bound.
+
+            Returns:
+                A duplicate tail bar, a newly closed bar and a forming bar.
+            """
+            rows = _raw_candles(start_ms, 3, 900_000)
+            return rows[:3]
+
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == asset_id))
+        asset.verification = "VERIFIED"
+        db.commit()
+        result = live_market.refresh_latest_candle(
+            db,
+            asset_id,
+            interval,
+            now_ms=start_ms + 1_800_000 + 1,
+            adapter=LiveAdapter(),
+            root=tmp_path,
+        )
+
+    saved = long_history.read_archive(asset_id, interval, root=tmp_path)
+    snapshot = live_market.read_live_snapshot(asset_id, interval, tmp_path)
+    assert len(result["closed_candles"]) == 1
+    assert result["closed_candles"][0]["open_time"] == start_ms + 900_000
+    assert result["live_candle"]["open_time"] == start_ms + 1_800_000
+    assert result["live_candle"]["is_closed"] is False
+    assert saved["available_count"] == 2
+    assert snapshot["candle"]["is_closed"] is False
+    assert snapshot["stale"] is True
+
+
+def test_live_refresh_api_requires_csrf_and_returns_incremental_snapshot(logged_in, monkeypatch):
+    """验证实时刷新API需要会话和CSRF且只序列化单次公开行情更新结果。
+
+    Args:
+        logged_in: 已通过会话认证并带CSRF请求头的测试客户端。
+        monkeypatch: pytest提供的依赖替换器，阻止测试访问公网。
+
+    Returns:
+        无返回值；认证边界或响应字段错误会使测试失败。
+    """
+    from app.api import market as market_api
+
+    result = {
+        "asset_id": "binance_usdm:BTCUSDT",
+        "interval": "15m",
+        "closed_candles": [],
+        "live_candle": {"open_time": 1, "open": "100", "high": "101", "low": "99", "close": "100.5", "volume": "2", "close_time": 2, "is_closed": False},
+        "updated_at_ms": 2,
+        "research_only": True,
+        "stale": False,
+    }
+    monkeypatch.setattr(market_api, "refresh_latest_candle", lambda *args: result)
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == "binance_usdm:BTCUSDT"))
+        asset.verification = "VERIFIED"
+        db.commit()
+
+    payload = {"asset_id": "binance_usdm:BTCUSDT", "interval": "15m"}
+    response = logged_in.post("/api/market/live", json=payload)
+    assert response.status_code == 200
+    assert response.json()["live_candle"]["is_closed"] is False
+    assert response.json()["research_only"] is True
+    assert logged_in.post("/api/market/live", json=payload, headers={"X-CSRF-Token": "invalid"}).status_code == 403
+    unauthenticated = logged_in.__class__(logged_in.app)
+    assert unauthenticated.post("/api/market/live", json=payload).status_code == 401
+    unauthenticated.close()

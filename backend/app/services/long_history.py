@@ -161,7 +161,7 @@ def _parse_closed_row(raw, interval, now_ms):
     }
 
 
-def _read_manifest(directory, asset_id, symbol, interval):
+def _read_manifest(directory, asset_id, symbol, interval, verify_segments=True):
     """验证归档清单的身份、版本和每个不可变分段的SHA256。
 
     Args:
@@ -169,6 +169,7 @@ def _read_manifest(directory, asset_id, symbol, interval):
         asset_id: 用户请求时的精确数据库资产ID。
         symbol: 已核验的产品代码。
         interval: 归档周期。
+        verify_segments: True校验所有分段；False仅校验路径并验算最新分段。
 
     Returns:
         清单字典；无清单时返回None。
@@ -192,15 +193,19 @@ def _read_manifest(directory, asset_id, symbol, interval):
     ):
         raise ValueError("长期行情清单身份或格式不匹配")
     root = directory.resolve()
-    for segment in manifest["segments"]:
+    last_index = len(manifest["segments"]) - 1
+    for index, segment in enumerate(manifest["segments"]):
         name = segment.get("file", "")
         if not name or Path(name).name != name or not name.endswith(".parquet"):
             raise ValueError("长期行情分段路径无效")
         target = (root / name).resolve()
         if target.parent != root or not target.is_file():
             raise ValueError("长期行情分段文件缺失")
-        digest = hashlib.sha256(target.read_bytes()).hexdigest()
-        if digest != segment.get("sha256"):
+        if verify_segments or index == last_index:
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        else:
+            digest = segment.get("sha256")
+        if (verify_segments or index == last_index) and digest != segment.get("sha256"):
             raise ValueError("长期行情分段SHA256不匹配")
     return manifest
 

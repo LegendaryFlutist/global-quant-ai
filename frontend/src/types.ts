@@ -28,6 +28,7 @@ export interface Candle {
   low: string;
   close: string;
   volume: string;
+  is_closed?: boolean;
 }
 export interface CandleResult {
   asset_id: string;
@@ -55,6 +56,21 @@ export interface ArchiveResult {
   segment_sha256?: string;
   research_only: boolean;
   available?: boolean;
+}
+/** Authenticated public refresh result; open candles remain display-only until close. */
+export interface LiveMarketResult {
+  asset_id: string;
+  interval: string;
+  closed_candles: Candle[];
+  live_candle: Candle | null;
+  last_closed_at_ms?: number | null;
+  updated_at_ms?: number;
+  archive_sha256?: string;
+  source?: string;
+  research_only: boolean;
+  stale: boolean;
+  refresh_error?: string;
+  new_segments?: { sha256: string }[];
 }
 /** Per-cycle structure output; all price values cross the API as Decimal strings. */
 export interface StructureLine {

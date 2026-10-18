@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ArchiveResult, Asset, CandleResult, Interval, StructureResult } from "../types";
+import type { ArchiveResult, Asset, Candle, CandleResult, Interval, LiveMarketResult, StructureResult } from "../types";
 import { api, date, post } from "../services/api";
 import PriceChart from "../components/PriceChart";
 /** 按标的/周期读取已校验历史；切换后忽略旧请求，采集作为独立后台任务。 */
@@ -22,6 +22,7 @@ export default function ChartPage({
   const [data, setData] = useState<CandleResult | null>(null);
   const [archive, setArchive] = useState<ArchiveResult | null>(null);
   const [structure, setStructure] = useState<StructureResult | null>(null);
+  const [live, setLive] = useState<LiveMarketResult | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,6 +49,7 @@ export default function ChartPage({
     setData(null);
     setArchive(null);
     setStructure(null);
+    setLive(null);
     const query = `?asset_id=${encodeURIComponent(assetId)}&interval=${interval}&limit=10000`;
     if (showArchive) {
       const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])]
@@ -85,6 +87,57 @@ export default function ChartPage({
       active = false;
     };
   }, [assetId, interval, reload, showArchive]);
+  useEffect(() => {
+    if (!showArchive || archive?.available !== true) return;
+    let active = true;
+    let timer = 0;
+    let retryDelay = 5000;
+    /** Refresh the selected verified cycle, waiting five seconds after each request settles. */
+    async function refreshSelectedCycle() {
+      try {
+        const result = await post<LiveMarketResult>("/market/live", { asset_id: assetId, interval });
+        if (!active) return;
+        retryDelay = 5000;
+        setLive(result);
+        if (result.closed_candles.length) {
+          setArchive((previous) => {
+            if (!previous?.candles) return previous;
+            const byOpen = new Map<number, Candle>(previous.candles.map((candle) => [candle.open_time, candle]));
+            result.closed_candles.forEach((candle) => byOpen.set(candle.open_time, candle));
+            const candles = [...byOpen.values()].sort((left, right) => left.open_time - right.open_time).slice(-10000);
+            return {
+              ...previous,
+              candles,
+              available_count: (previous.available_count ?? candles.length) + result.closed_candles.length,
+              last_close_ms: result.last_closed_at_ms ?? previous.last_close_ms,
+              updated_at_ms: result.updated_at_ms ?? previous.updated_at_ms,
+              segment_sha256: result.new_segments?.length
+                ? `${previous.segment_sha256 ?? ""}${result.new_segments.map((segment) => segment.sha256).join("")}`
+                : previous.segment_sha256,
+            };
+          });
+          const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])].slice(0, 10).join(",");
+          void api<StructureResult>(`/market/structure?asset_id=${encodeURIComponent(assetId)}&intervals=${encodeURIComponent(relatedIntervals)}&limit=10000`)
+            .then((value) => { if (active) setStructure(value); })
+            .catch(() => { /* Keep the last confirmed analysis visible during an outage. */ });
+        }
+      } catch (e) {
+        retryDelay = Math.min(retryDelay * 2, 60000);
+        if (active) {
+          setLive((previous) => previous
+            ? { ...previous, stale: true, refresh_error: (e as Error).message }
+            : { asset_id: assetId, interval, closed_candles: [], live_candle: null, research_only: true, stale: true, refresh_error: (e as Error).message });
+        }
+      } finally {
+        if (active) timer = window.setTimeout(() => void refreshSelectedCycle(), retryDelay);
+      }
+    }
+    void refreshSelectedCycle();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [archive?.available, assetId, interval, showArchive]);
   /** 创建最近90天公开行情任务；不把入队成功当作采集成功。 */
   async function collect() {
     try {
@@ -121,6 +174,9 @@ export default function ChartPage({
     }
   }
   const chartCandles = showArchive ? archive?.candles ?? [] : data?.candles ?? [];
+  const displayCandles: Candle[] = live?.live_candle
+    ? [...chartCandles.filter((candle) => candle.open_time !== live.live_candle?.open_time), live.live_candle]
+    : chartCandles;
   const currentStructure = structure?.timeframes[interval];
   const currentEvents = structure?.events.filter((event) => event.timeframe === interval) ?? [];
   return (
@@ -129,7 +185,7 @@ export default function ChartPage({
         <div>
           <span className="eyebrow">MARKET WORKSPACE</span>
           <h1>多周期行情</h1>
-          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示</p>
+          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示；三年缓存打开后每5秒更新当前周期</p>
         </div>
         <button onClick={() => setReload((n) => n + 1)}>重新读取缓存</button>
       </header>
@@ -211,14 +267,14 @@ export default function ChartPage({
         >
           <span>
             {showArchive
-              ? `长期缓存截止：${date(archive?.last_close_ms, timezone)} · 覆盖状态 ${archive?.status ?? "未缓存"}`
+              ? `长期缓存截止：${date(archive?.last_close_ms, timezone)} · 覆盖状态 ${archive?.status ?? "未缓存"} · ${live?.stale ? "实时更新中断，显示旧缓存" : live ? `更新时间 ${date(live.updated_at_ms, timezone)}` : "等待实时更新"}`
               : `数据截止：${date(data?.as_of_ms, timezone)}`} · 当前显示{" "}
-            {chartCandles.length} 根 / 可用{" "}
+            {displayCandles.length} 根 / 可用{" "}
             {showArchive ? archive?.available_count ?? 0 : data?.available_count ?? 0} 根
           </span>
           <span>
             {showArchive
-              ? `本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
+              ? `${live?.live_candle && !live.stale ? "实时K线未收盘；结构分析只使用已收盘K线 · " : ""}本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
               : `原始周期 ${data?.source_interval ?? "—"} · 排除不完整周期 ${data?.excluded_incomplete_buckets ?? 0} 个`}
           </span>
         </div>

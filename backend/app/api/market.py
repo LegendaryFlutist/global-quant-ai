@@ -1,17 +1,51 @@
 """Phase 1 market API."""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 from app.core.db import get_db
 from app.core.security import current_user
 from app.domains.models import User, MarketData
 from app.services.market_data import candles, MINUTES
-from app.adapters.public_binance import INTERVALS
+from app.adapters.public_binance import INTERVALS, PublicDataError
 from app.services.long_history import read_archive, validate_archive_identity
+from app.services.live_market import read_live_snapshot, refresh_latest_candle
 from app.services.structure_analysis import STRUCTURE_INTERVALS, analyze_archived_structure
 
 
 router=APIRouter()
+
+class LiveRefreshRequest(BaseModel):
+    """Validated selection for one current authenticated chart refresh."""
+    asset_id:str
+    interval:str='15m'
+
+@router.post('/api/market/live')
+def market_live(payload:LiveRefreshRequest,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """经CSRF校验后刷新当前图表周期并把新闭合K线追加到本机归档。
+
+    Args:
+        payload: 请求中的精确资产ID和原生K线周期。
+        user: 认证依赖已经校验的当前用户。
+        db: 本次调用的SQLAlchemy数据库会话。
+
+    Returns:
+        最近新增闭合K线、当前未闭合K线、更新时间和本地manifest哈希。
+
+    Raises:
+        HTTPException: CSRF/身份失败、未核验标的、缺少归档或上游临时不可用。
+    """
+    asset_id,interval=payload.asset_id,payload.interval
+    try:
+        validate_archive_identity(db,asset_id,interval)
+        return refresh_latest_candle(db,asset_id,interval)
+    except PublicDataError as exc:
+        snapshot=read_live_snapshot(asset_id,interval)
+        if snapshot:
+            return {'asset_id':asset_id,'interval':interval,'live_candle':snapshot.get('candle'),'closed_candles':[],'updated_at_ms':snapshot.get('fetched_at_ms'),'source':snapshot.get('source'),'research_only':True,'stale':True,'refresh_error':str(exc)}
+        raise HTTPException(503,str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from None
 
 @router.get('/api/market/structure')
 def market_structure(asset_id:str,intervals:str=Query('15m,1h,4h,1d',max_length=100),as_of_ms:int|None=None,limit:int=Query(10000,ge=1,le=200000),user:User=Depends(current_user),db:DBSession=Depends(get_db)):

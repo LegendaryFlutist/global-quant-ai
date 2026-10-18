@@ -1,6 +1,6 @@
 # 项目进度与会话交接
 
-更新时间：2026-10-18（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
+更新时间：2026-10-19（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
 
 ## 当前阶段
 
@@ -72,6 +72,7 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 已完成Phase2首个开发单元：长期行情独立归档服务、`FETCH_ARCHIVE`后台任务、认证API和图表采集/读取入口；点击后按页写不可变Parquet与SHA256清单，可续传且不影响90天快照。测试运行于mock与隔离库，尚未真实访问Binance，也未浏览器验收。
 - 已实现并提交多周期结构归档单元：复用确认摆动点和Dow123，输出各周期趋势线/破位、波浪候选、确认123、RSI顶/底背离，并关联数据SHA256；将事件汇入已有离线HTML/JSON结构报告。目标模块7项测试通过，完整研究套件156项通过；见最新Git记录。
 - 多周期结构Web单元已通过PR #11提交`32f1a9e`上的GitHub CI：Python3.11 backend、前端、risk-engine、发布扫描全success；本机npm测试2 passed/生产构建成功、py_compile与437函数文档检查通过。新增API运行容器未在本机重建：Docker BuildKit两次停在ARM64 NumPy wheel下载，第二次约90秒无进度后手动取消（退出码130）；现有服务仍用旧镜像，不声称本机已部署。恢复命令：处理可达的Python包索引/代理后运行`bash scripts/platform.sh up`，随后`bash scripts/platform.sh test`及认证后页面验收。CI结果与限制记录于`docs/platform/phase1.md`。
+- WIP（未验证）：三年缓存视图打开时每5秒通过带CSRF POST刷新当前标的/周期；后端仅用Binance公开K线GET，闭合K线追加不可变Parquet，形成中K线单独保存带SHA256的本机live.json，API进程串行更新清单；上游异常显示旧快照并递增退避。前端测试/生产构建、本机py_compile、文档检查通过；新增Python3.11服务/API隔离测试尚未运行，镜像下载同前受ARM64 NumPy wheel停滞影响。推送后须看PR CI；未通过前不勾选TASKS。
 - 下一步：实现单一后台源每5秒刷新当前选中标的并保存新K线、图表显示更新时间/未收盘状态；随后接四个优先标的可解释的整体情绪/周期汇总，再建立隔离可配置模拟账户与逐标的收益/回撤/持仓报告。注册表中的全部精确核验资产按需采集，不推测未核验符号；未收盘K线只展示，结构信号等收盘确认。
 
 ## 发布交接记录
