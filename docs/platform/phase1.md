@@ -95,7 +95,7 @@ Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存�
 
 资源检查（2026-10-19）：宿主机报告121 GiB内存、105 GiB可用、15 GiB swap空闲；`/home`所在卷3.7 TiB、可用约1.0 TiB；本地行情目录约1.2 MiB。平台Compose已运行PostgreSQL持久卷、Redis AOF和RQ worker。当前观测没有显示缓存或磁盘压力；Redis/RQ已承担当下队列需求，暂不增加RabbitMQ/Kafka。随三年行情增长再按磁盘、Parquet增长、Redis内存和队列积压监控调整。
 
-验证（2026-10-19）：`bash scripts/platform.sh test`隔离PostgreSQL/Redis中48 passed、1项既有Starlette TestClient弃用提示；包括账户4小时配置接受、1小时策略回测、逆势模式配置、跨期限字段与未来样本前缀不变性。`cd frontend && npm test && npm run build`为2 passed且生产构建成功；`python3 scripts/check_docs.py`为529个具名函数全通过，`python3 -m compileall -q backend/app backend/tests`成功。尚未接入新的深度模型，也没有真实三年行情上的预测校准或盈利结论。
+验证（2026-10-19）：`bash scripts/platform.sh test`隔离PostgreSQL/Redis中48 passed、1项既有Starlette TestClient弃用提示；包括账户4小时配置接受、1小时策略回测、逆势模式配置、跨期限字段与未来样本前缀不变性。`cd frontend && npm test && npm run build`为2 passed且生产构建成功；`python3 scripts/check_docs.py`为529个具名函数全通过，`python3 -m compileall -q backend/app backend/tests`成功。提交`3d22cac`的GitHub Actions run `39195935406`中backend、frontend、risk-engine、publish-hygiene四项全success；本机`bash scripts/platform.sh up`后API数据库/Redis健康且首页HTTP 200。尚未接入新的深度模型，也没有真实三年行情上的预测校准或盈利结论。
 
 ### 按需采集合约标记价格与资金费（2026-10-19）
 

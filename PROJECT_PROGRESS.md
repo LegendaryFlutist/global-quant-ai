@@ -98,8 +98,8 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 系统容量初检：`free -h`可用约105 GiB内存、空闲swap约15 GiB，`df -h /home`可用约1.0 TiB，`.runtime/market-data`约1.2 MiB；Compose现有PostgreSQL、Redis AOF、RQ worker均running。暂不加MQ；需随三年采集增长监控。
 - 验证（实际运行，2026-10-19）：`bash scripts/platform.sh test`：48 passed，1项既有Starlette TestClient/httpx弃用提示；包括4小时配置合法、1小时持仓回测、跨期限情景字段、追加未来K线前缀不变、事后真实价格与缺失未来数据处理。`cd frontend && npm test && npm run build`：2 passed，TypeScript/Vite生产构建成功。`python3 scripts/check_docs.py`：529个具名Python函数均有文档；`python3 -m compileall -q backend/app backend/tests`成功。
 - 尚未完成：本地浏览器以隔离账号验收编辑/运行报告全流程；真实三年行情尚未重新采集，未校准情景覆盖率和方向预测；Web深度模型注册/加载与架构对比仍未实现。未宣称任何新模型获利或优于既有模型。
-- 当前以上代码与文档尚未提交、未推送、未触发GitHub CI。最新已提交仍为`7cbf115`；`.local/`为用户/工具已有的未跟踪目录，必须保持不变、不加入提交。
-- 下一步：完成`git diff --check`和staged发布扫描；以显式文件路径运行`bash scripts/checkpoint.sh "feat: add configurable multi-horizon simulation scoring" <files...>`创建本地提交。因用户此前授权GitHub维护，再推送当前分支并记录PR #11 CI状态。后续浏览器隔离账号验证、真实缓存覆盖确认与样本外深度模型基准分为独立开发单元。
+- 开发单元已提交：`3d22cac feat: add configurable multi-horizon simulation scoring`，推送至PR #11分支。GitHub Actions run `39195935406` 的backend、frontend、risk-engine、publish-hygiene四项检查全部success（核验时间2026-10-19 UTC）。本机`bash scripts/platform.sh up`重建API/Web，服务健康；GPU lab、PostgreSQL、Redis、worker持续运行。`.local/`为用户/工具已有的未跟踪目录，保持不变且未加入提交。
+- 下一步：用隔离测试账号完成页面创建/修改/回测/逐笔查看浏览器验收；用户显式采集真实数据后确认覆盖并运行回测，记录校准误差；另行实现并比较GRU、VSN+LSTM和其他候选的冻结滚动样本外实验。恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && bash scripts/platform.sh status`；运行测试用`bash scripts/platform.sh test`，前端用`cd frontend && npm test && npm run build`。
 
 ## 发布交接记录
 
