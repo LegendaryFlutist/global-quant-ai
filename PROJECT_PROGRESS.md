@@ -165,3 +165,11 @@ bash scripts/platform.sh status
 - 未完成：新规则策略尚未生成新报告；13标的都跑出可信结果仍需公开数据访问和每标的冻结评估计划。Web模型训练和将重复多周期背离/底部钝化作为训练特征仍属Phase3规划；已有分析提供确认背离、周期结构和确认支撑，但不生成未经验证的底部预测价格。
 
 恢复本单元：`bash scripts/resume.sh`；后端隔离测试 `bash scripts/platform.sh test`；前端 `cd frontend && npm test && npm run build`；研究测试 `bash scripts/container.sh test`；文档 `python3 scripts/check_docs.py`；状态 `git status --short --branch && git log -5 --oneline`。
+
+## 当前开发单元（2026-10-19）：容器代理接入
+
+- 已实现：Compose为API/worker增加可选HTTP/HTTPS/SOCKS代理环境变量，以及`host.docker.internal`网关映射；不在代码或Git中保存代理地址/凭据。私有配置键为`PLATFORM_HTTP_PROXY`、`PLATFORM_HTTPS_PROXY`、`PLATFORM_ALL_PROXY`和`PLATFORM_NO_PROXY`。
+- 已验证：`docker compose ... config --quiet`通过；按要求执行`bash scripts/platform.sh up`完成三镜像重建/平台服务更新；API/Web health均healthy，首页HTTP 200，worker内`host.docker.internal`解析到宿主机网关`172.17.0.1`。
+- 未解决：worker当前未配置代理；宿主机代理只监听127.0.0.1:7897，对Binance的代理请求返回HTTP 451。用户需让代理仅在Docker网桥可达接口监听，并允许`fapi.binance.com:443`，之后在私有运行环境文件设置`PLATFORM_HTTPS_PROXY=http://host.docker.internal:7897`并重新运行`bash scripts/platform.sh up`。尚未验证通过代理获取Binance数据。
+- 本单元未触碰数据库或个人任务；无GitHub Actions状态。本次代码/Compose修改后已重建Docker服务。
+- 恢复：`bash scripts/resume.sh`；配置后启动 `bash scripts/platform.sh up`；查看健康 `bash scripts/platform.sh status`。不要打印`.runtime/platform.env`。

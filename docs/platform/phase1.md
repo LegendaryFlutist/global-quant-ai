@@ -43,6 +43,7 @@ npm run build
 ## 已知边界
 
 - 当前容器对Binance域名DNS解析失败，宿主机先前公开REST探测也曾返回451；公开行情自动更新存在网络/上游访问限制；任务显示实际失败原因，13个合约元数据快照与四个真实历史行情仍可研究。其他登记资产无行情时显示缺失。
+- 需要使用宿主机代理时，可在私有`.runtime/platform.env`中配置`PLATFORM_HTTP_PROXY`、`PLATFORM_HTTPS_PROXY`、可选`PLATFORM_ALL_PROXY`及`PLATFORM_NO_PROXY`。API/worker可通过`host.docker.internal`访问宿主机网桥；代理服务需监听Docker可达的接口，并限制为仅Docker网段可访问。代理仍须允许`fapi.binance.com:443`；451是代理策略拒绝，容器配置不能自行解除。
 - 本机8080是HTTP，仅绑定127.0.0.1。远程访问需要SSH转发或自行配置TLS/私网代理；使用HTTPS时配置Secure Cookie和Origin。
 - 图表历史以本地已收盘行情为主，不提供逐笔盘口或WebSocket。选中三年缓存视图时每五秒刷新当前标的/周期，并独立标记未收盘K线；1m/3m/5m需各自公开采集，不从15m伪造。
 - 总体周期摘要仅使用本地结构数据；无新闻、宏观事件或跨市场传导源。多模拟配置现可读取本地已归档数据生成离线回测权益/逐笔文件；没有已采集行情时不会生成模拟收益，离线既有回测与原模型结果未因本平台改写。
