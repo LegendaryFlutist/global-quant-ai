@@ -55,6 +55,17 @@ export default function PriceChart({
     const macdValues = macd(candles);
     const td = tdSetup(candles);
     const macdDivergenceEvents = showMACD ? macdDivergences(analysisCandles) : [];
+    /** Find the first candle closing at or after an event time in O(log n) on sorted UTC candles. */
+    function candleAtOrAfter(time: number) {
+      let low = 0;
+      let high = candles.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (candles[middle].close_time < time) low = middle + 1;
+        else high = middle;
+      }
+      return candles[low];
+    }
     const lineSeries = (["support", "resistance"] as const).flatMap((name) => {
       const line = structure?.trend_lines?.[name];
       if (!line || line.anchors.length < 2) return [];
@@ -94,45 +105,59 @@ export default function PriceChart({
         label: { show: true, formatter: (params: { value: (string | number)[] }) => String(params.value[2]), position: direction === "buy" ? "bottom" : "top", color: "#dbe6f7", fontSize: 8 },
       }] : [];
     }) : [];
-    const waveMarkers = (structure?.wave?.points ?? []).flatMap((point, index) => {
-      const target = candles.find((candle) => candle.close_time >= Number(point.time));
+    const wavePoints = (structure?.wave?.points ?? []).flatMap((point, index) => {
+      const target = candleAtOrAfter(Number(point.time));
       return target ? [{
-        name: "波浪候选",
-        type: "scatter" as const,
-        data: [[date(target.open_time, timezone), Number(point.price)]],
-        symbol: "diamond",
-        symbolSize: 9,
-        itemStyle: { color: "#c38cff" },
-        label: { show: true, formatter: structure?.wave?.labels?.[index] ?? "波", position: "top", color: "#d6b8ff", fontSize: 10 },
+        time: date(target.open_time, timezone),
+        price: Number(point.price),
+        label: structure?.wave?.labels?.[index] ?? "波",
       }] : [];
     });
-    const markers = events.flatMap((event) => {
-      const target = candles.find((c) => c.close_time >= event.occurred_at);
-      if (!target) return [];
-      const isBullish = event.kind.includes("BULLISH") ||
-        (event.kind === "DOW123_CONFIRMED" && event.evidence.direction === 1);
-      const isBreak = event.kind === "TRENDLINE_BREAK";
-      const label = isBreak ? "破位" : event.kind === "DOW123_CONFIRMED" ? "123" :
-        event.kind === "BULLISH_RSI_DIVERGENCE" ? "底背离" : "顶背离";
-      return [{
-        name: label,
+    // Keep ECharts series count bounded: a separate series for every event freezes browsers on long histories.
+    const eventGroups = [
+      { name: "趋势破位", match: (event: StructureEvent) => event.kind === "TRENDLINE_BREAK", label: "破位", color: "#f2ae52", symbol: "diamond" as const, position: "top" as const },
+      { name: "道氏123", match: (event: StructureEvent) => event.kind === "DOW123_CONFIRMED", label: "123", color: "#64a7ff", symbol: "circle" as const, position: "bottom" as const },
+      { name: "底背离", match: (event: StructureEvent) => event.kind === "BULLISH_RSI_DIVERGENCE", label: "底背离", color: "#47d1a2", symbol: "circle" as const, position: "bottom" as const },
+      { name: "顶背离", match: (event: StructureEvent) => event.kind === "BEARISH_RSI_DIVERGENCE", label: "顶背离", color: "#d87cf2", symbol: "circle" as const, position: "top" as const },
+    ];
+    const markers = eventGroups.flatMap((group) => {
+      const points = events.filter(group.match).flatMap((event) => {
+        const target = candleAtOrAfter(event.occurred_at);
+        return target ? [[date(target.open_time, timezone), Number(target.close)]] : [];
+      });
+      return points.length ? [{
+        name: group.name,
         type: "scatter" as const,
-        data: [[date(target.open_time, timezone), Number(target.close)]],
-        symbol: isBreak ? "diamond" : "circle",
-        symbolSize: 11,
-        itemStyle: { color: isBullish ? "#64a7ff" : isBreak ? "#f2ae52" : "#d87cf2" },
-        label: { show: true, formatter: label, position: isBullish ? "bottom" : "top", color: "#dbe6f7", fontSize: 10 },
-      }];
+        data: points,
+        symbol: group.symbol,
+        symbolSize: 9,
+        itemStyle: { color: group.color },
+        label: { show: true, formatter: group.label, position: group.position, color: "#dbe6f7", fontSize: 9 },
+      }] : [];
     });
-    const macdMarkers = macdDivergenceEvents.map((event) => ({
-      name: event.kind === "bullish" ? "MACD底背驰" : "MACD顶背驰",
+    const macdMarkers = (["bullish", "bearish"] as const).flatMap((kind) => {
+      const points = macdDivergenceEvents.filter((event) => event.kind === kind).map((event) => [
+        date(analysisCandles[event.index].open_time, timezone), event.price,
+      ]);
+      return points.length ? [{
+        name: kind === "bullish" ? "MACD底背驰" : "MACD顶背驰",
+        type: "scatter" as const,
+        data: points,
+        symbol: "diamond",
+        symbolSize: 10,
+        itemStyle: { color: kind === "bullish" ? "#47d1a2" : "#ef8090" },
+        label: { show: true, formatter: kind === "bullish" ? "MACD底背" : "MACD顶背", position: kind === "bullish" ? "bottom" : "top", color: "#dbe6f7", fontSize: 8 },
+      }] : [];
+    });
+    const waveMarkers = wavePoints.length ? [{
+      name: "波浪候选",
       type: "scatter" as const,
-      data: [[date(analysisCandles[event.index].open_time, timezone), event.price]],
+      data: wavePoints.map((point) => [point.time, point.price, point.label]),
       symbol: "diamond",
-      symbolSize: 12,
-      itemStyle: { color: event.kind === "bullish" ? "#47d1a2" : "#ef8090" },
-      label: { show: true, formatter: event.kind === "bullish" ? "MACD底背" : "MACD顶背", position: event.kind === "bullish" ? "bottom" : "top", color: "#dbe6f7", fontSize: 9 },
-    }));
+      symbolSize: 9,
+      itemStyle: { color: "#c38cff" },
+      label: { show: true, formatter: (params: { value: (string | number)[] }) => String(params.value[2]), position: "top", color: "#d6b8ff", fontSize: 10 },
+    }] : [];
     chart.setOption({
       backgroundColor: "#111927",
       animation: false,

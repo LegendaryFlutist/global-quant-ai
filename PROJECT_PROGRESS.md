@@ -194,3 +194,12 @@ bash scripts/platform.sh status
 - 功能提交`58528d5 feat: add realtime chart refresh and technical overlays`已推送至`feature/phase2-market-structure`。GitHub Actions状态未核验（本机未安装GitHub CLI）；API/Web/GPU runner镜像均已重建，健康检查通过。
 - 下一步：经本机浏览器登录Chart页，检查MA周期输入、趋势线/TD/MACD/布林/波浪显示和刷新陈旧状态；待代理允许`fapi.binance.com:443`后验证真实闭合K线更新与页面多周期分析重算。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch`；后端 `bash scripts/platform.sh test`；前端 `cd frontend && npm test && npm run build`；文档 `python3 scripts/check_docs.py`；平台重建 `bash scripts/platform.sh up`。
+
+## 当前开发单元（2026-10-19）：K线载入后浏览器黑屏
+
+- 现象证据：Web访问日志显示K线(约100 KB)及多周期结构事件(约0.6 MB)均返回200，实时行情因上游网络失败返回503并由页面保留缓存；因此黑屏发生在前端图表渲染路径，不是缓存加载失败。
+- 根因与修复：`PriceChart`曾为每个结构事件和每个MACD背驰单独创建一个ECharts series，历史样本增长会制造大量series并使浏览器卡死。现在按破位/123/底背离/顶背离聚合为最多4个series，MACD背驰最多2个series，波浪候选合并为1个series；事件定位改用排序K线的二分查找，避免逐事件线性扫描。
+- 验证：`cd frontend && npm test && npm run build`（6 tests passed，TypeScript/Vite生产构建成功）；`python3 scripts/check_docs.py`（569个Python函数通过）；`git diff --check`通过。随后运行`bash scripts/platform.sh up`完成Web/API/runner镜像构建和平台重启；首页HTTP 200，`/api/health`返回`status=ok`、数据库和Redis已连接。
+- 限制：当前无可接管的交互浏览器会话，未做用户浏览器实际截图验收；Binance REST仍有503，图表显示缓存属于预期降级行为。
+- 下一步：用户刷新 http://127.0.0.1:8080 并重新打开多周期行情；如仍复现，记录浏览器控制台第一条异常及标的/周期用于进一步定位。
+- 恢复：`bash scripts/resume.sh`；前端 `cd frontend && npm test && npm run build`；部署 `bash scripts/platform.sh up`；健康检查 `curl -sS http://127.0.0.1:8080/api/health`。
