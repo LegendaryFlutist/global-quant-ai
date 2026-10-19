@@ -160,7 +160,8 @@ bash scripts/platform.sh status
 - 多空核对：本地既有 `priority_structure_gru_20261018` 归档的四标的、多种旧模型报告均含 direction=-1 空单；例如 pattern_only 的 BTC/KORU/CL/NVDA 归档分别有154/259/153/193笔空单。该历史只读归档不是本次规则策略的结果。
 - 部署：`bash scripts/platform.sh up`重新构建并重启API、Web和GPU runner；API健康，`http://127.0.0.1:8080`返回HTTP 200。当前真实覆盖为4/13：BTC、KORU、CL、NVDA通过来源/哈希/冻结边界核验。不能通过更换数据源、跳过TLS或伪造行情解决；待代理/网络策略允许访问Binance公开REST后重试。当前新增标的仅作待采集状态。
 - 网络阻塞：当前运行环境主机直连 Binance DNS 查询失败；已配置代理请求返回HTTP 451。
-- 测试：`bash scripts/platform.sh test` 52 passed（1条既有Starlette/httpx弃用提示）；`cd frontend && npm test && npm run build` 2 passed且构建成功；`bash scripts/container.sh test` 157 passed；`python3 scripts/check_docs.py` 562个函数通过；`git diff --check`通过。CI尚未触发。
+- 测试：`bash scripts/platform.sh test` 52 passed（1条既有Starlette/httpx弃用提示）；`cd frontend && npm test && npm run build` 2 passed且构建成功；`bash scripts/container.sh test` 157 passed；`python3 scripts/check_docs.py` 562个函数通过；`git diff --check`通过。提交`ca2d619`已推送至GitHub功能分支；本机没有安装`gh` CLI，未核验GitHub Actions状态。
+- 最近提交：`ca2d619 feat: streamline rule backtests and symbol coverage`，已推送分支`feature/phase2-market-structure`；GitHub CI状态未知。
 - 未完成：新规则策略尚未生成新报告；13标的都跑出可信结果仍需公开数据访问和每标的冻结评估计划。Web模型训练和将重复多周期背离/底部钝化作为训练特征仍属Phase3规划；已有分析提供确认背离、周期结构和确认支撑，但不生成未经验证的底部预测价格。
 
 恢复本单元：`bash scripts/resume.sh`；后端隔离测试 `bash scripts/platform.sh test`；前端 `cd frontend && npm test && npm run build`；研究测试 `bash scripts/container.sh test`；文档 `python3 scripts/check_docs.py`；状态 `git status --short --branch && git log -5 --oneline`。
