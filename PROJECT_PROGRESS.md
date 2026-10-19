@@ -227,6 +227,6 @@ bash scripts/platform.sh status
 - 实际数据覆盖检查（只读）：资产目录80项；数据库现有13条资产/周期行情记录，全部为15m，DuckDB加载后13个数据文件SHA256全部通过，共112,307根K线。13项是已精确登记的Binance USDT永续代码；另外67项分布于美股、ETF、KRX/HK/CN、商品、外汇及研究指标等类别，不能由Binance USDM符号推断。当前Binance REST仍受DNS/代理HTTP 451限制，因此本轮没有拉取新行情；这些资产要继续接入须逐个绑定合适的公开行情源和产品别名。
 - 验证（2026-10-19）：DuckDB ARM64 Python 3.11 wheel SHA256核验通过，版本1.5.6；`bash scripts/platform.sh up`成功构建API/Web/NGC runner并重启服务；`bash scripts/platform.sh test`最终结果63 passed、1条既有Starlette/httpx弃用警告；`python3 scripts/check_docs.py`结果592个具名函数通过；相关`compileall`和`git diff --check`通过；API health返回数据库连接及Redis健康。只读重新核验13个行情文件后，DuckDB仍读取112,307根15m K线且SHA256全部匹配。
 - 未解决：本单元建立统一读写底座，但“80项全量接入”没有完成。剩余资产缺少可信供应商/产品代码映射；行情覆盖页面、逐笔/订单簿采集也仍待后续模块实现。当前未发生新行情拉取；Binance网络阻断不能靠私有只读App Key修复。
-- Git状态：本单元验证后待提交；随后记录实际本地提交、分支推送和CI状态。未查看或输出`.runtime`密钥；`.local/`是已有未跟踪用户目录，保持不动、不提交。
+- Git状态：实现提交`c2557eb refactor: unify market data storage adapters`已推送到`feature/phase2-market-structure`，`git ls-remote`确认远端ref相同；GitHub Actions尚未查询。未查看或输出`.runtime`密钥；`.local/`是已有未跟踪用户目录，保持不动、不提交。
 - 下一步：先为其余67项建立有来源证据的`venue + asset_type + provider + symbol + calendar`映射与覆盖状态报告；然后增加可插拔公开行情adapter并按原生周期/交易日历采集。另为Redis TTL键增加隔离Redis端到端过期测试，再分批把回测Parquet读路径切到DuckDB并对比冻结报告。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；后端隔离测试`bash scripts/platform.sh test`；文档检查`python3 scripts/check_docs.py`；重建并启动`bash scripts/platform.sh up`；健康检查`curl -fsS http://127.0.0.1:8080/api/health`；Git检查`git status --short --branch && git log -5 --oneline`。
