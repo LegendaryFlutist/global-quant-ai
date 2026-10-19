@@ -26,11 +26,11 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 ## 实际验证记录
 
 | 日期 | 开发单元 / 命令 | 真实结果 | 证据 |
+|---|---|---|---|
 | 2026-10-19 | 全模型页面/API/runner：`bash scripts/platform.sh test` | 51 passed，1项既有Starlette TestClient弃用提示；含任务隔离、曲线和逐笔、旧批次只读及路径穿越回归 | 本机隔离`quant_test`控制台结果；`backend/tests/test_research_backtests.py` |
 | 2026-10-19 | 前端：`cd frontend && npm test && npm run build` | 2 passed；TypeScript和Vite生产构建成功 | 本机控制台结果 |
 | 2026-10-19 | `python3 scripts/check_docs.py`、语法检查、`bash scripts/platform.sh up`、健康与GPU检查 | 559个Python具名函数文档通过；语法检查通过；API健康/数据库/Redis正常；NVIDIA runner已启动，Torch 2.10.0a0+b558c986e8.nv25.11且CUDA可用 | 本机控制台结果；容器`quant-lab-research-runner-1` |
 | 2026-10-19 | 完整GPU任务端到端 | 尚未通过登录页面触发；旧批次接口由隔离API测试覆盖。下一步可在页面点“开始整套回测”验证GPU进度和报告 | 未验证；不能标记为端到端验收 |
-|---|---|---|---|
 | 2026-10-18 | Phase1 Docker + 浏览器 | 4个标的×6周期共24组图表通过，80项资产、34,544根真实K线；无浏览器未捕获异常 | 本机`runs/platform_phase1/browser-check.json`、截图、runtime-check.json |
 | 2026-10-18 | `bash scripts/platform.sh test`（原Phase1） | 20 passed | 本机`runs/platform_phase1/backend-tests.log` |
 | 2026-10-18 | `cd frontend && npm test && npm run build` | 2 passed；TypeScript与Vite生产构建成功 | 本机`runs/platform_phase1/frontend-tests.log`、frontend-build.log |
@@ -132,6 +132,15 @@ bash scripts/platform.sh status
 ```
 
 需要启动已停止服务时：`bash scripts/platform.sh up`。需要测试时：`bash scripts/platform.sh test`，前端进入frontend运行`npm test && npm run build`。禁止为了恢复而删除卷、覆盖.env或重建冻结数据计划。
+
+## 当前开发单元交接（2026-10-19）
+
+- 已完成功能：系统页面全模型回测面板、排队API、NVIDIA容器执行器、实际阶段进度、历史批次只读浏览、按模型/标的/周期/退出模式读取报告/曲线/逐笔；保持公开历史数据、邮件模拟和无订单边界。
+- 已通过测试：`bash scripts/platform.sh test`（51 passed，1条既有Starlette弃用提示）；`cd frontend && npm test && npm run build`（2 passed，构建成功）；`python3 scripts/check_docs.py`（559函数通过）、Python语法检查、`git diff --check`及发布扫描通过。`bash scripts/platform.sh up`后API健康、NVIDIA PyTorch/CUDA可用，并核对runner无法读`.runtime`平台/引导秘密。
+- 未解决：未在已认证浏览器触发完整GPU回测；因此全链路运行时长、进度完成和新报告渲染待首次页面操作验收。未实现模型注册与自动择优。
+- 最近功能提交：`722d229 feat: add full model backtests to research page`，已推送PR #11分支，GitHub Actions `39215065348` success。
+- 下一步：打开 http://localhost:8080 的“模拟与回测”页，选择范围后点击“开始整套回测”，等待进度完成，检查各模型/标的报告与权益曲线。
+- 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch`；启动平台用`bash scripts/platform.sh up`；后端测试用`bash scripts/platform.sh test`。
 
 ### 下一次继续开发的具体入口
 
