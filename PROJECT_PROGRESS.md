@@ -101,6 +101,14 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 开发单元已提交：`3d22cac feat: add configurable multi-horizon simulation scoring`，推送至PR #11分支。GitHub Actions run `39195935406` 的backend、frontend、risk-engine、publish-hygiene四项检查全部success（核验时间2026-10-19 UTC）。本机`bash scripts/platform.sh up`重建API/Web，服务健康；GPU lab、PostgreSQL、Redis、worker持续运行。`.local/`为用户/工具已有的未跟踪目录，保持不变且未加入提交。
 - 下一步：用隔离测试账号完成页面创建/修改/回测/逐笔查看浏览器验收；用户显式采集真实数据后确认覆盖并运行回测，记录校准误差；另行实现并比较GRU、VSN+LSTM和其他候选的冻结滚动样本外实验。恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && bash scripts/platform.sh status`；运行测试用`bash scripts/platform.sh test`，前端用`cd frontend && npm test && npm run build`。
 
+## 本轮修复：恢复脚本的启动指引（2026-10-19）
+
+- 用户附件只包含`bash scripts/resume.sh`与`bash scripts/platform.sh status`的输出，没有失败堆栈，也没有执行模型回测命令。两条命令本来就分别只展示交接文档/Git历史和容器状态，不会启动平台或回测；附件状态显示API、Web、worker、GPU研究容器、PostgreSQL及Redis均在运行。
+- 修改`scripts/resume.sh`末尾，明确告知脚本只读并列出Web启动、GPU容器启动、模型回测和只读状态查看的准确命令；没有将恢复脚本改成自动启动，保留会话恢复无副作用约束。
+- 验证：`bash -n scripts/resume.sh`通过；`bash scripts/resume.sh | tail -n 18`显示正确命令；`bash scripts/platform.sh status`显示核心服务healthy/running；`bash scripts/container.sh run --check`退出码0，四个标的本地数据及运行环境均通过预检。
+- 尚未获得任何具体模型启动失败信息；若按新的`bash scripts/container.sh run`运行仍失败，需要保留该命令的报错全文供定位。无需重建或重置数据库。
+- 本项待本地提交；`.local/`继续保持未跟踪且不触碰。
+
 ## 发布交接记录
 
 - GitHub已通过官方CLI登录；不在此文件记录任何授权码或Token。

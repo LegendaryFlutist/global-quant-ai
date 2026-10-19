@@ -16,4 +16,22 @@ printf '\n===== Git status =====\n'
 git status --short --branch
 printf '\n===== Recent commits =====\n'
 git log -5 --oneline
-printf '\nNext: check working changes, then continue the highest-priority unfinished task in TASKS.md.\n'
+cat <<'NEXT_STEPS'
+
+This script only displays recovery notes and Git history; it does not start the app or run a backtest.
+
+Start the Web platform:
+  bash scripts/platform.sh up
+  Open http://localhost:8080
+
+Start the NVIDIA research container (if it is stopped):
+  bash scripts/container.sh start
+
+Run the unified model backtest inside that container:
+  bash scripts/container.sh run
+
+Check running containers without starting or changing them:
+  bash scripts/platform.sh status
+
+Next development step: inspect working changes, then continue the highest-priority unfinished task in TASKS.md.
+NEXT_STEPS
