@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from lab import demo
 from pattern_research import finalize_pattern_mail,run_pattern_research
+from quant_lab.models.model_registry import MODEL_NAMES
 
 
 class PatternResearchTests(unittest.TestCase):
@@ -65,12 +66,20 @@ class PatternResearchTests(unittest.TestCase):
             with patch('pattern_research.fit_model',return_value=(None,[])),patch('pattern_execution.simulate_patterns',side_effect=fake_engine),patch('pattern_research.export_pattern_report'),patch('operation_report.export_operations_report',return_value={}),patch('operation_report.print_operations_summary'):
                 result=run_pattern_research(data,root/'out',baseline,['15m'],['fixed_rr'])
             self.assertTrue(result['holdout_used'])
-            self.assertEqual(len(result['ranking']),8)
+            self.assertEqual(len(result['ranking']),1)
             self.assertEqual(sum(first>=cut for first,last in calls),2)
             self.assertTrue(all(last<cut for first,last in calls if first<cut))
             self.assertTrue((root/'out/selected_holdout_equity.csv').exists())
             # Source is synthetic: even a positive mocked test never permits promotion.
             self.assertEqual(result['status'],'REJECTED')
+
+    def test_new_backtest_registry_excludes_all_machine_learning_models(self):
+        """确保新回测白名单只暴露确定性的多周期结构规则。
+
+        Returns:
+            无返回值；当ML或旧简易模型重新进入新任务注册表时断言失败。
+        """
+        self.assertEqual(MODEL_NAMES, ('analysis_dow123',))
 
     def test_partial_exit_mail_is_recorded_once_without_smtp(self):
         """验证减仓模拟通知仅记录一次且不调用SMTP。

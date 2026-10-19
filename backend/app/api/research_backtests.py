@@ -2,6 +2,7 @@
 
 import hmac
 import csv
+import hashlib
 import json
 import re
 import uuid
@@ -19,29 +20,33 @@ from app.core.security import current_user
 from app.domains.models import Audit, Task, User, utcnow
 
 router = APIRouter()
-RESEARCH_SYMBOLS = ("KORUUSDT", "CLUSDT", "NVDAUSDT", "BTCUSDT")
+RESEARCH_SYMBOLS = (
+    "KORUUSDT", "CLUSDT", "NVDAUSDT", "BTCUSDT", "SKHYNIXUSDT", "SPCXUSDT",
+    "SNDKUSDT", "XAUUSDT", "QQQUSDT", "INTCUSDT", "TSLAUSDT", "OPENAIUSDT", "ZHIPUUSDT",
+)
 RESEARCH_TIMEFRAMES = ("15m", "30m", "1h", "2h", "4h")
-RESEARCH_MODELS = (
-    "analysis_dow123", "torch_gru", "pattern_only", "logistic",
-    "random_forest", "extra_trees", "hist_gradient", "mlp",
+RESEARCH_MODELS = ("analysis_dow123",)
+ARCHIVE_MODELS = (
+    *RESEARCH_MODELS, "torch_gru", "pattern_only", "logistic", "random_forest",
+    "extra_trees", "hist_gradient", "mlp",
 )
 RESEARCH_KIND = "RUN_FULL_RESEARCH"
 
 
 class ResearchBacktestRequest(BaseModel):
-    """页面提交的整套历史模型研究范围；不接受路径或执行参数。"""
+    """页面提交的规则策略历史回测范围；不接受路径或执行参数。"""
 
     model_config = ConfigDict(extra="forbid")
-    symbols: list[str] = Field(min_length=1, max_length=4)
-    models: list[str] = Field(min_length=1, max_length=8)
+    symbols: list[str] = Field(min_length=1, max_length=13)
+    models: list[str] = Field(min_length=1, max_length=1)
     timeframes: list[str] = Field(min_length=1, max_length=5)
 
     @field_validator("symbols")
     @classmethod
     def validate_symbols(cls, values):
-        """限制为已在本地数据目录登记的四个优先标的。"""
+        """限制为交易所已核验的十三个公开合约标的。"""
         if len(values) != len(set(values)) or any(value not in RESEARCH_SYMBOLS for value in values):
-            raise ValueError("仅支持四个已登记优先标的，且不能重复")
+            raise ValueError("标的须来自交易所已核验的回测名单，且不能重复")
         return values
 
     @field_validator("models")
@@ -49,7 +54,7 @@ class ResearchBacktestRequest(BaseModel):
     def validate_models(cls, values):
         """限制为研究引擎已登记的模型名称，并拒绝重复运行项。"""
         if len(values) != len(set(values)) or any(value not in RESEARCH_MODELS for value in values):
-            raise ValueError("模型列表包含未登记或重复模型")
+            raise ValueError("新回测仅支持多周期结构·道氏123规则模型")
         return values
 
     @field_validator("timeframes")
@@ -210,10 +215,10 @@ def create_research_backtest(
 
 
 def _has_local_source(symbol: str) -> bool:
-    """确认本机存在真实来源、资金费、标记价和冻结计划文件。
+    """确认本机存在真实来源、资金费、标记价和冻结评估计划文件。
 
     Args:
-        symbol: 四个已登记优先标的之一。
+        symbol: 已核验的公开合约代码之一。
 
     Returns:
         当所有必需本地文件存在时返回True；本函数不发起网络行情请求。
@@ -223,8 +228,41 @@ def _has_local_source(symbol: str) -> bool:
     plan = data / "evaluation_plan.json"
     if plan.is_file():
         baseline = plan
-    required = (data / "bars.csv", data / "funding.csv", data / "mark_bars.csv", data / "source.json", baseline)
-    return all(path.is_file() for path in required)
+    bars, funding, mark, source_path = (data / name for name in
+                                        ("bars.csv", "funding.csv", "mark_bars.csv", "source.json"))
+    if not all(path.is_file() for path in (bars, funding, mark, baseline)):
+        return False
+    try:
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        plan = json.loads(baseline.read_text(encoding="utf-8"))
+        digest = hashlib.sha256(bars.read_bytes() + funding.read_bytes()).hexdigest()
+        return (source.get("symbol") == symbol and source.get("synthetic") is False
+                and plan.get("dataset_sha256") == digest
+                and isinstance(plan.get("holdout_period_ms"), list)
+                and len(plan["holdout_period_ms"]) == 2)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+@router.get("/api/research/backtests/coverage")
+def research_backtest_coverage(user: User = Depends(current_user)):
+    """Return exchange-verified contract coverage and local frozen-plan readiness.
+
+    Args:
+        user: Authenticated user; coverage itself contains no private account data.
+
+    Returns:
+        One row per verified contract with a truthful local-data readiness flag.
+        This endpoint performs no network requests and never fabricates coverage.
+    """
+    del user
+    assets = []
+    for symbol in RESEARCH_SYMBOLS:
+        ready = _has_local_source(symbol)
+        assets.append({"symbol": symbol, "ready": ready,
+                       "reason": "本地行情与冻结评估计划齐全" if ready
+                       else "缺少匹配的本地行情或冻结评估计划；采集与评估边界准备后可回测"})
+    return {"assets": assets, "models": list(RESEARCH_MODELS)}
 
 
 @router.get("/api/research/backtests")
@@ -353,7 +391,7 @@ def archived_model_report(
     Returns:
         排名、权益曲线和对应的历史模拟成交；不改写归档文件。
     """
-    if symbol not in RESEARCH_SYMBOLS or model not in RESEARCH_MODELS:
+    if symbol not in RESEARCH_SYMBOLS or model not in ARCHIVE_MODELS:
         raise HTTPException(404, "回测报告不存在")
     report_dir = _archive_directory(archive_id) / "models" / model / "symbols" / symbol
     return _read_model_report(report_dir, symbol, model, timeframe, exit_mode)
@@ -392,6 +430,7 @@ def _read_model_report(report_dir: Path, symbol: str, model: str, timeframe: str
                         "position_id", "direction", "entry_time", "exit_time", "holding_hours",
                         "entry_price", "exit_price", "net_pnl", "exit_reason", "partial_exit_count",
                     )})
+    short_count = sum(1 for row in operations if row.get("direction") in ("-1", -1))
     return {
         "symbol": symbol,
         "model": model,
@@ -412,6 +451,8 @@ def _read_model_report(report_dir: Path, symbol: str, model: str, timeframe: str
         )} for row in operation_summary.get("accounts", {}).values()],
         "curve": [[int(timestamp), float(value)] for timestamp, value in curve.items()],
         "operations": operations,
+        "short_operations": short_count,
+        "long_operations": len(operations) - short_count,
         "curve_key": key,
         "actual_email_sent": False,
         "real_orders_enabled": False,

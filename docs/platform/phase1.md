@@ -121,3 +121,7 @@ Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存�
 - 外部连接限制：容器内fapi.binance.com DNS解析失败。自动核验真实失败并最多重试3次；页面不会把缓存标成实时行情。当前使用已验证连接器采集的真实历史快照。
 
 验收产物位于`runs/platform_phase1/`：`browser-check.json`、`runtime-check.json`、测试日志、依赖审计和页面截图。重新验证浏览器需启动隔离Chrome后执行`node scripts/platform_browser_check.mjs 9223`；脚本只在内存中读取本机初始凭据并在结束时退出登录。若已改密码，初始密码文件不能再用于此脚本，需改用独立测试账号。
+
+### Rule backtest coverage update (2026-10-19)
+
+The authenticated research page lists all 13 exact exchange-verified contract IDs. A local coverage check enables only symbols that have real bars, funding, mark-price bars and a matching frozen evaluation plan. New system backtests now select the deterministic multi-timeframe structure/Dow-123 rule model only; old ML reports are preserved for read-only review. The selected report shows how many completed long and short operations it contains. This does not implement model training; causal multi-timeframe training features and bottom-structure watch zones remain planned. Current network access is blocked: direct Binance DNS lookup fails and the configured proxy returns HTTP 451.

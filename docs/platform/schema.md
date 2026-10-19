@@ -75,3 +75,5 @@
 账户资金、仓位、订单、成交、事件和权益变动必须同事务提交，账户行/版本锁隔离。成交引用的账户必须与订单、策略版本一致，不能仅靠API检查跨账户完整性。未来用组合外键、唯一约束与账本守恒测试实现。
 
 模型版本与策略版本禁止原地改产物；晋升状态与运行账户绑定需显式流程。审批引用建议内容哈希、用户和2FA事件，执行请求引用审批与风控复核。审批修改、参数漂移、过期、撤回、重复提交、未知交易所结果均需独立状态机测试。
+
+The full-research task allowlist now admits up to 13 exchange-verified symbols but only `analysis_dow123` for new runs. Existing archived model names remain readable through the archive path; no database migration is needed. Task parameters continue to pin selected symbol/model/timeframe lists and the output UUID; local source readiness is checked before enqueueing.

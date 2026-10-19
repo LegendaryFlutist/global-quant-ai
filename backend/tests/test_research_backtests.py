@@ -20,7 +20,7 @@ def _queue_task(client, monkeypatch):
     """
     monkeypatch.setattr(research_backtests, "_has_local_source", lambda symbol: True)
     response = client.post("/api/research/backtests", json={
-        "symbols": ["BTCUSDT"], "models": ["logistic"], "timeframes": ["15m"],
+        "symbols": ["BTCUSDT"], "models": ["analysis_dow123"], "timeframes": ["15m"],
     })
     assert response.status_code == 202
     return response.json()["id"]
@@ -30,9 +30,13 @@ def test_research_task_is_validated_and_owner_scoped(logged_in, monkeypatch):
     """Queue only allowlisted inputs and hide private runtime path parameters."""
     monkeypatch.setattr(research_backtests, "_has_local_source", lambda symbol: True)
     invalid = logged_in.post("/api/research/backtests", json={
-        "symbols": ["NOT-A-SYMBOL"], "models": ["logistic"], "timeframes": ["15m"],
+        "symbols": ["NOT-A-SYMBOL"], "models": ["analysis_dow123"], "timeframes": ["15m"],
     })
     assert invalid.status_code == 422
+    ml_rejected = logged_in.post("/api/research/backtests", json={
+        "symbols": ["BTCUSDT"], "models": ["logistic"], "timeframes": ["15m"],
+    })
+    assert ml_rejected.status_code == 422
     task_id = _queue_task(logged_in, monkeypatch)
     visible = logged_in.get("/api/research/backtests").json()
     task = next(row for row in visible if row["id"] == task_id)
@@ -41,16 +45,26 @@ def test_research_task_is_validated_and_owner_scoped(logged_in, monkeypatch):
     assert "output_id" not in task["parameters"]
 
 
+def test_backtest_coverage_lists_all_verified_assets_and_only_rule_model(logged_in, monkeypatch):
+    """Expose all verified contract IDs and report readiness without network or fake data."""
+    monkeypatch.setattr(research_backtests, "_has_local_source", lambda symbol: symbol == "BTCUSDT")
+    body = logged_in.get("/api/research/backtests/coverage").json()
+    assert len(body["assets"]) == 13
+    assert {row["symbol"] for row in body["assets"]} == set(research_backtests.RESEARCH_SYMBOLS)
+    assert [row["symbol"] for row in body["assets"] if row["ready"]] == ["BTCUSDT"]
+    assert body["models"] == ["analysis_dow123"]
+
+
 def test_completed_task_serves_scoped_curve_and_operations(logged_in, monkeypatch, tmp_path):
     """Serve the selected model report from a fixed UUID path and no other scope."""
     task_id = _queue_task(logged_in, monkeypatch)
     monkeypatch.setattr(research_backtests, "RESEARCH_RUNS_ROOT", tmp_path / "reports")
-    report_root = tmp_path / "reports" / task_id / "models" / "logistic" / "symbols" / "BTCUSDT"
+    report_root = tmp_path / "reports" / task_id / "models" / "analysis_dow123" / "symbols" / "BTCUSDT"
     report_root.mkdir(parents=True)
-    key = "15m|logistic|swing_percent"
+    key = "15m|analysis_dow123|swing_percent"
     (report_root / "report.json").write_text(json.dumps({
         "status": "NO_CANDIDATE", "dataset_sha256": "a" * 64, "ranking": [{
-            "timeframe": "15m", "model": "logistic", "exit_mode": "swing_percent",
+            "timeframe": "15m", "model": "analysis_dow123", "exit_mode": "swing_percent",
             "net_return": 0.03, "max_drawdown": 0.02, "entries": 4,
             "liquidations": 0, "validation_score": 0.01, "eligible": False,
             "rejection_reasons": [], "holding_hours_mean": 48,
@@ -70,12 +84,13 @@ def test_completed_task_serves_scoped_curve_and_operations(logged_in, monkeypatc
         task.status = "SUCCEEDED"
         task.result = {"progress": {"percent": 100, "phase": "completed"}}
         db.commit()
-    report = logged_in.get(f"/api/research/backtests/{task_id}/assets/BTCUSDT/models/logistic?timeframe=15m&exit_mode=swing_percent")
+    report = logged_in.get(f"/api/research/backtests/{task_id}/assets/BTCUSDT/models/analysis_dow123?timeframe=15m&exit_mode=swing_percent")
     assert report.status_code == 200
     body = report.json()
     assert body["curve"] == [[1000, 1.0], [2000, 1.03]]
     assert body["operations"][0]["position_id"] == "p1"
-    hidden = logged_in.get(f"/api/research/backtests/{task_id}/assets/NVDAUSDT/models/logistic")
+    assert body["long_operations"] == 1 and body["short_operations"] == 0
+    hidden = logged_in.get(f"/api/research/backtests/{task_id}/assets/NVDAUSDT/models/analysis_dow123")
     assert hidden.status_code == 404
 
 

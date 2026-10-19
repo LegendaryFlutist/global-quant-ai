@@ -7,14 +7,12 @@ import { api, post } from "../services/api";
 
 echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, CanvasRenderer]);
 
-const SYMBOLS = ["KORUUSDT", "CLUSDT", "NVDAUSDT", "BTCUSDT"];
-const MODELS = ["analysis_dow123", "torch_gru", "pattern_only", "logistic", "random_forest", "extra_trees", "hist_gradient", "mlp"];
+const SYMBOLS = ["KORUUSDT", "CLUSDT", "NVDAUSDT", "BTCUSDT", "SKHYNIXUSDT", "SPCXUSDT", "SNDKUSDT", "XAUUSDT", "QQQUSDT", "INTCUSDT", "TSLAUSDT", "OPENAIUSDT", "ZHIPUUSDT"];
+const MODELS = ["analysis_dow123"];
 const TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h"];
 const EXITS = ["swing_percent", "fixed_rr", "atr_trailing", "three_bar_breakout", "three_bar_trailing", "time_exit", "fixed_three_bar_target"];
 const MODEL_LABELS: Record<string, string> = {
-  analysis_dow123: "道氏 1-2-3", torch_gru: "PyTorch GRU", pattern_only: "反转形态",
-  logistic: "逻辑回归", random_forest: "随机森林", extra_trees: "极端随机树",
-  hist_gradient: "直方图梯度提升", mlp: "多层感知机",
+  analysis_dow123: "多周期结构 · 道氏 1-2-3",
 };
 const EXIT_LABELS: Record<string, string> = {
   swing_percent: "波段百分比", fixed_rr: "固定盈亏比", atr_trailing: "ATR 跟踪",
@@ -25,9 +23,10 @@ const EXIT_LABELS: Record<string, string> = {
 type Progress = { percent: number; phase: string; symbol?: string; timeframe?: string; model?: string; fold?: number };
 type Run = { id: string; status: string; kind?: string; parameters: { symbols: string[]; models: string[]; timeframes: string[] }; progress: Progress; error?: string | null; created_at: string };
 type Summary = { models: string[]; symbols: string[]; configurations: number; sources: { symbol: string; status: string; configurations: number }[] };
+type Coverage = { assets: { symbol: string; ready: boolean; reason: string }[]; models: string[] };
 type Ranking = { timeframe: string; model: string; exit_mode: string; net_return: number; max_drawdown: number; entries: number; liquidations: number; validation_score: number; eligible: boolean; rejection_reasons: string[]; holding_hours_mean: number; holding_hours_median: number; holding_hours_max: number };
 type ModelOperation = { position_id?: string; direction?: string; entry_time?: string; exit_time?: string; holding_hours?: string; entry_price?: string; exit_price?: string; net_pnl?: string; exit_reason?: string; partial_exit_count?: string };
-type ModelReport = { symbol: string; model: string; status: string; dataset_sha256: string; selected: Ranking | null; holdout: Record<string, number> | null; rankings: Ranking[]; curve: [number, number][]; curve_key: string; operations: ModelOperation[]; real_orders_enabled: false };
+type ModelReport = { symbol: string; model: string; status: string; dataset_sha256: string; selected: Ranking | null; holdout: Record<string, number> | null; rankings: Ranking[]; curve: [number, number][]; curve_key: string; operations: ModelOperation[]; short_operations: number; long_operations: number; real_orders_enabled: false };
 
 /** 绘制指定模型验证期权益曲线；输入时间戳为毫秒、权益为初始权益倍数。 */
 function ResearchCurve({ points }: { points: [number, number][] }) {
@@ -51,10 +50,11 @@ function ResearchCurve({ points }: { points: [number, number][] }) {
 
 /** 提供整套 GPU 多模型回测的任务启动、真实进度轮询和分模型分标的报告浏览。 */
 export default function FullResearchBacktests() {
-  const [symbols, setSymbols] = useState(SYMBOLS);
+  const [symbols, setSymbols] = useState<string[]>([]);
   const [models, setModels] = useState(MODELS);
   const [timeframes, setTimeframes] = useState(TIMEFRAMES);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [selectedRun, setSelectedRun] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [symbol, setSymbol] = useState(SYMBOLS[0]);
@@ -74,6 +74,12 @@ export default function FullResearchBacktests() {
   }
   useEffect(() => {
     void refreshRuns().catch((cause) => setError((cause as Error).message));
+    api<Coverage>("/research/backtests/coverage").then((result) => {
+      setCoverage(result);
+      const ready = result.assets.filter((asset) => asset.ready).map((asset) => asset.symbol);
+      setSymbols(ready);
+      if (ready.length) setSymbol(ready[0]);
+    }).catch((cause) => setError((cause as Error).message));
   }, []);
   useEffect(() => {
     if (!runs.some((run) => ["QUEUED", "RUNNING", "RETRYING"].includes(run.status))) return;
@@ -120,15 +126,18 @@ export default function FullResearchBacktests() {
   const progress = active?.progress;
   const filteredRankings = report?.rankings.filter((row) => row.timeframe === timeframe) ?? [];
   return <section className="panel full-research-panel">
-    <div className="section-title"><div><span className="eyebrow">GPU MULTI-MODEL RESEARCH</span><h2>全模型 · 全标的回测</h2></div><button onClick={() => void refreshRuns()} disabled={busy}>刷新任务</button></div>
-    <p>从系统页面运行 8 种研究模型，按标的分别生成报告、验证期权益曲线和逐周期/止盈模式排名。仅使用已验证本地行情，邮件为模拟记录，不发送委托。</p>
+    <div className="section-title"><div><span className="eyebrow">RULE-BASED RESEARCH</span><h2>规则回测 · 全标的覆盖</h2></div><button onClick={() => void refreshRuns()} disabled={busy}>刷新任务</button></div>
+    <p>新回测仅运行多周期结构与道氏 1-2-3 规则策略；机器学习模型已从新任务移除。全部 13 个已核验合约会列出，只有具备匹配本地行情与冻结评估计划的标的可选。研究支持多空信号，不发送委托。</p>
     {error && <div role="alert" className="alert error">{error}</div>}
     <div className="filters">
-      <fieldset><legend>回测标的</legend>{SYMBOLS.map((value) => <label className="toggle" key={value}><input type="checkbox" checked={symbols.includes(value)} onChange={() => toggle(symbols, value, setSymbols)} />{value}</label>)}</fieldset>
+      <fieldset><legend>回测标的（就绪 {coverage?.assets.filter((asset) => asset.ready).length ?? 0}/{SYMBOLS.length}）</legend>{SYMBOLS.map((value) => {
+        const asset = coverage?.assets.find((row) => row.symbol === value);
+        return <label className="toggle" key={value} title={asset?.reason ?? "正在检查本地数据"}><input type="checkbox" checked={symbols.includes(value)} disabled={!asset?.ready} onChange={() => toggle(symbols, value, setSymbols)} />{value}{asset && !asset.ready ? " · 待数据" : ""}</label>;
+      })}</fieldset>
       <fieldset><legend>模型</legend>{MODELS.map((value) => <label className="toggle" key={value}><input type="checkbox" checked={models.includes(value)} onChange={() => toggle(models, value, setModels)} />{MODEL_LABELS[value]}</label>)}</fieldset>
       <fieldset><legend>入场周期</legend>{TIMEFRAMES.map((value) => <label className="toggle" key={value}><input type="checkbox" checked={timeframes.includes(value)} onChange={() => toggle(timeframes, value, setTimeframes)} />{value}</label>)}</fieldset>
     </div>
-    <div className="actions"><button onClick={() => void startRun()} disabled={busy || !!runs.find((run) => ["QUEUED", "RUNNING", "RETRYING"].includes(run.status))}>{busy ? "提交中…" : "开始整套回测"}</button>
+    <div className="actions"><button onClick={() => void startRun()} disabled={busy || symbols.length === 0 || !!runs.find((run) => ["QUEUED", "RUNNING", "RETRYING"].includes(run.status))}>{busy ? "提交中…" : "开始整套回测"}</button>
       <label>任务与已完成报告<select value={selectedRun} onChange={(event) => setSelectedRun(event.target.value)}><option value="">选择回测任务</option>{runs.map((run) => <option key={run.id} value={run.id}>{new Date(run.created_at).toLocaleString()} · {run.kind === "ARCHIVED_REPORT" ? "已有报告" : run.status} · {run.id.slice(0, 16)}</option>)}</select></label>
     </div>
     {active && <article className="panel">
@@ -151,6 +160,7 @@ export default function FullResearchBacktests() {
           <article className="metric"><span>模型选中配置</span><strong>{report.selected ? `${report.selected.timeframe} · ${EXIT_LABELS[report.selected.exit_mode]}` : "无合格配置"}</strong></article>
           <article className="metric"><span>留出期净收益</span><strong>{report.holdout ? `${(100 * Number(report.holdout.net_return ?? 0)).toFixed(2)}%` : "未触碰留出集"}</strong></article>
           <article className="metric"><span>权益曲线配置</span><strong>{report.curve_key}</strong></article>
+          <article className="metric"><span>多空成交</span><strong>多 {report.long_operations} · 空 {report.short_operations}</strong></article>
         </div>
         <ResearchCurve points={report.curve} />
         <div className="table-wrap"><table><thead><tr><th>周期</th><th>止盈模式</th><th>验证净收益</th><th>最大回撤</th><th>开仓数</th><th>平均持仓时长</th><th>合格</th><th>筛选结果</th></tr></thead>

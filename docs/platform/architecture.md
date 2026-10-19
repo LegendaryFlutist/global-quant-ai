@@ -87,3 +87,5 @@ Phase1审计是应用只追加，不声称具备数据库级防篡改。Phase7�
 - 上游DNS/451/超时明确记录失败、重试次数与供应商状态，不替换域名规避限制，不伪造行情。历史任务状态每10秒轮询；历史归档/标记价与资金费数据均需用户点击后采集。图表五秒刷新只轮询已选择的K线，不提供逐笔盘口或WebSocket。
 - Redis AOF保存队列；数据库记录任务与分页进度。普通异常最多3次。启动时补发未发布的QUEUED/QUEUE_ERROR任务。Worker被强杀的RUNNING任务由RQ维护及重试处理；任务页可对最终失败任务重新入队。严格跨进程 exactly-once 不作保证，数据写入幂等。
 - 数据库卷与Parquet目录需一起备份，恢复后校验SHA256。不能用`down -v`重置用户数据。
+
+- Full research strategy selection (2026-10-19): new system backtests expose only the deterministic multi-timeframe structure/Dow-123 rule strategy. The UI lists all 13 exchange-verified contract IDs and obtains readiness from local real bars, funding, mark-price bars and a matching frozen evaluation plan. Assets missing any component are shown as unavailable and cannot be included in a run. Older ML batches remain read-only archives; the selector does not imply model training. Reports include long/short operation counts.
