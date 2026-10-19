@@ -213,6 +213,10 @@ export interface SimulationAccount {
   configuration: {
     asset_ids: string[];
     intervals: string[];
+    timeframe_weights: Record<string, string>;
+    direction_mode: "trend_following" | "countertrend_rebound" | "balanced";
+    decision_horizon_hours: 72 | 168 | 720;
+    horizon_consensus_weight: string;
     weights: Record<"trend" | "dow123" | "wave" | "divergence" | "reversal_patterns" | "deep_model", string>;
     entry_threshold: string;
     max_leverage: string;
@@ -247,8 +251,15 @@ export interface SimulationBacktestRun {
     max_drawdown_pct?: string;
     trade_count?: number;
     algorithm_sha256?: string;
+    multi_timeframe_policy?: {
+      direction_mode: string;
+      timeframe_weights: Record<string, string>;
+      decision_horizon_hours: number;
+      horizon_consensus_weight: string;
+    };
+    forecast_definition?: { status: string; horizons_hours: number[]; scenario_band: string };
     skipped_assets?: { asset_id: string; status: string; reason: string }[];
-    per_asset?: { asset_id: string; metrics: Record<string, string | number>; dataset_hashes: Record<string, unknown> }[];
+    per_asset?: { asset_id: string; metrics: Record<string, string | number>; dataset_hashes: Record<string, unknown>; forecast_evaluation?: Record<string, { observations: number; directional_accuracy_pct: number | null; mean_directional_return_pct: number | null }> }[];
   };
   created_at: string;
   updated_at: string;

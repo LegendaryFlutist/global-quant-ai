@@ -62,9 +62,11 @@ function emptyDraft(): Draft {
     configuration: {
       asset_ids: ["binance_usdm:KORUUSDT", "binance_usdm:CLUSDT", "binance_usdm:NVDAUSDT", "binance_usdm:BTCUSDT"],
       intervals: ["15m", "1h", "4h"],
+      timeframe_weights: Object.fromEntries(INTERVAL_CHOICES.map((interval) => [interval, "1"])),
+      direction_mode: "trend_following", decision_horizon_hours: 168, horizon_consensus_weight: "0.25",
       weights: { trend: "0.40", dow123: "0.25", wave: "0.10", divergence: "0.15", reversal_patterns: "0.10", deep_model: "0" },
       entry_threshold: "0.70", max_leverage: "3", max_margin_fraction: "0.10",
-      min_holding_hours: 24, max_holding_hours: 168, exit_mode: "three_bar_trailing", deep_model_version: null,
+      min_holding_hours: 1, max_holding_hours: 168, exit_mode: "three_bar_trailing", deep_model_version: null,
     },
   };
 }
@@ -258,11 +260,23 @@ export default function SimulationPage() {
               setDraft({ ...draft, configuration: { ...draft.configuration, intervals } });
             }} />{interval}</label>)}
           </fieldset>
+          <fieldset><legend>多周期相对权重（仅已选周期参与）</legend>
+            <div className="filters">{draft.configuration.intervals.map((interval) => <label key={interval}>{interval}<input type="number" min={0} max={10} step={0.1} value={draft.configuration.timeframe_weights[interval] ?? "1"} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, timeframe_weights: { ...draft.configuration.timeframe_weights, [interval]: event.target.value } } })} /></label>)}</div>
+          </fieldset>
+          <div className="filters">
+            <label>入场方向规则<select value={draft.configuration.direction_mode} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, direction_mode: event.target.value as Draft["configuration"]["direction_mode"] } })}>
+              <option value="trend_following">顺最高周期趋势</option><option value="countertrend_rebound">允许多理论确认的逆势反弹</option><option value="balanced">多周期多数方向</option>
+            </select></label>
+            <label>主要评估期限<select value={draft.configuration.decision_horizon_hours} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, decision_horizon_hours: Number(event.target.value) as 72 | 168 | 720 } })}>
+              <option value={72}>3天</option><option value={168}>7天</option><option value={720}>30天</option>
+            </select></label>
+            <label>其他期限共识占比<input type="number" min={0} max={1} step={0.05} value={draft.configuration.horizon_consensus_weight} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, horizon_consensus_weight: event.target.value } })} /></label>
+          </div>
           <div className="filters">
             <label>模拟最大杠杆（1～20）<input inputMode="decimal" value={draft.configuration.max_leverage} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, max_leverage: event.target.value } })} /></label>
             <label>单次保证金比例（≤25%）<input inputMode="decimal" value={draft.configuration.max_margin_fraction} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, max_margin_fraction: event.target.value } })} /></label>
-            <label>最短持仓小时（24～上限）<input type="number" min={24} max={draft.configuration.max_holding_hours} value={draft.configuration.min_holding_hours} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, min_holding_hours: Number(event.target.value) } })} /></label>
-            <label>持仓上限小时（24～504）<input inputMode="numeric" value={draft.configuration.max_holding_hours} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, max_holding_hours: Number(event.target.value) } })} /></label>
+            <label>最短持仓小时（1～上限，止损可提前）<input type="number" min={1} max={draft.configuration.max_holding_hours} value={draft.configuration.min_holding_hours} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, min_holding_hours: Number(event.target.value) } })} /></label>
+            <label>持仓上限小时（1～2160）<input type="number" min={1} max={2160} value={draft.configuration.max_holding_hours} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, max_holding_hours: Number(event.target.value) } })} /></label>
             <label>止盈/退出模式<select value={draft.configuration.exit_mode} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, exit_mode: event.target.value as Draft["configuration"]["exit_mode"] } })}>
               <option value="three_bar_trailing">最近三根K线跟踪退出</option><option value="atr">ATR退出</option><option value="fixed_rr">固定盈亏比</option><option value="time">时间退出</option>
             </select></label>
@@ -275,7 +289,7 @@ export default function SimulationPage() {
           {accounts.map((account) => <article className="panel" key={account.id}>
             <div className="section-title"><div><h3>{account.name}</h3><small>修订 {account.revision} · USDT {account.initial_equity}</small></div><button onClick={() => editAccount(account)}>编辑</button></div>
             <p>标的：{account.configuration.asset_ids.map((id) => assets.find((asset) => asset.id === id)?.symbol ?? id).join(" / ")}</p>
-            <p>周期：{account.configuration.intervals.join(" / ")} · 最大杠杆 {account.configuration.max_leverage}× · 持仓 {account.configuration.min_holding_hours}～{account.configuration.max_holding_hours} 小时（止损可提前）</p>
+            <p>周期：{account.configuration.intervals.join(" / ")} · 期限 {account.configuration.decision_horizon_hours / 24} 天 · 方向规则 {account.configuration.direction_mode} · 杠杆 {account.configuration.max_leverage}× · 持仓 {account.configuration.min_holding_hours}～{account.configuration.max_holding_hours} 小时（止损可提前）</p>
             <p>权重：{WEIGHTS.map(({ key, label }) => `${label} ${account.configuration.weights[key]}`).join(" · ")}</p>
             <small className="mono break">配置 SHA256：{account.configuration_sha256}</small>
             <div className="actions">
@@ -293,8 +307,9 @@ export default function SimulationPage() {
               {run.result.status === "COMPLETED" ? <>
                 <p>USDT {run.result.initial_equity} → {run.result.final_equity} · 净收益 {run.result.net_return_pct}% · 最大回撤 {run.result.max_drawdown_pct}% · 成交 {run.result.trade_count}</p>
                 {run.result.algorithm_sha256 && <small className="mono break">算法 SHA256：{run.result.algorithm_sha256}</small>}
+                {run.result.forecast_definition && <p className="muted">期限情景：{run.result.forecast_definition.horizons_hours.map((hours) => `${hours / 24}天`).join(" / ")}。价格区间尚未做历史校准，不作为概率或保证目标价。</p>}
                 {(run.result.per_asset ?? []).map((assetRun) => <p key={assetRun.asset_id} className="mono break">
-                  {assets.find((asset) => asset.id === assetRun.asset_id)?.symbol ?? assetRun.asset_id}：净收益 {assetRun.metrics.net_return_pct}% · 成交 {assetRun.metrics.trades} · 平均持仓 {assetRun.metrics.holding_hours_mean} 小时
+                  {assets.find((asset) => asset.id === assetRun.asset_id)?.symbol ?? assetRun.asset_id}：净收益 {assetRun.metrics.net_return_pct}% · 成交 {assetRun.metrics.trades} · 平均持仓 {assetRun.metrics.holding_hours_mean} 小时 · 期限方向命中 {Object.entries(assetRun.forecast_evaluation ?? {}).map(([horizon, score]) => `${Number(horizon.replace("h", "")) / 24}天 ${score.directional_accuracy_pct ?? "—"}%（n=${score.observations}）`).join(" / ")}
                 </p>)}
                 {(run.result.skipped_assets ?? []).map((asset) => <p className="muted" key={asset.asset_id}>{asset.asset_id}已跳过：{asset.reason}</p>)}
                 {curves[run.id]?.length ? <EquityChart points={curves[run.id]} /> : <p className="muted">净值文件暂不可用</p>}
@@ -311,7 +326,7 @@ export default function SimulationPage() {
   );
 }
 
-/** 展示选定回测的本地逐笔记录及持仓时长。 */
+/** 展示选定回测的逐笔方向、持仓时长和各期限入场情景及事后价格。 */
 function RunTrades({ accountId, runId }: { accountId: string; runId: string }) {
   const [trades, setTrades] = useState<Record<string, unknown>[]>([]);
   const [error, setError] = useState("");
@@ -321,10 +336,11 @@ function RunTrades({ accountId, runId }: { accountId: string; runId: string }) {
     ).then((result) => setTrades(result.trades)).catch((cause) => setError((cause as Error).message));
   }, [accountId, runId]);
   if (error) return <p className="muted">{error}</p>;
-  return <div className="table-wrap"><table><thead><tr><th>标的</th><th>方向</th><th>开仓时间</th><th>平仓时间</th><th>持仓小时</th><th>净损益（USDT）</th><th>退出</th></tr></thead>
+  return <div className="table-wrap"><table><thead><tr><th>标的</th><th>方向</th><th>开仓时间</th><th>平仓时间</th><th>持仓小时</th><th>净损益（USDT）</th><th>退出</th><th>入场3天情景价</th><th>入场7天情景价</th><th>入场30天情景价</th></tr></thead>
     <tbody>{trades.map((trade, index) => <tr key={`${String(trade.position_id)}-${index}`}>
       <td>{String(trade.asset_id ?? "—")}</td><td>{Number(trade.direction) > 0 ? "多" : "空"}</td>
       <td>{new Date(Number(trade.entry_time)).toLocaleString()}</td><td>{new Date(Number(trade.exit_time)).toLocaleString()}</td>
       <td>{String(trade.holding_hours ?? "—")}</td><td>{String(trade.net_pnl ?? "—")}</td><td>{String(trade.exit_reason ?? "—")}</td>
+      {["72h", "168h", "720h"].map((horizon) => <td key={horizon}>{String(trade[`scenario_${horizon}_center`] ?? "—")}<small className="muted"> [{String(trade[`scenario_${horizon}_lower`] ?? "—")} – {String(trade[`scenario_${horizon}_upper`] ?? "—")} ]<br />事后实际 {String(trade[`actual_${horizon}_close`] ?? "—")}（{String(trade[`actual_${horizon}_return_pct`] ?? "—")}%）</small></td>)}
     </tr>)}</tbody></table>{trades.length === 0 && <p>该次回测没有成交。</p>}</div>;
 }

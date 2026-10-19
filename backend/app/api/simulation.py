@@ -54,11 +54,15 @@ class SimulationPolicy(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=10)
     intervals: list[str] = Field(min_length=1, max_length=6)
     weights: StrategyWeights
+    timeframe_weights: dict[str, Decimal] = Field(default_factory=lambda: {item: Decimal("1") for item in INTERVALS})
+    direction_mode: Literal["trend_following", "countertrend_rebound", "balanced"] = "trend_following"
+    decision_horizon_hours: Literal[72, 168, 720] = 168
+    horizon_consensus_weight: Decimal = Field(default=Decimal("0.25"), ge=0, le=1)
     entry_threshold: Decimal = Field(ge=0, le=1)
     max_leverage: Decimal = Field(ge=1, le=20)
     max_margin_fraction: Decimal = Field(gt=0, le=Decimal("0.25"))
-    min_holding_hours: int = Field(default=24, ge=24, le=504)
-    max_holding_hours: int = Field(ge=24, le=504)
+    min_holding_hours: int = Field(default=1, ge=1, le=2160)
+    max_holding_hours: int = Field(ge=1, le=2160)
     exit_mode: Literal["three_bar_trailing", "atr", "fixed_rr", "time"]
     deep_model_version: str | None = Field(default=None, max_length=120)
 
@@ -94,6 +98,23 @@ class SimulationPolicy(BaseModel):
             raise ValueError("周期必须从15m、30m、1h、2h、4h、1d中选择且不能重复")
         return values
 
+    @field_validator("timeframe_weights")
+    @classmethod
+    def validate_timeframe_weights(cls, values):
+        """校验0至10的原生周期相对权重；未选周期可保留默认值但不参与评分。
+
+        Args:
+            values: 周期名称到无量纲相对权重的映射。
+
+        Returns:
+            仅含支持周期、各值在0至10之间且至少一项为正的原映射。
+        """
+        if not values or any(key not in INTERVALS for key in values):
+            raise ValueError("多周期权重键必须是支持的原生K线周期")
+        if any(value < 0 or value > 10 for value in values.values()) or not any(values.values()):
+            raise ValueError("至少一个多周期相对权重需大于0且每项不超过10")
+        return values
+
     @model_validator(mode="after")
     def validate_model_binding(self):
         """禁止为深度模型分配权重却未绑定明确版本。
@@ -107,6 +128,8 @@ class SimulationPolicy(BaseModel):
             raise ValueError("不使用深度模型时应清除模型版本绑定")
         if self.max_holding_hours < self.min_holding_hours:
             raise ValueError("最长持仓小时必须大于或等于最短持仓小时")
+        if not any(self.timeframe_weights.get(interval, Decimal("1")) > 0 for interval in self.intervals):
+            raise ValueError("至少一个已选周期的相对权重大于0")
         return self
 
 

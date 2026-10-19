@@ -24,6 +24,10 @@ def _payload(name="conservative", capital="10000.12345678"):
         "configuration": {
             "asset_ids": ["binance_usdm:BTCUSDT"],
             "intervals": ["15m", "1h", "4h"],
+            "timeframe_weights": {"15m": "0.5", "1h": "1", "4h": "2"},
+            "direction_mode": "countertrend_rebound",
+            "decision_horizon_hours": 72,
+            "horizon_consensus_weight": "0.30",
             "weights": {
                 "trend": "0.40",
                 "dow123": "0.25",
@@ -35,7 +39,8 @@ def _payload(name="conservative", capital="10000.12345678"):
             "entry_threshold": "0.70",
             "max_leverage": "3",
             "max_margin_fraction": "0.10",
-            "max_holding_hours": 168,
+            "min_holding_hours": 4,
+            "max_holding_hours": 720,
             "exit_mode": "three_bar_trailing",
             "deep_model_version": None,
         },
@@ -60,15 +65,19 @@ def test_simulation_accounts_preserve_decimal_capital_and_policy_revision(logged
     assert len(created["configuration_sha256"]) == 64
     assert created["research_only"] is True
     assert created["backtest_implemented"] is True
-    assert created["configuration"]["min_holding_hours"] == 24
+    assert created["configuration"]["min_holding_hours"] == 4
+    assert created["configuration"]["direction_mode"] == "countertrend_rebound"
+    assert created["configuration"]["decision_horizon_hours"] == 72
 
     changed = _payload("conservative", "9000.25")
     changed["configuration"]["max_leverage"] = "2"
+    changed["configuration"]["min_holding_hours"] = 1
     updated = logged_in.put(f"/api/simulation/accounts/{created['id']}", json=changed)
     assert updated.status_code == 200
     assert updated.json()["revision"] == 2
     assert updated.json()["configuration_sha256"] != created["configuration_sha256"]
     assert Decimal(updated.json()["initial_equity"]) == Decimal("9000.25")
+    assert updated.json()["configuration"]["min_holding_hours"] == 1
     assert len(logged_in.get("/api/simulation/accounts").json()) == 2
 
 
@@ -88,6 +97,16 @@ def test_simulation_account_rejects_unsafe_policy_and_missing_model_binding(logg
     invalid_leverage = _payload("bad-leverage")
     invalid_leverage["configuration"]["max_leverage"] = "21"
     assert logged_in.post("/api/simulation/accounts", json=invalid_leverage).status_code == 422
+
+    invalid_holding = _payload("bad-minimum")
+    invalid_holding["configuration"]["min_holding_hours"] = 0
+    assert logged_in.post("/api/simulation/accounts", json=invalid_holding).status_code == 422
+
+    invalid_timeframe_weights = _payload("bad-timeframe-weights")
+    invalid_timeframe_weights["configuration"]["timeframe_weights"] = {
+        "15m": "0", "1h": "0", "4h": "0", "1d": "1",
+    }
+    assert logged_in.post("/api/simulation/accounts", json=invalid_timeframe_weights).status_code == 422
 
     unbound_model = _payload("unbound-model")
     unbound_model["configuration"]["weights"]["deep_model"] = "0.1"

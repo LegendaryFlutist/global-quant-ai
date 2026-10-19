@@ -89,6 +89,18 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 本轮新增本地合约回测服务/API/UI：多理论加权信号、最高周期趋势门控、账号持仓窗口、标记价格执行及资金费/费率假设、跳过缺档标的、逐笔和组合曲线/回撤、每资产统计。报告在运行时`DATA_ROOT/simulation_runs/<task_uuid>/`保存不可变Parquet，并绑定账号revision/config hash、算法SHA和来源数据SHA；账号API按所有者隔离。隔离后端47 passed、前端2 passed/构建成功、文档/发布扫描通过。commit `1eefbb5` 已推送PR #11，GitHub四项CI通过；容器已重建且接口、首页与worker检查通过。没有真实行情回填和收益结论。
 - 下一步：用隔离测试身份做新页面浏览器全流程验证；用户显式点击采集后检查真实覆盖并查看报告。后续做账号间曲线可视化对照、验证/消融及深度模型注册。
 
+## 本轮增量：可调持仓下限、多周期评分与期限评估（2026-10-19）
+
+- 已完成工作区改动：模拟账号`min_holding_hours` API下限和页面输入下限改为1小时，默认值1；止损/风控退出仍可提前。最大上限改为90天（2160小时），便于30天评估策略继续持仓。
+- 新增账号策略字段：各原生K线周期相对权重、`trend_following`/`countertrend_rebound`/`balanced`三种方向规则、3/7/30天决策期限及其它期限共识权重。所选周期至少一个权重为正；逆势反弹要求基础周期反转形态与趋势、道氏或背离中至少一项确认。多周期特征按已闭合K线收盘时间因果对齐。
+- 入场记录三个期限的方向评分、以滚动历史波动率生成的价格中心与情景带；另用目标时间之后真实已归档K线收盘价生成逐笔实际收益与方向准确率。尾部无足够未来样本时记空值。未来数据仅作事后评估，不参与信号。情景未校准，UI及报告均标记`UNCALIBRATED_SCENARIO`。
+- 模型调研已写入`docs/platform/phase1.md`：TimesFM 3.0适合作通用预测参照但公开权重非商业/非生产许可；公开金融基准未证明普适最佳模型，VSN+LSTM等结论限其研究样本。后续用独立滚动样本外、真实手续费/资金费数据比较简单基线、现有GRU与候选深度架构，不依据宣传排名决定。当前未安装新模型、未自动下载权重。
+- 系统容量初检：`free -h`可用约105 GiB内存、空闲swap约15 GiB，`df -h /home`可用约1.0 TiB，`.runtime/market-data`约1.2 MiB；Compose现有PostgreSQL、Redis AOF、RQ worker均running。暂不加MQ；需随三年采集增长监控。
+- 验证（实际运行，2026-10-19）：`bash scripts/platform.sh test`：48 passed，1项既有Starlette TestClient/httpx弃用提示；包括4小时配置合法、1小时持仓回测、跨期限情景字段、追加未来K线前缀不变、事后真实价格与缺失未来数据处理。`cd frontend && npm test && npm run build`：2 passed，TypeScript/Vite生产构建成功。`python3 scripts/check_docs.py`：529个具名Python函数均有文档；`python3 -m compileall -q backend/app backend/tests`成功。
+- 尚未完成：本地浏览器以隔离账号验收编辑/运行报告全流程；真实三年行情尚未重新采集，未校准情景覆盖率和方向预测；Web深度模型注册/加载与架构对比仍未实现。未宣称任何新模型获利或优于既有模型。
+- 当前以上代码与文档尚未提交、未推送、未触发GitHub CI。最新已提交仍为`7cbf115`；`.local/`为用户/工具已有的未跟踪目录，必须保持不变、不加入提交。
+- 下一步：完成`git diff --check`和staged发布扫描；以显式文件路径运行`bash scripts/checkpoint.sh "feat: add configurable multi-horizon simulation scoring" <files...>`创建本地提交。因用户此前授权GitHub维护，再推送当前分支并记录PR #11 CI状态。后续浏览器隔离账号验证、真实缓存覆盖确认与样本外深度模型基准分为独立开发单元。
+
 ## 发布交接记录
 
 - GitHub已通过官方CLI登录；不在此文件记录任何授权码或Token。

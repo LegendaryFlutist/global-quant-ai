@@ -39,6 +39,7 @@ EXIT_MODES = {
 FEE_RATE = Decimal("0.0005")
 SLIPPAGE_RATE = Decimal("0.0002")
 INITIAL_STOP_ATR = 1.5
+FORECAST_HORIZONS_HOURS = (72, 168, 720)
 
 
 def _frame(records):
@@ -99,16 +100,24 @@ def _divergence_votes(bars, active_bars=4):
     return result
 
 
-def build_multi_theory_signals(bars_by_timeframe, weights, entry_threshold):
-    """按已知收盘时点组合多周期理论方向并生成下一根K线候选信号。
+def build_multi_theory_signals(
+    bars_by_timeframe, weights, entry_threshold, timeframe_weights=None,
+    decision_horizon_hours=168, horizon_consensus_weight=0.25,
+    direction_mode="trend_following",
+):
+    """按多周期权重与持有期限生成因果方向信号及未校准价格情景带。
 
     Args:
         bars_by_timeframe: 15m至1d的原生闭合K线DataFrame映射，至少含最小周期。
         weights: 权重和为1的趋势、道氏、波浪、背离、反转、深度模型配置。
         entry_threshold: 0至1之间的绝对方向分数门槛，不代表胜率。
+        timeframe_weights: 每个原生周期相对权重；值越大该周期贡献越高。
+        decision_horizon_hours: 主要入场评分期限，仅支持72、168、720小时。
+        horizon_consensus_weight: 其余两个期限对入场分数的相对贡献。
+        direction_mode: 顺最高周期、理论确认逆势反弹或多周期多数方向。
 
     Returns:
-        最小周期逐行信号及分项方向分；只在分数与最大配置周期趋势同向时入场。
+        最小周期信号、分期限理论评分、价格情景上下边界及多周期趋势证据。
 
     Raises:
         ValueError: 周期缺失、阈值无效或请求尚无注册器支持的深度模型。
@@ -116,6 +125,7 @@ def build_multi_theory_signals(bars_by_timeframe, weights, entry_threshold):
     Notes:
         周期特征通过已完成收盘时间向下对齐；高周期尚未收盘时沿用最近已知值。
         反转形态只使用最小周期已收盘K线。entry方向在该收盘后交给模拟器下根开盘。
+        价格情景中心与波动带是透明启发式，尚未概率校准，不等同可保证的目标价。
     """
     if not bars_by_timeframe:
         raise ValueError("回测至少需要一个已归档周期")
@@ -126,6 +136,7 @@ def build_multi_theory_signals(bars_by_timeframe, weights, entry_threshold):
     if float(weights.get("deep_model", 0)) > 0:
         raise ValueError("Web模型注册器尚未实现，不能回测未验证的深度模型版本")
     aligned_components = []
+    timeframe_weights = timeframe_weights or {}
     highest_interval = max(bars_by_timeframe, key=lambda item: INTERVAL_MS[item])
     for interval, bars in bars_by_timeframe.items():
         features = structure_features(bars)
@@ -159,37 +170,176 @@ def build_multi_theory_signals(bars_by_timeframe, weights, entry_threshold):
                 aligned[column] = aligned[column].fillna(0).where(valid, 0).astype(np.int8)
         aligned_components.append(aligned.reset_index(drop=True))
     components = pd.concat([item.drop(columns="close_time") for item in aligned_components], axis=1)
-    trend_columns = [column for column in components if column.startswith("trend_")]
-    dow_columns = [column for column in components if column.startswith("dow_")]
-    wave_columns = [column for column in components if column.startswith("wave_")]
-    divergence_columns = [column for column in components if column.startswith("divergence_")]
-    components["trend_score"] = components[trend_columns].mean(axis=1)
-    components["dow123_score"] = components[dow_columns].mean(axis=1)
-    components["wave_score"] = components[wave_columns].mean(axis=1)
-    components["divergence_score"] = components[divergence_columns].mean(axis=1)
-    components["reversal_score"] = np.sign(components[list(PATTERN_COLUMNS)].sum(axis=1))
-    weight_map = {
-        "trend": "trend_score",
-        "dow123": "dow123_score",
-        "wave": "wave_score",
-        "divergence": "divergence_score",
-        "reversal_patterns": "reversal_score",
+    active_timeframes = list(bars_by_timeframe)
+    interval_relative_weights = {
+        interval: float(timeframe_weights.get(interval, 1)) for interval in active_timeframes
     }
-    components["entry_score"] = sum(
-        float(weights.get(weight_name, 0)) * components[column]
-        for weight_name, column in weight_map.items()
-    )
+    if not any(value > 0 for value in interval_relative_weights.values()):
+        raise ValueError("至少一个已选周期的相对权重大于0")
+
+    def weighted_feature(prefix, intervals):
+        """按配置权重汇总已闭合周期特征，返回无量纲方向分数。"""
+        denominator = sum(interval_relative_weights[item] for item in intervals)
+        if denominator <= 0:
+            raise ValueError("参与评分的周期相对权重总和必须大于0")
+        return sum(
+            interval_relative_weights[item] * components[f"{prefix}_{item}"]
+            for item in intervals
+        ) / denominator
+
+    components["trend_score"] = weighted_feature("trend", active_timeframes)
+    components["dow123_score"] = weighted_feature("dow", active_timeframes)
+    components["wave_score"] = weighted_feature("wave", active_timeframes)
+    components["divergence_score"] = weighted_feature("divergence", active_timeframes)
+    components["reversal_score"] = np.sign(components[list(PATTERN_COLUMNS)].sum(axis=1))
+    timeframe_scores = {}
+    nonpattern_weight = sum(float(weights.get(name, 0)) for name in ("trend", "dow123", "wave", "divergence"))
+    for interval in active_timeframes:
+        numerator = sum(
+            float(weights.get(name, 0)) * components[f"{prefix}_{interval}"]
+            for name, prefix in (("trend", "trend"), ("dow123", "dow"), ("wave", "wave"), ("divergence", "divergence"))
+        )
+        denominator = nonpattern_weight
+        if interval == base_interval:
+            numerator += float(weights.get("reversal_patterns", 0)) * components["reversal_score"]
+            denominator += float(weights.get("reversal_patterns", 0))
+        timeframe_scores[interval] = numerator / max(denominator, np.finfo(float).tiny)
+        components[f"timeframe_score_{interval}"] = timeframe_scores[interval]
+    horizon_scores = {}
+    for horizon_hours in FORECAST_HORIZONS_HOURS:
+        eligible = [interval for interval in active_timeframes
+                    if INTERVAL_MS[interval] / 3_600_000 <= horizon_hours / 4]
+        if not eligible:
+            eligible = active_timeframes
+        eligible = [interval for interval in eligible if interval_relative_weights[interval] > 0]
+        if not eligible:
+            eligible = [interval for interval in active_timeframes if interval_relative_weights[interval] > 0]
+        horizon_weight = sum(interval_relative_weights[item] for item in eligible)
+        horizon_scores[horizon_hours] = sum(
+            interval_relative_weights[item] * timeframe_scores[item] for item in eligible
+        ) / horizon_weight
+        components[f"forecast_score_{horizon_hours}h"] = horizon_scores[horizon_hours]
+    consensus = sum(horizon_scores.values()) / len(horizon_scores)
+    horizon_consensus_weight = float(horizon_consensus_weight)
+    if decision_horizon_hours not in FORECAST_HORIZONS_HOURS or not 0 <= horizon_consensus_weight <= 1:
+        raise ValueError("主要预测期限或多期限共识权重无效")
+    primary_score = horizon_scores[decision_horizon_hours]
+    components["entry_score"] = primary_score * (1 - horizon_consensus_weight) + consensus * horizon_consensus_weight
     high_trend = components[f"trend_{highest_interval}"].to_numpy(dtype=np.int8)
     score = components.entry_score.to_numpy(dtype=float)
     direction = np.sign(score).astype(np.int8)
-    permitted = (np.abs(score) >= float(entry_threshold)) & (direction == high_trend) & (high_trend != 0)
+    threshold_pass = np.abs(score) >= float(entry_threshold)
+    if direction_mode == "trend_following":
+        mode_pass = (direction == high_trend) & (high_trend != 0)
+    elif direction_mode == "countertrend_rebound":
+        base_divergence = components[f"divergence_{base_interval}"].to_numpy(dtype=np.int8)
+        base_dow = components[f"dow_{base_interval}"].to_numpy(dtype=np.int8)
+        base_trend = components[f"trend_{base_interval}"].to_numpy(dtype=np.int8)
+        reversal = components["reversal_score"].to_numpy(dtype=np.int8)
+        additional_confirmation = ((base_divergence == direction) | (base_dow == direction) | (base_trend == direction))
+        mode_pass = (high_trend != 0) & (direction == -high_trend) & (reversal == direction) & additional_confirmation
+    elif direction_mode == "balanced":
+        same_direction = np.column_stack([
+            np.sign(timeframe_scores[interval].to_numpy(dtype=float)) == direction
+            for interval in active_timeframes
+        ]).sum(axis=1)
+        mode_pass = same_direction >= math.ceil(len(active_timeframes) / 2)
+    else:
+        raise ValueError("未知的多周期方向规则")
+    permitted = threshold_pass & mode_pass
     direction = np.where(permitted, direction, 0).astype(np.int8)
     signal_names = np.where(direction > 0, "MULTI_THEORY_LONG", np.where(direction < 0, "MULTI_THEORY_SHORT", ""))
     signals = pd.DataFrame({"direction": direction, "pattern": signal_names})
     components["highest_timeframe_trend"] = high_trend
     components["direction"] = direction
     components["close_time"] = base.close_time.to_numpy(dtype=np.int64)
+    bars_per_day = 86_400_000 / INTERVAL_MS[base_interval]
+    log_returns = np.log(base.close.astype(float)).diff()
+    volatility_window = min(len(base), max(20, int(20 * bars_per_day)))
+    min_volatility_observations = min(20, len(base))
+    daily_volatility = log_returns.rolling(
+        volatility_window, min_periods=min_volatility_observations,
+    ).std(ddof=0) * math.sqrt(bars_per_day)
+    for horizon_hours in FORECAST_HORIZONS_HOURS:
+        horizon_days = horizon_hours / 24
+        horizon_sigma = np.clip(
+            daily_volatility.to_numpy(dtype=float) * math.sqrt(horizon_days), 0, 3,
+        )
+        log_shift = np.clip(
+            horizon_scores[horizon_hours].to_numpy(dtype=float) * horizon_sigma * 0.1,
+            -1.5,
+            1.5,
+        )
+        center = base.close.to_numpy(dtype=float) * np.exp(
+            log_shift
+        )
+        spread = np.clip(1.28 * horizon_sigma, 0, 3)
+        components[f"scenario_{horizon_hours}h_center"] = center
+        components[f"scenario_{horizon_hours}h_lower"] = center * np.exp(-spread)
+        components[f"scenario_{horizon_hours}h_upper"] = center * np.exp(spread)
     return signals, components, base_interval, highest_interval
+
+
+def _attach_forecast_outcomes(trades, components, bars):
+    """把入场时生成的期限情景与未来实际收盘价作事后对照。
+
+    Args:
+        trades: 已完成/强制结清的模拟成交记录，含入场、信号和方向。
+        components: 决策收盘时可用的多期限分数与价格情景。
+        bars: 截至回测结束的真实本地基础周期K线。
+
+    Returns:
+        附带三天/七天/三十天情景及事后实现结果的逐笔表和校准摘要。
+
+    Notes:
+        未来价格只用于回测事后评价，不会进入过去的入场分数或情景计算。
+    """
+    if trades.empty:
+        return trades, {}
+    output = trades.copy()
+    close_times = bars.close_time.to_numpy(dtype=np.int64)
+    closes = bars.close.to_numpy(dtype=float)
+    forecast_rows = components.set_index("close_time").to_dict(orient="index")
+    evaluations = {}
+    for horizon_hours in FORECAST_HORIZONS_HOURS:
+        horizon = f"{horizon_hours}h"
+        forecast_column_map = {
+            f"forecast_{horizon}_score": f"forecast_score_{horizon}",
+            f"scenario_{horizon}_center": f"scenario_{horizon}_center",
+            f"scenario_{horizon}_lower": f"scenario_{horizon}_lower",
+            f"scenario_{horizon}_upper": f"scenario_{horizon}_upper",
+        }
+        for output_column, source_column in forecast_column_map.items():
+            output[output_column] = output.signal_time.map(
+                lambda timestamp: forecast_rows.get(int(timestamp), {}).get(source_column)
+            )
+        actual_values = []
+        return_values = []
+        for trade in output.itertuples(index=False):
+            target_time = int(trade.entry_time) + horizon_hours * 3_600_000
+            position = int(np.searchsorted(close_times, target_time, side="left"))
+            actual = closes[position] if position < len(closes) else np.nan
+            entry_price = float(trade.entry_price)
+            actual_values.append(actual)
+            return_values.append((actual / entry_price - 1) * 100 if np.isfinite(actual) else np.nan)
+        output[f"actual_{horizon}_close"] = actual_values
+        output[f"actual_{horizon}_return_pct"] = return_values
+        valid = np.isfinite(np.asarray(return_values, dtype=float))
+        if valid.any():
+            realized = np.asarray(return_values, dtype=float)[valid]
+            directions = output.direction.to_numpy(dtype=int)[valid]
+            evaluations[horizon] = {
+                "observations": int(valid.sum()),
+                "directional_accuracy_pct": float((np.sign(realized) == directions).mean() * 100),
+                "mean_directional_return_pct": float((realized * directions).mean()),
+            }
+        else:
+            evaluations[horizon] = {
+                "observations": 0,
+                "directional_accuracy_pct": None,
+                "mean_directional_return_pct": None,
+            }
+    return output, evaluations
 
 
 def _write_immutable_frame(directory, filename, frame):
@@ -257,6 +407,11 @@ def _format_money_columns(frame, allocation):
         "entry_price", "exit_price", "signal_price", "entry_raw_price", "exit_raw_price",
         "initial_stop", "final_stop", "target_price",
     }
+    money_names.update(
+        f"scenario_{horizon}_{bound}" for horizon in ("72h", "168h", "720h")
+        for bound in ("center", "lower", "upper")
+    )
+    money_names.update(f"actual_{horizon}_close" for horizon in ("72h", "168h", "720h"))
     for column in (money_names | capital_names) & set(output.columns):
         def format_value(value):
             """格式化单个研究结果字段且将标准化子账户金额换算成USDT。"""
@@ -340,8 +495,15 @@ def _run_asset(db, asset_id, intervals, start_ms, end_ms, weights, threshold, ac
         单标的指标、成交表、权益表、数据源hash和可比较的策略分数摘要。
     """
     bars_by_timeframe, market_hashes = _read_asset_sources(db, asset_id, intervals, end_ms)
+    configuration = account.configuration
     signals, components, base_interval, high_interval = build_multi_theory_signals(
-        bars_by_timeframe, weights, threshold,
+        bars_by_timeframe,
+        weights,
+        threshold,
+        timeframe_weights=configuration.get("timeframe_weights", {}),
+        decision_horizon_hours=int(configuration.get("decision_horizon_hours", 168)),
+        horizon_consensus_weight=float(configuration.get("horizon_consensus_weight", 0.25)),
+        direction_mode=configuration.get("direction_mode", "trend_following"),
     )
     base = bars_by_timeframe[base_interval]
     all_history = base.loc[base.close_time <= end_ms].reset_index(drop=True)
@@ -409,6 +571,7 @@ def _run_asset(db, asset_id, intervals, start_ms, end_ms, weights, threshold, ac
     )
     trades = result["trades"].copy()
     trades["asset_id"] = asset_id
+    trades, forecast_evaluation = _attach_forecast_outcomes(trades, selected_components, all_history)
     trades = _format_money_columns(trades, allocation)
     hashes = {
         "market": market_hashes,
@@ -425,6 +588,13 @@ def _run_asset(db, asset_id, intervals, start_ms, end_ms, weights, threshold, ac
         "raw_metrics": result["metrics"],
         "equity": equity[["close_time", "asset_id", "allocated_equity"]],
         "trades": trades,
+        "forecast_definition": {
+            "status": "UNCALIBRATED_SCENARIO",
+            "horizons_hours": list(FORECAST_HORIZONS_HOURS),
+            "decision_horizon_hours": int(configuration.get("decision_horizon_hours", 168)),
+            "note": "启发式中心与历史波动情景带，仅作可审计假设，不是概率预测或保证目标价",
+        },
+        "forecast_evaluation": forecast_evaluation,
         "dataset_hashes": hashes,
     }
 
@@ -543,8 +713,19 @@ def run_simulation_backtest(db, task_id, parameters):
         "trade_count": int(len(trades)),
         "fees_assumption": {"taker_rate": str(FEE_RATE), "slippage_rate": str(SLIPPAGE_RATE)},
         "holding_policy": {
-            "minimum_hours": int(configuration.get("min_holding_hours", 24)),
+        "minimum_hours": int(configuration.get("min_holding_hours", 1)),
             "maximum_hours": configuration["max_holding_hours"],
+        },
+        "multi_timeframe_policy": {
+            "direction_mode": configuration.get("direction_mode", "trend_following"),
+            "timeframe_weights": configuration.get("timeframe_weights", {}),
+            "decision_horizon_hours": int(configuration.get("decision_horizon_hours", 168)),
+            "horizon_consensus_weight": str(configuration.get("horizon_consensus_weight", "0.25")),
+        },
+        "forecast_definition": {
+            "status": "UNCALIBRATED_SCENARIO",
+            "horizons_hours": list(FORECAST_HORIZONS_HOURS),
+            "scenario_band": "rolling historical volatility scaled by square-root time; not a calibrated confidence interval",
         },
         "margin_assumptions": {
             "maintenance_rate": "0.01",

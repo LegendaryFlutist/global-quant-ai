@@ -52,11 +52,16 @@ def _configuration():
     return {
         "asset_ids": ["binance_usdm:BTCUSDT"],
         "intervals": ["15m", "1h", "4h"],
+        "timeframe_weights": {"15m": "1", "1h": "1", "4h": "1"},
+        "direction_mode": "countertrend_rebound",
+        "decision_horizon_hours": 72,
+        "horizon_consensus_weight": "0.25",
         "weights": _weights(),
         "entry_threshold": "0.35",
         "max_leverage": "2",
         "max_margin_fraction": "0.10",
-        "max_holding_hours": 168,
+        "min_holding_hours": 1,
+        "max_holding_hours": 720,
         "exit_mode": "three_bar_trailing",
         "deep_model_version": None,
     }
@@ -78,14 +83,71 @@ def test_multi_theory_signals_are_prefix_invariant_and_htf_aligned():
         interval: frame.loc[frame.close_time <= cutoff].reset_index(drop=True)
         for interval, frame in complete.items()
     }
-    full_signals, _, _, _ = simulation_backtest.build_multi_theory_signals(
+    full_signals, full_components, _, _ = simulation_backtest.build_multi_theory_signals(
         complete, _weights(), 0.35,
     )
-    prefix_signals, _, _, _ = simulation_backtest.build_multi_theory_signals(
+    prefix_signals, prefix_components, _, _ = simulation_backtest.build_multi_theory_signals(
         prefix, _weights(), 0.35,
     )
     assert full_signals.iloc[: len(prefix["15m"])].direction.tolist() == prefix_signals.direction.tolist()
     assert set(full_signals.direction.unique()).issubset({-1, 0, 1})
+    for horizon in simulation_backtest.FORECAST_HORIZONS_HOURS:
+        for column in (
+            f"forecast_score_{horizon}h",
+            f"scenario_{horizon}h_center",
+            f"scenario_{horizon}h_lower",
+            f"scenario_{horizon}h_upper",
+        ):
+            assert column in full_components
+            np.testing.assert_allclose(
+                full_components[column].iloc[: len(prefix_components)],
+                prefix_components[column],
+                equal_nan=True,
+            )
+        finite = full_components[
+            [f"scenario_{horizon}h_lower", f"scenario_{horizon}h_center", f"scenario_{horizon}h_upper"]
+        ].dropna()
+        assert (finite.iloc[:, 0] <= finite.iloc[:, 1]).all()
+        assert (finite.iloc[:, 1] <= finite.iloc[:, 2]).all()
+
+
+def test_forecast_outcomes_use_only_future_closes_for_retrospective_evaluation():
+    """验证未来价格只用于入场后的事后评估，且数据尾部不足期限时保持空值。
+
+    Returns:
+        无返回值；期限映射、方向统计或缺失未来行情错误时测试失败。
+    """
+    bars = _bars("15m", 4000, 1_760_000_000_000)
+    signal_time = int(bars.close_time.iloc[0])
+    entry_time = int(bars.open_time.iloc[1])
+    components = pd.DataFrame([{
+        "close_time": signal_time,
+        **{f"forecast_score_{horizon}h": 0.5 for horizon in simulation_backtest.FORECAST_HORIZONS_HOURS},
+        **{
+            f"scenario_{horizon}h_{bound}": 100.0
+            for horizon in simulation_backtest.FORECAST_HORIZONS_HOURS
+            for bound in ("center", "lower", "upper")
+        },
+    }])
+    trades = pd.DataFrame([{
+        "signal_time": signal_time,
+        "entry_time": entry_time,
+        "entry_price": 100.0,
+        "direction": 1,
+    }])
+
+    evaluated, summary = simulation_backtest._attach_forecast_outcomes(trades, components, bars)
+
+    assert evaluated.loc[0, "forecast_72h_score"] == 0.5
+    assert evaluated.loc[0, "scenario_72h_center"] == 100.0
+    assert pd.notna(evaluated.loc[0, "actual_72h_close"])
+    assert summary["72h"]["observations"] == 1
+    assert pd.notna(evaluated.loc[0, "actual_720h_close"])
+
+    short_bars = bars.iloc[:100].reset_index(drop=True)
+    short_result, short_summary = simulation_backtest._attach_forecast_outcomes(trades, components, short_bars)
+    assert pd.isna(short_result.loc[0, "actual_72h_close"])
+    assert short_summary["72h"]["observations"] == 0
 
 
 def test_backtest_uses_real_source_hashes_and_writes_immutable_artifacts(tmp_path, monkeypatch):
@@ -189,5 +251,8 @@ def test_backtest_uses_real_source_hashes_and_writes_immutable_artifacts(tmp_pat
     assert result["per_asset"][0]["dataset_hashes"]["mark_manifest_sha256"] == mark_manifest
     assert result["per_asset"][0]["dataset_hashes"]["funding_manifest_sha256"] == funding_manifest
     assert result["initial_equity"] == "10000.12345678"
+    assert result["holding_policy"]["minimum_hours"] == 1
+    assert result["multi_timeframe_policy"]["direction_mode"] == "countertrend_rebound"
+    assert result["forecast_definition"]["status"] == "UNCALIBRATED_SCENARIO"
     assert equity[0]["close_time"] == start
     assert trades == [] or all(item["asset_id"] == "binance_usdm:BTCUSDT" for item in trades)
