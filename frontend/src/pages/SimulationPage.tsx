@@ -5,6 +5,7 @@ import { DataZoomComponent, GridComponent, TooltipComponent } from "echarts/comp
 import { CanvasRenderer } from "echarts/renderers";
 import type { Asset, SimulationAccount, SimulationBacktestRun, SimulationEquityPoint } from "../types";
 import { api, post } from "../services/api";
+import FullResearchBacktests from "./FullResearchBacktests";
 
 echarts.use([LineChart, DataZoomComponent, GridComponent, TooltipComponent, CanvasRenderer]);
 
@@ -217,6 +218,7 @@ export default function SimulationPage() {
       </header>
       {error && <div role="alert" className="alert error">{error}</div>}
       {saved && <div role="status" className="alert">{saved}</div>}
+      <FullResearchBacktests />
       <section className="panel filters">
         <label>回测起始日期（UTC）<input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
         <label>回测结束日期（UTC）<input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>

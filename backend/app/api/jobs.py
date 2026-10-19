@@ -78,4 +78,14 @@ def tasks(user:User=Depends(current_user),db:DBSession=Depends(get_db)):
         任务状态列表；不会把重试中或失败记录标为成功。
     """
     reconcile_task_states(db)
-    return [{'id':t.id,'kind':t.kind,'status':t.status,'parameters':t.parameters,'result':t.result,'attempts':t.attempts,'created_at':t.created_at,'updated_at':t.updated_at} for t in db.scalars(select(Task).order_by(Task.created_at.desc()).limit(100))]
+    rows = db.scalars(select(Task).order_by(Task.created_at.desc()).limit(100))
+    visible = []
+    for task in rows:
+        if task.kind == 'RUN_FULL_RESEARCH' and task.parameters.get('owner_user_id') != user.id:
+            continue
+        parameters = {key: value for key, value in task.parameters.items()
+                      if key not in {'owner_user_id', 'output_id'}}
+        visible.append({'id':task.id,'kind':task.kind,'status':task.status,'parameters':parameters,
+                        'result':task.result,'attempts':task.attempts,'created_at':task.created_at,
+                        'updated_at':task.updated_at})
+    return visible

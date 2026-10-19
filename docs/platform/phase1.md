@@ -103,6 +103,12 @@ Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存�
 
 验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；Python3.11 ARM64镜像构建成功，隔离PostgreSQL/Redis 44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；498个具名Python函数文档检查、发布扫描和语法检查通过。提交`5d2a028`的GitHub backend、frontend、risk-engine、publish-hygiene CI全success（run 39145561898）。`bash scripts/platform.sh up`后API健康端点/首页HTTP 200且新route已注册。未发起真实Binance请求；随后开发的离线回测/曲线实现详见上一节，本机实际行情收益仍未知。
 
+### 系统页面整套多模型回测（2026-10-19）
+
+模拟与回测页面新增全模型任务面板：可选四个优先标的、八种已登记模型及15分钟至4小时入场周期，在页面启动同一离线研究引擎。任务保存在现有`scheduled_tasks`表，由独立NVIDIA PyTorch容器处理；引擎在每个模型验证折及周期/退出配置完成时上报实际进度，页面每2秒轮询并显示百分比与当前标的/周期/模型/折。报告保存在`.runtime/research-runs/<UUID>`，页面按登录用户隔离读取总体摘要、模型/标的报告、不同退出模式排名、验证期权益曲线和逐笔模拟操作。已有`runs/`中带`batch_summary.json`的历史报告作为只读归档展示，不修改旧报告。GPU容器无Binance私有密钥，邮件仅模拟，禁止下单。
+
+验证：新增认证任务输入/所有权、固定UUID报告路径、曲线/逐笔报告读取、历史报告只读及路径穿越拒绝测试；最终`bash scripts/platform.sh test`隔离PostgreSQL/Redis为51 passed，1条既有Starlette TestClient弃用提示。前端`npm test`为2 passed，`npm run build`成功；`python3 scripts/check_docs.py`覆盖559个具名Python函数，语法检查通过。`bash scripts/platform.sh up`完成API/Web/NVIDIA runner构建和启动，API健康、CUDA可用；未从页面触发完整新回测，因此尚未验证一次完整端到端GPU任务耗时/报告。
+
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
 - Docker：Python3.11.17；FastAPI0.143.3；SQLAlchemy2.1.5；RQ2.12.0；PostgreSQL15、Redis6。基础镜像摘要、完整Python约束锁和npm锁文件已固定。

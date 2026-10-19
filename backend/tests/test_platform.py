@@ -109,7 +109,8 @@ def test_asset_priority_identity_and_truthful_capabilities(logged_in):
     statuses={c['id']:c['status'] for c in caps}
     assert statuses['platform']=='IMPLEMENTED'
     assert statuses['technical']=='PARTIAL'
-    assert all(status=='PLANNED' for key,status in statuses.items() if key not in ('platform','technical'))
+    assert statuses['backtests']=='PARTIAL'
+    assert all(status=='PLANNED' for key,status in statuses.items() if key not in ('platform','technical','backtests'))
     assert logged_in.post('/api/execution/orders',json={'side':'BUY'}).status_code==403
 
 def test_settings_validation_persistence_and_csrf(logged_in):

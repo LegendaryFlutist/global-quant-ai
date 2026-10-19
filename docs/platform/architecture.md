@@ -54,6 +54,7 @@ flowchart TB
 - Live market（Phase2）：三年缓存视图只刷新当前选中周期；同源认证且CSRF保护的POST触发币安公开GET，已收盘K线新分段追加，形成中K线以本机SHA256快照显示，错误时退避。当前单API进程锁序列化写入，适用于本机单服务；横向扩容前需共享节流。Python3.11后端和前端CI已通过，本机新容器运行验收待包索引可达。
 - Market cycle（Phase2）：已实现`GET /api/market/sentiment`汇总四个优先永续资产的本地已收盘结构状态；方向分分项包含大小周期趋势、道氏123及最近确认价格-RSI背离，报告波浪候选、20根已收盘对数收益波动、趋势线/破坏、支撑压力和数据哈希。波动率只作背景展示，不改变方向分。大周期冲突或趋势线破坏显示TRANSITIONING，缺档显示UNKNOWN；分数为规则摘要，不是概率或策略收益预测。财经新闻/宏观事件/跨市场传导仍属Phase3。
 - Simulation research（Phase2）：Alembic 0002和认证CRUD保存多个每用户隔离的策略配置；按本地交易价K线、标记价K线和结算资金费回放因果趋势/道氏123/波浪候选/RSI背离/反转形态分数。每账号分别生成带费用、滑点、资金费和保证金假设的逐笔/净值/回撤报告；报告为本地不可变Parquet并绑定配置、算法及来源SHA256，API按账号所有者读取。它不是持续纸面账户，也不能连接实盘或声称收益可复现于未来。
+- Full offline model backtests（Phase2）：`/simulation`中的全模型面板可排队已有研究引擎；API写入带所有者的`RUN_FULL_RESEARCH`持久任务，独立NVIDIA PyTorch容器执行固定白名单、仅本地行情的研究，逐模型/周期/验证折/退出模式更新进度。报告写入`.runtime/research-runs/<task UUID>`，按任务所有者读取；`runs/`里已有`batch_summary.json`的完成批次也以只读归档方式显示。RQ行情worker不消费GPU任务；研究容器不读取私有凭据、不发真实邮件、不产生订单。该页面不代表模型注册、滚动样本外实验或自动择优。
 - Multi-timeframe（Phase2）：仅用截至决策时刻已收盘的大周期。配置高低周期关系，不读取未来高周期收盘。
 - Features / Models（Phase3）：训练集拟合预处理，时间切分与标签窗口隔离；不可变模型版本、代码/数据/特征校验、随机种子、训练产物、评估与批准状态。
 - Ensemble（Phase4）：版本固定的加权、投票、层级、OOF元模型；不能在线自动替换已运行策略。

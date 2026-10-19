@@ -31,6 +31,8 @@ def main():
         from app.domains.models import Task, MarketData
         from rq import Retry
         for task in db.scalars(select(Task).where(Task.status.in_(['QUEUED','QUEUE_ERROR']))):
+            if task.kind == 'RUN_FULL_RESEARCH':
+                continue  # The dedicated NVIDIA runner claims this durable task.
             if queue().fetch_job(task.id) is None:
                 queue().enqueue(execute,task.id,job_id=task.id,retry=Retry(max=2,interval=[5,30]));task.status='QUEUED'
         db.commit()

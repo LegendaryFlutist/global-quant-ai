@@ -26,6 +26,8 @@
 
 回测执行由`scheduled_tasks`的`RUN_SIMULATION_BACKTEST`任务承载；任务参数固定账号所有者、配置修订/哈希和UTC时间窗，结果保存算法及行情来源哈希与报告相对路径。组合权益、回撤和逐笔数据作为按任务UUID隔离的本地不可变Parquet，不新增交易账本数据库表，也不记录模拟账号余额变更。
 
+整套离线模型比较复用`scheduled_tasks`并使用`RUN_FULL_RESEARCH`类型；JSON参数只保存用户ID、固定输出UUID及白名单标的/模型/周期。GPU runner状态和进度写入任务`result`，完整模型/标的报告保存在`.runtime/research-runs/<UUID>/`；该目录不进入Git。已有`runs/`报告只读挂载，通过`batch_summary.json`发现并浏览，不迁移、不覆盖原有产物。
+
 ## Phase2–8 其他规划表（尚未迁移创建）
 
 以下是完整领域规划，不表示存在业务功能；除上方明确列出的revision 0002配置账号表外，其他表都还不存在。后续迁移会补齐更精确字段、外键和并发约束。

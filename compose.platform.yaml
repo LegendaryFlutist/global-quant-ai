@@ -35,6 +35,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATA_ROOT: /market-data
       RESEARCH_ROOT: /research
+      RESEARCH_RUNS_ROOT: /research/research-runs
+      RESEARCH_WORKER_TOKEN: ${PLATFORM_RESEARCH_TOKEN:?Use scripts/platform.sh to generate local credentials}
       COOKIE_SECURE: ${PLATFORM_COOKIE_SECURE:-false}
       ALLOWED_ORIGINS: ${PLATFORM_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
     volumes: &api_volumes
@@ -42,6 +44,7 @@ services:
       - ./.runtime:/secrets
       - ./data:/research/data:ro
       - ./runs:/research/runs:ro
+      - ./.runtime/research-runs:/research/research-runs
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -56,6 +59,46 @@ services:
     environment: *api_environment
     volumes: *api_volumes
     command: [rq, worker, --url, 'redis://redis:6379/0', --with-scheduler, market-data]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  research-runner:
+    image: quant-lab:ngc25.11
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace/quant_lab
+    user: "1000:1000"
+    init: true
+    gpus: all
+    ipc: private
+    shm_size: 8gb
+    environment:
+      RESEARCH_API_URL: http://api:8000
+      RESEARCH_WORKER_TOKEN: ${PLATFORM_RESEARCH_TOKEN:?Use scripts/platform.sh to generate local credentials}
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: /tmp/quant-matplotlib
+      QUANT_MAIL_MODE: simulate
+      HOME: /home/quant
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace/quant_lab
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.env
+        read_only: true
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.runtime/platform.env
+        read_only: true
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.runtime/bootstrap-admin.txt
+        read_only: true
+    command: ["/opt/quant-venv/bin/python", "scripts/research_worker.py"]
     depends_on:
       api: {condition: service_healthy}
     restart: unless-stopped

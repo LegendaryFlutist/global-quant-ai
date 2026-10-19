@@ -204,6 +204,25 @@ def run_pattern_research(data_dir,out,baseline_report,timeframes=tuple(MINUTES),
     simulate_patterns(sample,pd.DataFrame({'direction':0,'pattern':''},index=sample.index),funding_events=funding,execution_data=execution,**risk,**execution_kwargs)
     out.mkdir(parents=True)
     results=[];curves={};trade_cache={};event_records=[];decisions=[];fit_warnings=[];pattern_counts=[];deep_training=[]
+    progress_total=len(timeframes)*len(windows)*len(model_names)+len(timeframes)*len(model_names)*len(exit_modes)
+    progress_done=0
+    def report_progress(phase,timeframe,model,fold=None):
+        """Emit coarse-grained progress after a completed fit or exit simulation.
+
+        Args:
+            phase: Finite stage label safe to display in the authenticated UI.
+            timeframe: Current native entry candle timeframe.
+            model: Registered model name currently being evaluated.
+            fold: Optional chronological validation fold number.
+
+        Returns:
+            None; writes one structured stdout event for the local GPU runner.
+        """
+        nonlocal progress_done
+        progress_done += 1
+        event=dict(percent=min(99,int(progress_done*100/progress_total)),phase=phase,
+                   symbol=source['symbol'],timeframe=timeframe,model=model,fold=fold)
+        print('RESEARCH_PROGRESS '+json.dumps(event,separators=(',',':')),flush=True)
     for timeframe,frame in prepared.items():
         finite=np.isfinite(frame[list(FEATURE_COLUMNS)].to_numpy(dtype=float)).all(axis=1)
         usable=frame.loc[finite]
@@ -239,6 +258,7 @@ def run_pattern_research(data_dir,out,baseline_report,timeframes=tuple(MINUTES),
                         model=name,fold=fold,decision_time=int(row.close_time),signal=int(side),pattern=patterns,
                         higher_trend=int(row.higher_trend),swing_range_pct=float(row.swing_range_pct) if pd.notna(row.swing_range_pct) else None,
                         signal_price=float(row.close),earliest_execution_time=int(row.close_time+1+execution_kwargs['execution_delay_ms']),status='SIMULATED_NOT_SENT',fold_complete=complete))
+                report_progress('model_fold',timeframe,name,fold)
         for name in model_names:
             for exit_mode in exit_modes:
                 key=f'{timeframe}|{name}|{exit_mode}'
@@ -276,6 +296,7 @@ def run_pattern_research(data_dir,out,baseline_report,timeframes=tuple(MINUTES),
                     holding_hours_max=float(max(hours)) if hours else 0.,partial_exit_count=sum(int(t.get('partial_exit_count',0)) for t in trades)))
                 results[-1]['rejection_reasons']=screening_reasons(results[-1])
                 curves[key]=curve;trade_cache[key]=trades
+                report_progress('exit_mode',timeframe,name)
         print('Validated reversal patterns:',source['symbol'],timeframe,flush=True)
     results.sort(key=lambda r:(r['eligible'],r['validation_score']),reverse=True)
     selected=next((r for r in results if r['eligible']),None)

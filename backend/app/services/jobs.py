@@ -89,6 +89,8 @@ def reconcile_task_states(db):
     try:
         q=queue()
         for task in db.scalars(select(Task).where(Task.status.in_(['QUEUED','RUNNING','RETRYING']))):
+            if task.kind == 'RUN_FULL_RESEARCH':
+                continue  # The NVIDIA runner owns this task lifecycle, not the RQ queue.
             job=q.fetch_job(task.id)
             if job is not None:
                 status=job.get_status(refresh=True)

@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。Phase2已实现三年历史K线/标记价/资金费按需本地归档，多周期结构分析与总体周期摘要，隔离多策略账号及只读多理论合约回测报告（逐笔、净值/回撤、分标的统计和来源哈希）。回测提交`1eefbb5`已推送PR #11，GitHub backend/frontend/risk-engine/publish-hygiene四项CI全success；本机47项隔离后端测试、前端2项测试/生产构建、文档及发布扫描通过，容器已重建且API/Web/worker健康。真实Binance数据尚未由用户点击回填，无真实行情收益结论；未实现Web深度模型加载或持续纸面执行。**
+**Phase1及GitHub恢复机制已交付。Phase2已实现本地市场结构、多模拟策略回测以及系统页面上的整套离线多模型任务、真实进度和分模型/标的报告。2026-10-19开发单元本机隔离后端51 passed，前端2 passed/生产构建成功，文档检查559函数通过；NVIDIA runner、API与Web已重建并运行，API健康且CUDA可用。尚未通过已登录浏览器提交一次完整GPU任务；真实三年数据收益尚无结论，未实现模型注册/自动择优或持续纸面执行。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -21,10 +21,15 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 分享准备：匿名配置/示例邮箱、凭据和私人数据排除、发布扫描、贡献指南、安全说明、Issue/PR模板、固定官方Actions摘要的CI、Dependabot。
 - 新克隆：没有私人历史目录时改为公开采集任务；不把不存在的本机数据标为导入成功。
 - 恢复规范：AGENTS.md架构/恢复约定；本进度文件；TASKS.md；只读`resume.sh`、显式文件提交`checkpoint.sh`；持久状态备份/恢复说明。
+- 系统页面完整模型回测：模拟/回测页可启动四标的×八模型及15m–4h周期的白名单组合；NVIDIA PyTorch 25.11 runner运行同一离线引擎，逐个验证折和退出配置报告进度，页面显示模型/标的/周期排名、权益曲线和逐笔操作。已有`runs/*/batch_summary.json`历史批次可只读浏览，新报告写入`.runtime/research-runs/<UUID>`并按用户隔离；不会发真实邮件或订单。
 
 ## 实际验证记录
 
 | 日期 | 开发单元 / 命令 | 真实结果 | 证据 |
+| 2026-10-19 | 全模型页面/API/runner：`bash scripts/platform.sh test` | 51 passed，1项既有Starlette TestClient弃用提示；含任务隔离、曲线和逐笔、旧批次只读及路径穿越回归 | 本机隔离`quant_test`控制台结果；`backend/tests/test_research_backtests.py` |
+| 2026-10-19 | 前端：`cd frontend && npm test && npm run build` | 2 passed；TypeScript和Vite生产构建成功 | 本机控制台结果 |
+| 2026-10-19 | `python3 scripts/check_docs.py`、语法检查、`bash scripts/platform.sh up`、健康与GPU检查 | 559个Python具名函数文档通过；语法检查通过；API健康/数据库/Redis正常；NVIDIA runner已启动，Torch 2.10.0a0+b558c986e8.nv25.11且CUDA可用 | 本机控制台结果；容器`quant-lab-research-runner-1` |
+| 2026-10-19 | 完整GPU任务端到端 | 尚未通过登录页面触发；旧批次接口由隔离API测试覆盖。下一步可在页面点“开始整套回测”验证GPU进度和报告 | 未验证；不能标记为端到端验收 |
 |---|---|---|---|
 | 2026-10-18 | Phase1 Docker + 浏览器 | 4个标的×6周期共24组图表通过，80项资产、34,544根真实K线；无浏览器未捕获异常 | 本机`runs/platform_phase1/browser-check.json`、截图、runtime-check.json |
 | 2026-10-18 | `bash scripts/platform.sh test`（原Phase1） | 20 passed | 本机`runs/platform_phase1/backend-tests.log` |
