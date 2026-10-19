@@ -7,6 +7,7 @@ import pandas as pd
 
 from app.adapters.public_binance import INTERVALS
 from app.services.long_history import read_archive, validate_archive_identity
+from app.services.market_data import candles
 from quant_lab.analysis.market_structure import multitimeframe_structure
 
 STRUCTURE_INTERVALS = tuple(INTERVALS)
@@ -76,7 +77,13 @@ def analyze_archived_structure(db, asset_id, intervals, as_of_ms=None, limit=100
         validate_archive_identity(db, asset_id, interval)
         archive = read_archive(asset_id, interval, limit=limit, end_ms=as_of_ms)
         if archive is None:
-            missing.append(interval)
+            try:
+                cached = candles(db, asset_id, interval, limit=limit, end_ms=as_of_ms)
+            except ValueError:
+                missing.append(interval)
+                continue
+            frames[interval] = pd.DataFrame(cached["candles"])
+            source_hashes[interval] = cached["dataset_sha256"]
             continue
         frames[interval] = pd.DataFrame(archive["candles"])
         source_hashes[interval] = archive["dataset_sha256"]

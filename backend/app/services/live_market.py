@@ -12,7 +12,9 @@ from threading import Lock
 
 from app.adapters.public_binance import BinancePublic, INTERVALS
 from app.core.config import DATA_ROOT
-from app.domains.models import Asset
+from sqlalchemy import select
+
+from app.domains.models import Asset, MarketData
 from app.services.long_history import (
     _archive_directory,
     _interval_end,
@@ -21,7 +23,7 @@ from app.services.long_history import (
     _validate_identity,
     _atomic_manifest,
 )
-from app.services.market_data import FIELDS, bucket_bounds
+from app.services.market_data import FIELDS, bucket_bounds, candles, read_dataset, save_dataset
 
 _REFRESH_LOCK = Lock()
 
@@ -236,7 +238,96 @@ def refresh_latest_candle(db, asset_id, interval, now_ms=None, adapter=None, roo
     directory = _archive_directory(base, symbol, interval)
     manifest = _read_manifest(directory, asset_id, symbol, interval, verify_segments=False)
     if manifest is None or not manifest.get("segments"):
-        raise ValueError("请先按需建立本地长期归档后再开启实时更新")
+        cached_view = candles(db, asset_id, interval, limit=10_000)
+        source_interval = cached_view["source_interval"]
+        metadata = db.scalar(select(MarketData).where(
+            MarketData.asset_id == asset_id,
+            MarketData.interval == source_interval,
+        ))
+        if metadata is None:
+            raise ValueError("当前周期没有本地K线缓存；请先采集历史行情")
+        previous_closed = cached_view["candles"]
+        previous_last_close = previous_closed[-1]["close_time"] if previous_closed else None
+        cached = read_dataset(metadata)
+        if not cached:
+            raise ValueError("当前周期本地K线缓存为空")
+        latest_open = max(int(row["open_time"]) for row in cached)
+        client = adapter or BinancePublic()
+        raw_rows = client.klines(symbol, source_interval, latest_open, current_ms)
+        parsed = [_parse_live_row(raw, source_interval, current_ms) for raw in raw_rows]
+        parsed.sort(key=lambda row: row["open_time"])
+        if len({row["open_time"] for row in parsed}) != len(parsed):
+            raise ValueError("公开K线分页含重复开盘时间")
+        closed = [row for row in parsed if row["is_closed"] and row["open_time"] > latest_open]
+        live = next((row for row in reversed(parsed) if not row["is_closed"]), None)
+        merged = {int(row["open_time"]): row for row in cached}
+        merged.update({row["open_time"]: row for row in closed})
+        saved = None
+        if closed:
+            saved = save_dataset(
+                db,
+                asset_id,
+                source_interval,
+                list(merged.values()),
+                {
+                    "provider": "binance_public_rest",
+                    "mode": "live_incremental_refresh",
+                    "retrieved_at_ms": current_ms,
+                },
+                current_ms,
+            )
+        if source_interval == interval:
+            display_closed = closed
+            display_live = live
+            current_last_close = max(
+                (row["close_time"] for row in merged.values()), default=None
+            )
+        else:
+            updated_view = candles(db, asset_id, interval, limit=10_000)
+            display_closed = [
+                row for row in updated_view["candles"]
+                if previous_last_close is None or row["close_time"] > previous_last_close
+            ]
+            current_last_close = updated_view["candles"][-1]["close_time"] if updated_view["candles"] else previous_last_close
+            live = live or next((row for row in reversed(parsed) if row["is_closed"]), None)
+            target_open, target_end = bucket_bounds(current_ms, interval)
+            live_group = [
+                row for row in [*merged.values(), *([live] if live else [])]
+                if bucket_bounds(int(row["open_time"]), interval)[0] == target_open
+            ]
+            display_live = None
+            if live_group and current_ms < target_end:
+                live_group.sort(key=lambda row: row["open_time"])
+                display_live = {
+                    "open_time": target_open,
+                    "close_time": target_end - 1,
+                    "open": live_group[0]["open"],
+                    "high": max(row["high"] for row in live_group),
+                    "low": min(row["low"] for row in live_group),
+                    "close": live_group[-1]["close"],
+                    "volume": sum((row["volume"] for row in live_group), Decimal("0")),
+                    "is_closed": False,
+                }
+        return {
+            "asset_id": asset_id,
+            "symbol": symbol,
+            "interval": interval,
+            "closed_candles": [
+                {**row, **{field: str(row[field]) for field in FIELDS}}
+                for row in display_closed
+            ],
+            "live_candle": (
+                {**display_live, **{field: str(display_live[field]) for field in FIELDS}}
+                if display_live is not None
+                else None
+            ),
+            "last_closed_at_ms": current_last_close,
+            "updated_at_ms": current_ms,
+            "dataset_sha256": saved.get("sha256") if saved else metadata.sha256,
+            "source": "binance_public_rest",
+            "research_only": True,
+            "stale": False,
+        }
     latest_open = max(segment["last_open_ms"] for segment in manifest["segments"])
     client = adapter or BinancePublic()
     raw_rows = client.klines(symbol, interval, latest_open, current_ms)

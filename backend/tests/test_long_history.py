@@ -10,6 +10,8 @@ from app.core.db import SessionLocal
 from app.domains.models import Asset
 from app.services import long_history
 from app.services import live_market
+from app.services import market_data
+from app.services import structure_analysis
 
 
 def _raw_candles(start_ms, count, interval_ms=86_400_000):
@@ -443,6 +445,127 @@ def test_live_refresh_api_requires_csrf_and_returns_incremental_snapshot(logged_
     unauthenticated = logged_in.__class__(logged_in.app)
     assert unauthenticated.post("/api/market/live", json=payload).status_code == 401
     unauthenticated.close()
+
+
+def test_live_refresh_uses_recent_market_cache_without_long_archive(tmp_path, monkeypatch):
+    """验证普通90天缓存无需三年归档即可刷新并增量保存闭合K线。
+
+    Args:
+        tmp_path: pytest提供的隔离Parquet目录。
+        monkeypatch: pytest依赖替换器，将磁盘根目录固定在临时目录。
+
+    Returns:
+        无返回值；实时蜡烛、已闭合增量和不可变缓存错误会使测试失败。
+    """
+    start_ms = 1_800_000_000_000
+    now_ms = start_ms + 3 * 900_000 + 1
+    monkeypatch.setattr(market_data, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(live_market, "DATA_ROOT", tmp_path)
+
+    class IncrementalAdapter:
+        """仅返回本地缓存尾部之后已闭合和正在形成的测试K线。"""
+
+        def klines(self, symbol, interval, start, end):
+            """按Binance游标契约返回指定测试时间窗中的K线。"""
+            return [row for row in _raw_candles(start_ms, 4, 900_000) if start <= row[0] < end]
+
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == "binance_usdm:BTCUSDT"))
+        asset.verification = "VERIFIED"
+        db.commit()
+        market_data.save_dataset(
+            db,
+            asset.id,
+            "15m",
+            [dict(zip(("open_time", "open", "high", "low", "close", "volume", "close_time"), row))
+             for row in _raw_candles(start_ms, 2, 900_000)],
+            {"provider": "test_public_snapshot"},
+            now_ms,
+        )
+        result = live_market.refresh_latest_candle(
+            db,
+            asset.id,
+            "15m",
+            now_ms=now_ms,
+            adapter=IncrementalAdapter(),
+            root=tmp_path,
+        )
+        metadata = db.scalar(select(market_data.MarketData).where(market_data.MarketData.asset_id == asset.id))
+        saved = market_data.read_dataset(metadata)
+
+    assert len(result["closed_candles"]) == 1
+    assert result["closed_candles"][0]["open_time"] == start_ms + 2 * 900_000
+    assert result["live_candle"]["open_time"] == start_ms + 3 * 900_000
+    assert len(saved) == 3
+    assert result["dataset_sha256"] == metadata.sha256
+
+
+def test_structure_analysis_uses_recent_cache_without_long_archive(tmp_path, monkeypatch):
+    """验证多周期结构分析可使用90天本地K线且返回精确来源哈希。
+
+    Args:
+        tmp_path: pytest提供的隔离Parquet目录。
+        monkeypatch: pytest依赖替换器，隔离长期归档和近期数据路径。
+
+    Returns:
+        无返回值；结构状态、周期覆盖或数据来源丢失会使测试失败。
+    """
+    start_ms = 1_800_000_000_000
+    now_ms = start_ms + 100 * 900_000
+    monkeypatch.setattr(market_data, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(structure_analysis, "read_archive", lambda *args, **kwargs: None)
+    rows = [dict(zip(("open_time", "open", "high", "low", "close", "volume", "close_time"), row))
+            for row in _raw_candles(start_ms, 100, 900_000)]
+
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == "binance_usdm:BTCUSDT"))
+        asset.verification = "VERIFIED"
+        db.commit()
+        saved = market_data.save_dataset(db, asset.id, "15m", rows, {"provider": "test_public_snapshot"}, now_ms)
+        report = structure_analysis.analyze_archived_structure(db, asset.id, ["15m"], now_ms)
+
+    assert report["timeframes"]["15m"]["status"] == "OK"
+    assert report["timeframes"]["15m"]["bars"] == 100
+    assert report["timeframes"]["15m"]["source_sha256"] == saved["sha256"]
+
+
+def test_live_refresh_aggregates_cached_fifteen_minute_bars_for_higher_chart(tmp_path, monkeypatch):
+    """验证4小时内周期可用15分钟缓存产生真实聚合K线和临时大周期蜡烛。
+
+    Args:
+        tmp_path: pytest提供的隔离Parquet目录。
+        monkeypatch: pytest依赖替换器，隔离长期和近期行情路径。
+
+    Returns:
+        无返回值；周期桶边界或forming candle聚合错误会使测试失败。
+    """
+    start_ms = 1_800_000_000_000
+    now_ms = start_ms + 3_660_000
+    monkeypatch.setattr(market_data, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(live_market, "DATA_ROOT", tmp_path)
+
+    class IncrementalAdapter:
+        """返回近期15分钟尾部及当前形成中的源K线。"""
+
+        def klines(self, symbol, interval, start, end):
+            """按精确源周期和UTC毫秒边界读取测试K线。"""
+            return [row for row in _raw_candles(start_ms, 6, 900_000) if start <= row[0] < end]
+
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == "binance_usdm:BTCUSDT"))
+        asset.verification = "VERIFIED"
+        db.commit()
+        source_rows = [dict(zip(("open_time", "open", "high", "low", "close", "volume", "close_time"), row))
+                       for row in _raw_candles(start_ms, 4, 900_000)]
+        market_data.save_dataset(db, asset.id, "15m", source_rows, {"provider": "test_public_snapshot"}, now_ms)
+        result = live_market.refresh_latest_candle(
+            db, asset.id, "1h", now_ms=now_ms, adapter=IncrementalAdapter(), root=tmp_path
+        )
+
+    assert result["interval"] == "1h"
+    assert result["live_candle"]["open_time"] == start_ms + 3_600_000
+    assert result["live_candle"]["is_closed"] is False
+    assert result["live_candle"]["volume"] == "12.75"
 
 
 def test_priority_sentiment_api_rejects_unsupported_cycles(logged_in, monkeypatch):

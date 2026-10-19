@@ -15,7 +15,7 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - Web：React/TypeScript/Vite/ECharts；总览、资产、多周期K线、任务、能力状态、设置、登录；Python3.11 FastAPI按领域拆分。
 - 数据：PostgreSQL/Alembic 0001、Redis/RQ、不可变Decimal Parquet/SHA256；公开Binance精确代码核验、分页采集、断点恢复、异常重试；不伪造小周期或缺失行情。
 - 身份：Argon2id、服务端过期会话、CSRF/Origin检查、登录限流、密码变更撤销会话；本机loopback部署。无实盘执行能力。
-- 资产：80项登记、13个真实精确合约代码的公开元数据快照；四个优先标的KORUUSDT、CLUSDT、NVDAUSDT、BTCUSDT。本机保留34,544根真实15m行情，最近90天大周期严格聚合。
+- 资产：80项登记、13个真实精确合约代码的公开元数据快照；四个优先标的KORUUSDT、CLUSDT、NVDAUSDT、BTCUSDT。2026-10-19公开连接器回填后，13个精确USDT永续各有8,639根真实15m行情（共112,307根），大周期严格聚合。
 - 离线研究：既有12类反转信号、多周期、经典道氏与1-2-3、波浪候选、GRU等模型、杠杆合约回测、持仓统计、分层报告、模拟邮件。风险研究复用冻结GRU与已使用验证窗，按GRU方向支持/大周期趋势/道氏/波浪/反转形态生成质量分，结合波动率、止损、回撤预算限制杠杆和仓位，并仅减仓。策略配置`config/swing.json`、原模型权重与冻结数据计划保持原状。
 - 容器：保留NVIDIA NGC PyTorch 25.11 GPU lab；独立Python3.11 API、worker、Web、PostgreSQL、Redis。镜像摘要与依赖锁固定。
 - 分享准备：匿名配置/示例邮箱、凭据和私人数据排除、发布扫描、贡献指南、安全说明、Issue/PR模板、固定官方Actions摘要的CI、Dependabot。
@@ -182,3 +182,15 @@ bash scripts/platform.sh status
 - 测试与运行：`bash scripts/platform.sh test` 53 passed（1条既有Starlette弃用警告）；前端2 passed/构建成功；`python3 scripts/check_docs.py` 564个函数通过；运行`bash scripts/platform.sh up`后API/Web健康、HTTP 200。数据库中最新VERIFY_ASSETS任务为`SUCCEEDED / VERIFIED_LOCAL_SNAPSHOT`，旧失败任务未改写。MCP公开K线探测BTC/KORU/CL/NVDA/OPENAI/INTC均返回记录；并未把这些临时响应写成后台采集成果。
 - 限制：需要后台下载新数据仍须容器可访问Binance REST；当前宿主代理返回HTTP 451，API Key不能解决DNS或代理策略。
 - 恢复：`bash scripts/resume.sh`；后端测试 `bash scripts/platform.sh test`；前端测试/构建 `cd frontend && npm test && npm run build`；部署 `bash scripts/platform.sh up`。
+
+## 当前开发单元（2026-10-19）：普通行情缓存刷新与技术图表叠加
+
+- 用户要求K线准实时更新、短周期评估更新，并在图表绘制多个独立高低点趋势线、九转、波浪、背驰、MACD、布林线和可调均线。
+- 接受条件：普通90天缓存与三年缓存均每5秒请求一次选中精确标的/周期的公开增量；已闭合K线经Decimal校验后存为新不可变Parquet并更新哈希，未闭合K线只显示/计算临时图表指标，不进入结构判断；90天本地数据可支持结构API；图表含至少3个确认独立pivot趋势线、TD 1–9 setup、已有波浪和RSI背驰标注、右侧确认后的价格-MACD背驰、MACD/布林线/可配MA；单元测试覆盖因果和线条条件。
+- 已实现：实时服务缺少长期归档时回退到`MarketData`本地Parquet，在上游可达时按底层原生缓存周期增量保存闭合数据并聚合返回所选图表周期forming candle。结构服务缺归档时回退到90日数据库缓存及完整桶聚合。普通/长期图表页均轮询5秒，连接故障保留缓存并明确陈旧状态；用户可输入1–500日、最多8项均线周期，采用UTC日收盘值并投影至当前图表周期；MACD、价格-MACD背驰、布林带、九转和符合三个确认点的支撑/压力线前端绘制，波浪候选点和RSI/结构事件叠加。非闭合K线不传入服务器结构分析。
+- 本机行情资产状态：13个精确Binance USDT永续合约的15m Parquet缓存各8,639根，合计112,307根，时间范围约90天；应用`read_dataset`已对全部13个检查SHA256成功。行情来自连接的公开Binance市场数据工具，无密钥；没有更改旧离线回测目录。
+- 实际验证（2026-10-19）：`bash scripts/platform.sh test`结果56 passed，1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build`结果6 passed，TypeScript/Vite构建通过；`python3 scripts/check_docs.py`结果569具名Python函数均有docstring；`bash scripts/platform.sh up`重建成功，API健康、Web/worker已启动。隔离检查确认13个MarketData记录及文件哈希均可读。
+- 未解决/边界：执行环境主机直连Binance REST DNS失败，配置代理HTTP 451，故虽然轮询代码已部署，实际不能取得实时更新；错误只会陈旧告警，不会伪造报价。尚未完成认证浏览器实时验收；高周期聚合仅从现有15m完整K线合法生成，不能得到更小周期。改动无数据库schema迁移。
+- 最新提交需在本单元创建后补录。无GitHub推送/CI状态；此单元代码尚未提交。
+- 下一步：经本机浏览器登录Chart页，检查MA周期输入、趋势线/TD/MACD/布林/波浪显示和刷新陈旧状态；待代理允许`fapi.binance.com:443`后验证真实闭合K线更新与页面多周期分析重算。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch`；后端 `bash scripts/platform.sh test`；前端 `cd frontend && npm test && npm run build`；文档 `python3 scripts/check_docs.py`；平台重建 `bash scripts/platform.sh up`。

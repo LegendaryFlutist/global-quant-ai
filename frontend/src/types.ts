@@ -66,6 +66,7 @@ export interface LiveMarketResult {
   last_closed_at_ms?: number | null;
   updated_at_ms?: number;
   archive_sha256?: string;
+  dataset_sha256?: string;
   live_snapshot_sha256?: string | null;
   source?: string;
   research_only: boolean;
@@ -135,7 +136,7 @@ export interface StructureTimeframe {
   trendline_break_state?: string;
   trend_lines?: Record<string, StructureLine>;
   dow123_state?: number;
-  wave?: { status: string; direction: number; interpretation: string; invalidation: string | null; labels: string[] };
+  wave?: { status: string; direction: number; interpretation: string; invalidation: string | null; labels: string[]; points?: { time: number; price: string; confirmed_at: number }[] };
   latest_divergence?: StructureEvent | null;
 }
 /** Authenticated local-cache analysis for the selected asset and cycle set. */

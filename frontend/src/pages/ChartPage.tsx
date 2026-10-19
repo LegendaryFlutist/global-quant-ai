@@ -27,6 +27,10 @@ export default function ChartPage({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [ma, setMA] = useState(true);
+  const [maPeriodsText, setMAPeriodsText] = useState("5,10,20");
+  const [showBollinger, setShowBollinger] = useState(true);
+  const [showMACD, setShowMACD] = useState(true);
+  const [showTD, setShowTD] = useState(true);
   const [reload, setReload] = useState(0);
   const asset = assets.find((a) => a.id === assetId);
   useEffect(() => {
@@ -70,11 +74,15 @@ export default function ChartPage({
           if (active) setLoading(false);
         });
     } else {
-      setStructure(null);
-      api<CandleResult>(`/market/candles${query}`)
-        .then((value) => {
-        if (!active) return;
-        setData(value);
+      const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])].slice(0, 4).join(",");
+      Promise.all([
+        api<CandleResult>(`/market/candles${query}`),
+        api<StructureResult>(`/market/structure?asset_id=${encodeURIComponent(assetId)}&intervals=${encodeURIComponent(relatedIntervals)}&limit=10000`),
+      ])
+        .then(([value, structureValue]) => {
+          if (!active) return;
+          setData(value);
+          setStructure(structureValue);
         })
         .catch((e) => {
           if (active) setError(e.message);
@@ -87,8 +95,9 @@ export default function ChartPage({
       active = false;
     };
   }, [assetId, interval, reload, showArchive]);
+  const canRefresh = showArchive ? archive?.available === true : Boolean(data?.candles.length);
   useEffect(() => {
-    if (!showArchive || archive?.available !== true) return;
+    if (!canRefresh) return;
     let active = true;
     let timer = 0;
     let retryDelay = 5000;
@@ -100,23 +109,28 @@ export default function ChartPage({
         retryDelay = 5000;
         setLive(result);
         if (result.closed_candles.length) {
-          setArchive((previous) => {
+          if (showArchive) setArchive((previous) => {
             if (!previous?.candles) return previous;
             const byOpen = new Map<number, Candle>(previous.candles.map((candle) => [candle.open_time, candle]));
             result.closed_candles.forEach((candle) => byOpen.set(candle.open_time, candle));
             const candles = [...byOpen.values()].sort((left, right) => left.open_time - right.open_time).slice(-10000);
-            return {
-              ...previous,
-              candles,
-              available_count: (previous.available_count ?? candles.length) + result.closed_candles.length,
+            return { ...previous, candles, available_count: Math.max(previous.available_count ?? 0, candles.length),
               last_close_ms: result.last_closed_at_ms ?? previous.last_close_ms,
               updated_at_ms: result.updated_at_ms ?? previous.updated_at_ms,
               segment_sha256: result.new_segments?.length
                 ? `${previous.segment_sha256 ?? ""}${result.new_segments.map((segment) => segment.sha256).join("")}`
-                : previous.segment_sha256,
-            };
+                : previous.segment_sha256 };
           });
-          const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])].slice(0, 10).join(",");
+          else setData((previous) => {
+            if (!previous) return previous;
+            const byOpen = new Map<number, Candle>(previous.candles.map((candle) => [candle.open_time, candle]));
+            result.closed_candles.forEach((candle) => byOpen.set(candle.open_time, candle));
+            const candles = [...byOpen.values()].sort((left, right) => left.open_time - right.open_time).slice(-10000);
+            return { ...previous, candles, available_count: candles.length,
+              as_of_ms: result.last_closed_at_ms ?? previous.as_of_ms,
+              dataset_sha256: result.dataset_sha256 ?? previous.dataset_sha256 };
+          });
+          const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])].slice(0, 4).join(",");
           void api<StructureResult>(`/market/structure?asset_id=${encodeURIComponent(assetId)}&intervals=${encodeURIComponent(relatedIntervals)}&limit=10000`)
             .then((value) => { if (active) setStructure(value); })
             .catch(() => { /* Keep the last confirmed analysis visible during an outage. */ });
@@ -137,7 +151,7 @@ export default function ChartPage({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive?.available, assetId, interval, showArchive]);
+  }, [canRefresh, assetId, interval, showArchive]);
   /** 创建最近90天公开行情任务；不把入队成功当作采集成功。 */
   async function collect() {
     try {
@@ -179,13 +193,14 @@ export default function ChartPage({
     : chartCandles;
   const currentStructure = structure?.timeframes[interval];
   const currentEvents = structure?.events.filter((event) => event.timeframe === interval) ?? [];
+  const maPeriods = [...new Set(maPeriodsText.split(",").map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0 && value <= 500))].slice(0, 8);
   return (
     <>
       <header className="page-heading">
         <div>
           <span className="eyebrow">MARKET WORKSPACE</span>
           <h1>多周期行情</h1>
-          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示；三年缓存打开后每5秒更新当前周期</p>
+          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示；每5秒尝试刷新当前周期，结构评分只使用闭合K线</p>
         </div>
         <button onClick={() => setReload((n) => n + 1)}>重新读取缓存</button>
       </header>
@@ -208,8 +223,14 @@ export default function ChartPage({
               checked={ma}
               onChange={(e) => setMA(e.target.checked)}
             />
-            MA20 / MA60
+            均线
           </label>
+          <label className="toggle">均线(日)
+            <input aria-label="均线周期(日)" style={{ width: "110px", padding: "6px 8px" }} value={maPeriodsText} onChange={(event) => setMAPeriodsText(event.target.value)} placeholder="5,10,20" />
+          </label>
+          <label className="toggle"><input type="checkbox" checked={showBollinger} onChange={(event) => setShowBollinger(event.target.checked)} />布林线</label>
+          <label className="toggle"><input type="checkbox" checked={showMACD} onChange={(event) => setShowMACD(event.target.checked)} />MACD</label>
+          <label className="toggle"><input type="checkbox" checked={showTD} onChange={(event) => setShowTD(event.target.checked)} />九转</label>
           <button onClick={collect}>采集最近90天</button>
           <button onClick={() => void collectArchive()}>采集三年历史</button>
           <button
@@ -254,7 +275,7 @@ export default function ChartPage({
             <small>可选择已有数据的周期，或创建公开行情采集任务。</small>
           </div>
         ) : chartCandles.length ? (
-          <PriceChart candles={chartCandles} timezone={timezone} showMA={ma} structure={currentStructure} events={currentEvents} />
+          <PriceChart candles={displayCandles} timezone={timezone} showMA={ma} structure={currentStructure} events={currentEvents} maPeriods={maPeriods} showBollinger={showBollinger} showMACD={showMACD} showTD={showTD} />
         ) : showArchive && archive?.available === false ? (
           <div className="empty">本地尚无该标的/周期的长期缓存；点击“采集三年历史”创建后台任务。</div>
         ) : (
@@ -268,7 +289,7 @@ export default function ChartPage({
           <span>
             {showArchive
               ? `长期缓存截止：${date(archive?.last_close_ms, timezone)} · 覆盖状态 ${archive?.status ?? "未缓存"} · ${live?.stale ? "实时更新中断，显示旧缓存" : live ? `更新时间 ${date(live.updated_at_ms, timezone)}` : "等待实时更新"}`
-              : `数据截止：${date(data?.as_of_ms, timezone)}`} · 当前显示{" "}
+              : `数据截止：${date(data?.as_of_ms, timezone)} · ${live?.stale ? "实时连接中断，显示旧缓存" : live ? `刷新于 ${date(live.updated_at_ms, timezone)}` : canRefresh ? "正在刷新" : "等待本地行情"}`} · 当前显示{" "}
             {displayCandles.length} 根 / 可用{" "}
             {showArchive ? archive?.available_count ?? 0 : data?.available_count ?? 0} 根
           </span>
@@ -290,16 +311,16 @@ export default function ChartPage({
         </section>
         <section className="panel">
           <h3>分析能力</h3>
-          {showArchive ? (
+          {currentStructure ? (
             <>
-              <p>分析截止：{date(structure?.as_of_ms, timezone)} · 只读已收盘K线 · {structure?.algorithm ?? "等待归档数据"}</p>
+              <p>分析截止：{date(currentStructure.last_closed_at, timezone)} · 只读已收盘K线 · {structure?.algorithm ?? "等待缓存数据"}</p>
               <p>当前周期：{interval} · 结构趋势 {currentStructure?.trend === 1 ? "上升" : currentStructure?.trend === -1 ? "下降" : currentStructure?.status === "OK" ? "震荡/分歧" : "数据不足"} · 趋势线状态 {currentStructure?.trendline_break_state ?? "待缓存"}</p>
               <p>各周期缓存状态：{Object.entries(structure?.timeframes ?? {}).map(([tf, value]) => `${tf} ${value.status === "OK" ? value.trendline_break_state === "BROKEN" ? "趋势线破坏" : "可分析" : "数据不足"}`).join(" · ") || "请先采集对应周期"}</p>
               <p>已确认事件：{currentEvents.length ? currentEvents.slice(-4).map((event) => `${event.kind} ${date(event.confirmed_at, timezone)}`).join("；") : "本周期暂无破位、123或RSI背离确认"}</p>
               <p>波浪计数：{currentStructure?.wave?.status ?? "样本不足/待缓存"} · 只作为结构候选，不表示获利概率。</p>
             </>
           ) : (
-            <p>90天缓存用于普通蜡烛图；切换到“三年缓存”后会加载已落盘周期的趋势线、道氏123、波浪候选、RSI背离和跨周期结构破坏时间。</p>
+            <p>均线按UTC日收盘值计算并投影到当前周期；MACD、布林带和九转按当前图表周期计算。缓存可用时显示因果趋势、道氏123、波浪候选与背离；未收盘线只显示临时技术指标，不参与结构评分。</p>
           )}
         </section>
       </div>

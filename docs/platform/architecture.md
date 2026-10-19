@@ -33,7 +33,7 @@ flowchart TB
 | 组件 | 选择 | 原因与边界 |
 |---|---|---|
 | Web | React 19 + TypeScript + Vite 6.4 | 桌面优先、响应式、深色工作台；npm 锁文件 |
-| 图表 | Apache ECharts 6.1（Apache-2.0） | 蜡烛、量柱、MA、十字线、缩放；仅显示已收盘实际数据 |
+| 图表 | Apache ECharts 6.1（Apache-2.0） | 蜡烛、量柱、可调根数MA、布林带、MACD、TD九转、三点趋势线、十字线和缩放；结构判断只读已收盘实际数据 |
 | API | Python 3.11 / FastAPI / Pydantic | 同源 REST；未来需要时添加 WebSocket，不将轮询声称为 WebSocket |
 | ORM / 迁移 | SQLAlchemy 2.1 / Alembic | 业务与迁移分离，首版迁移冻结表定义 |
 | 数据库 | PostgreSQL 15 | 持久业务、外键、事务；未来账本 NUMERIC(38,18) |
@@ -50,8 +50,8 @@ flowchart TB
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
 - Ingestion：公开 GET、来源核验、上市时间、交易日历、原生周期、清洗与分页恢复。无可信来源的全球资产只登记，行情显示缺失。
 - Sentiment / Contagion（Phase3）：各源有时间戳与缺失状态；0–100风险分、六类风险状态；无数据为UNKNOWN。联动统计区分相关、领先滞后与因果假设。
-- Technical（Phase2）：统一研究域结构报告与已认证`GET /api/market/structure`：按选定的本地归档周期分析已收盘K线，返回已确认摆动点、趋势线/破坏、Dow 1-2-3、Elliott候选与因果价格-RSI背离。事件分别保存发生/确认时间、证据和源SHA256；归档图表显示当前周期线/事件及跨周期破坏状态。缺少周期明确报告缺档；分析请求不主动联网。
-- Live market（Phase2）：三年缓存视图只刷新当前选中周期；同源认证且CSRF保护的POST触发币安公开GET，已收盘K线新分段追加，形成中K线以本机SHA256快照显示，错误时退避。当前单API进程锁序列化写入，适用于本机单服务；横向扩容前需共享节流。Python3.11后端和前端CI已通过，本机新容器运行验收待包索引可达。
+- Technical（Phase2）：统一研究域结构报告与已认证`GET /api/market/structure`：优先读长期归档，否则使用近期Parquet缓存及可合法聚合的大周期闭合K线；返回已确认摆动点、结构趋势线/破坏、Dow 1-2-3、Elliott候选与因果价格-RSI背离。图表另外显示需要至少三个已确认独立摆动点的局部支撑/压力线、TD setup序列、MACD价格背驰、布林带、MACD与可配置日均线；日均线使用UTC日收盘并投影至当前图表周期。事件带发生/确认时间和来源SHA256；缺少周期明确报告缺档；分析请求不主动联网。
+- Live market（Phase2）：普通90天缓存图与三年缓存图均可每5秒尝试刷新所选周期；同源认证且CSRF保护的POST触发Binance公开GET。长期归档追加已闭合K线不可变分段，近期缓存写入新的不可变Parquet并更新DB指针，未收盘K线只作为图表快照，不进入结构评分。失败保留旧行情并显示陈旧状态。当前主机网络仍有DNS/代理451限制，因此部署轮询能力不代表此刻实时源已连通；单API进程锁不跨副本。
 - Market cycle（Phase2）：已实现`GET /api/market/sentiment`汇总四个优先永续资产的本地已收盘结构状态；方向分分项包含大小周期趋势、道氏123及最近确认价格-RSI背离，报告波浪候选、20根已收盘对数收益波动、趋势线/破坏、支撑压力和数据哈希。波动率只作背景展示，不改变方向分。大周期冲突或趋势线破坏显示TRANSITIONING，缺档显示UNKNOWN；分数为规则摘要，不是概率或策略收益预测。财经新闻/宏观事件/跨市场传导仍属Phase3。
 - Simulation research（Phase2）：Alembic 0002和认证CRUD保存多个每用户隔离的策略配置；按本地交易价K线、标记价K线和结算资金费回放因果趋势/道氏123/波浪候选/RSI背离/反转形态分数。每账号分别生成带费用、滑点、资金费和保证金假设的逐笔/净值/回撤报告；报告为本地不可变Parquet并绑定配置、算法及来源SHA256，API按账号所有者读取。它不是持续纸面账户，也不能连接实盘或声称收益可复现于未来。
 - Full offline model backtests（Phase2）：`/simulation`中的全模型面板可排队已有研究引擎；API写入带所有者的`RUN_FULL_RESEARCH`持久任务，独立NVIDIA PyTorch容器执行固定白名单、仅本地行情的研究，逐模型/周期/验证折/退出模式更新进度。报告写入`.runtime/research-runs/<task UUID>`，按任务所有者读取；`runs/`里已有`batch_summary.json`的完成批次也以只读归档方式显示。RQ行情worker不消费GPU任务；研究容器不读取私有凭据、不发真实邮件、不产生订单。该页面不代表模型注册、滚动样本外实验或自动择优。
