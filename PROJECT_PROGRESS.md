@@ -210,3 +210,12 @@ bash scripts/platform.sh status
 - 验证：前端`npm test`为6 passed，`npm run build`通过；`python3 scripts/check_docs.py`通过（569个Python函数）；`git diff --check`通过。执行`bash scripts/platform.sh up`重建Web/API/runner后，首页HTTP 200，API健康且数据库/Redis连接正常。通过本机Chrome只读CDP检查实际用户标签页：新bundle加载，React根节点正常挂载登录页；该标签页认证已过期，`/auth/me`返回401。没有以用户身份提交凭据或执行登录。
 - 待用户操作：重新登录；进入多周期行情复验K线加载。如果再次出现全黑，当前启动/错误兜底会留下可见提示；收集浏览器控制台第一条异常继续定位。
 - 恢复：`bash scripts/resume.sh`；`cd frontend && npm test && npm run build`；`bash scripts/platform.sh up`；健康检查`curl -sS http://127.0.0.1:8080/api/health`。
+
+## 当前开发单元补充（2026-10-19）：ECharts scatter 系列注册故障
+
+- 用户提供的控制台栈明确报错：`Cannot read properties of undefined (reading 'getProgressive')`，位置为ECharts `setOption` 处理scatter系列。检查发现图表创建scatter标记但未导入/注册`ScatterChart`；现已加入`echarts.use`，并新增SSR回归测试实际调用`setOption`和SVG渲染。
+- 控制台同时出现的`/api/market/live` 503来自Binance公开REST连通性故障，只影响实时刷新，不是图表series异常的原因。
+- 启动兜底曾使用内联脚本，与`script-src 'self'`冲突；现迁移至同源`frontend/public/startup.js`，不放宽CSP。服务端HTML只引用同源脚本。
+- 验证：`cd frontend && npm test && npm run build`（scatter SSR回归测试1 passed，TypeScript/Vite构建成功）；`python3 scripts/check_docs.py`（569函数通过）；`git diff --check`通过。`bash scripts/platform.sh up`已重建Web/API/runner；首页和`/startup.js` HTTP 200、API健康。当前Chrome强制刷新后React登录页已渲染，脚本资源使用新bundle；用户会话仍需重新登录。控制台中CSP报错是页面重载前已缓冲的旧日志，现投放的HTML不含任何内联脚本。
+- 待用户操作：登录后重开K线图，确认`getProgressive`异常消失；随后重新登录态下检查图表指标和实时503提示。
+- 恢复：`bash scripts/resume.sh`；前端`cd frontend && npm test && npm run build`；重建`bash scripts/platform.sh up`；健康检查`curl -sS http://127.0.0.1:8080/api/health`。
