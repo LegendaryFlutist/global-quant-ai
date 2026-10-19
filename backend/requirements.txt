@@ -9,5 +9,6 @@ httpx==0.28.1
 pyarrow==19.0.1
 numpy==2.4.3
 pandas==3.0.6
+duckdb==1.5.6
 argon2-cffi==25.1.0
 pytest==9.1.1

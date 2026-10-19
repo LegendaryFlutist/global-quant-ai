@@ -1,9 +1,7 @@
 """按需下载并不可变保存USDM合约标记价格K线及资金费率。"""
 
-import hashlib
 import fcntl
 import json
-import os
 import re
 import time
 from decimal import Decimal, InvalidOperation
@@ -18,6 +16,11 @@ from app.core.config import DATA_ROOT
 from app.domains.models import Asset
 from app.services.long_history import _validate_identity, three_year_start
 from app.services.market_data import bucket_bounds
+from app.storage.parquet_files import (
+    sha256_file,
+    write_content_addressed_parquet,
+    write_json_atomic,
+)
 
 SCHEMA_VERSION = 1
 PAGE_LIMIT = 1000
@@ -112,7 +115,7 @@ def _read_manifest(directory, asset_id, symbol, interval, kind):
         if not name or Path(name).name != name or not name.endswith(".parquet"):
             raise ValueError("衍生品分段路径无效")
         file_path = directory / name
-        if not file_path.is_file() or hashlib.sha256(file_path.read_bytes()).hexdigest() != segment.get("sha256"):
+        if not file_path.is_file() or sha256_file(file_path) != segment.get("sha256"):
             raise ValueError("衍生品分段缺失或SHA256校验失败")
     return manifest
 
@@ -127,10 +130,7 @@ def _atomic_manifest(directory, manifest):
     Returns:
         无返回值；清单通过同目录临时文件替换。
     """
-    target = directory / "manifest.json"
-    temporary = directory / "manifest.tmp"
-    temporary.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-    os.replace(temporary, target)
+    write_json_atomic(directory / "manifest.json", manifest, compact=True)
 
 
 def _persist_page(directory, rows, kind):
@@ -146,17 +146,16 @@ def _persist_page(directory, rows, kind):
     """
     schema = MARK_SCHEMA if kind == "mark" else FUNDING_SCHEMA
     table = pa.Table.from_pylist(rows, schema=schema)
-    temporary = directory / f"page-{time.time_ns()}.tmp"
-    pq.write_table(table, temporary, compression="zstd")
-    digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
     first_key = "open_time" if kind == "mark" else "funding_time"
     last_key = "close_time" if kind == "mark" else "funding_time"
     start, end = rows[0][first_key], rows[-1][last_key]
-    filename = f"{start}-{end}-{digest[:16]}.parquet"
-    target = directory / filename
-    os.replace(temporary, target)
+    target, digest = write_content_addressed_parquet(
+        table,
+        directory,
+        prefix=f"{start}-{end}",
+    )
     return {
-        "file": filename,
+        "file": target.name,
         "rows": len(rows),
         "first_time_ms": start,
         "last_time_ms": end,
@@ -348,7 +347,7 @@ def _manifest_hash(directory):
     Returns:
         64位小写SHA256十六进制字符串。
     """
-    return hashlib.sha256((directory / "manifest.json").read_bytes()).hexdigest()
+    return sha256_file(directory / "manifest.json")
 
 
 def fetch_derivative_history(db, asset_id, interval, start_ms, end_ms, now_ms=None, adapter=None, pause=0.25):

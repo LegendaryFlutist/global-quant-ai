@@ -10,8 +10,10 @@ flowchart TB
     API --> Redis[(Redis / RQ 任务队列)]
     Redis --> Worker[Python 3.11 行情 Worker]
     Worker --> Public[Binance 公开 GET 数据]
-    Worker --> PQ[(不可变 Parquet 历史快照)]
-    API --> PQ
+    Worker --> PQ[(不可变 Parquet 行情分区)]
+    API --> DuckDB[DuckDB 只读分析层]
+    DuckDB --> PQ
+    API --> Cache[(Redis 20秒实时快照缓存)]
     Legacy[现有 NGC PyTorch GPU 研究容器] -. Phase 3/4 接入 .-> Registry[模型版本 / 实验 / 回测服务]
     Registry -.-> PG
     Features[情绪 / 联动 / 技术 / 波浪 / 道氏 / 多周期特征] -.-> Registry
@@ -37,8 +39,10 @@ flowchart TB
 | API | Python 3.11 / FastAPI / Pydantic | 同源 REST；未来需要时添加 WebSocket，不将轮询声称为 WebSocket |
 | ORM / 迁移 | SQLAlchemy 2.1 / Alembic | 业务与迁移分离，首版迁移冻结表定义 |
 | 数据库 | PostgreSQL 15 | 持久业务、外键、事务；未来账本 NUMERIC(38,18) |
-| 任务 | Redis 6 + RQ 2 | AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
-| 历史数据 | Arrow Decimal128 + Parquet/Zstd | 不可变文件 + SHA256 + DB 指针；数据库不存大批重复 OHLC |
+| 任务 | Redis 6 + RQ 2 | 承载任务队列、认证限流及20秒实时K线快照缓存；AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
+| 分析查询 | DuckDB 1.5.6（Python 3.11，ARM64/x86_64） | 进程内只读 SQL 查询已校验的 Parquet 文件；每个请求独立内存连接，不引入第二份可变数据库 |
+| 历史数据 | Arrow Decimal128 + Parquet/Zstd | 不可变文件 + SHA256 + PostgreSQL 元数据指针；数据库不存大批重复 OHLC |
+| 实时缓存 | Redis TTL键 | 20秒缓存已闭合/未闭合数据之外的临时forming candle；断网时API先读Redis，缓存未命中再读带SHA256的本地`live.json`。Redis缓存可丢弃，不能作为历史事实来源 |
 | 身份 | Argon2id + 12小时服务端会话 | 随机令牌只存 SHA256，HttpOnly / SameSite，CSRF、来源校验与限流 |
 | GPU | 现有 NGC PyTorch 25.11 容器 | 保留 GB10/CUDA 环境；该镜像没有 TensorFlow；研究 Python3.12 与新 API3.11 隔离 |
 | 部署 | Docker Compose | web/api/worker/postgres/redis，与原 lab 共存；只发布127.0.0.1:8080 |
@@ -46,6 +50,19 @@ flowchart TB
 相关实现依据：[FastAPI Cookie](https://fastapi.tiangolo.com/advanced/response-cookies/)、[SQLAlchemy PostgreSQL/psycopg](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#module-sqlalchemy.dialects.postgresql.psycopg)、[RQ Worker](https://python-rq.org/docs/workers/)、[ECharts](https://echarts.apache.org/en/index.html)。
 
 ## 模块边界与后续服务
+
+### 数据层职责
+
+- `backend/app/adapters/` 只负责特定供应商的公开读取和响应解析；不在适配器中落库或推断不同产品可交易。
+- `backend/app/services/ingestion.py` 与 `long_history.py` 负责清洗、周期校验、分页恢复和写入编排；真实原生周期行情才可持久化，不补造缺失报价、不向下插值。
+- `backend/app/storage/` 统一文件读写契约。`storage/parquet_files.py`负责流式SHA256、同目录临时文件、fsync与不可变/内容寻址Parquet发布，并原子更新小型manifest；`storage/duckdb_query.py`只读取调用方已校验且明确列出的Parquet分段，时间字段白名单化、文件名用SQL参数传递、Decimal128通过Arrow往返。
+- Parquet是行情/模型输入的规范事实存储；PostgreSQL保存资产/供应商/任务/策略配置和文件哈希指针；Redis当前承载任务队列、认证限流和20秒实时行情快照。Redis失效时实时刷新仍可回退到本地带哈希快照。DuckDB不是独立服务，也不另建共享可变`.duckdb`文件，避免多个API/worker进程竞争写入。
+- 回测交易、净值和完整模型产物保存在带来源/配置/代码SHA256的不可变本地Parquet文件；PostgreSQL仅保留所有者、任务状态与结果索引。技术指标和结构特征应先按确定版本从输入行情计算，保存时须带定义版本、`as_of`、`known_at`和源哈希。
+- 已切换近期行情、三年K线、标记价、费率与未收盘K线快照的原子写入/SHA256校验到storage模块；实时快照额外写入20秒Redis TTL键。近期缓存与三年K线分析查询通过DuckDB读取。后续按`adapters → ingestion services → storage ports → DuckDB readers / Parquet writers → API`迁移其它读路径；迁移期间保留旧API契约，逐项对比行数、时间边界、Decimal、SHA256和冻结回测结果，不移动/覆盖已有行情与报告。
+
+### 接入覆盖范围
+
+资产目录80项中，当前13项具有精确核验的Binance USDT永续代码；这13项各有一份约90天、8,639根15分钟真实K线。当前连接器不能把其它67个股票、ETF、指数关联资产或未验证代码映射成Binance合约。后续需要按`venue + asset_type + provider`配置专属公开适配器和交易日历，并在覆盖页区分`VERIFIED_WITH_DATA`、`VERIFIED_NO_DATA`、`UNSUPPORTED_SOURCE`和`FETCH_BLOCKED`；不会把同底层资产映射成虚构行情。当前公开REST DNS/代理受阻，批量补历史数据须在网络恢复后逐个验证来源。
 
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
 - Ingestion：公开 GET、来源核验、上市时间、交易日历、原生周期、清洗与分页恢复。无可信来源的全球资产只登记，行情显示缺失。

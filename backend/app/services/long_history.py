@@ -2,20 +2,23 @@
 
 import hashlib
 import json
-import os
 import re
 import time
-import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from app.adapters.public_binance import INTERVALS, BinancePublic
 from app.core.config import DATA_ROOT
 from app.domains.models import Asset
+from app.storage.duckdb_query import parquet_row_stats, query_parquet_rows
+from app.storage.parquet_files import (
+    sha256_file,
+    write_content_addressed_parquet,
+    write_json_atomic,
+)
 from app.services.market_data import FIELDS, MINUTES, SCHEMA, bucket_bounds
 
 ARCHIVE_SCHEMA_VERSION = 1
@@ -202,7 +205,7 @@ def _read_manifest(directory, asset_id, symbol, interval, verify_segments=True):
         if target.parent != root or not target.is_file():
             raise ValueError("长期行情分段文件缺失")
         if verify_segments or index == last_index:
-            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            digest = sha256_file(target)
         else:
             digest = segment.get("sha256")
         if (verify_segments or index == last_index) and digest != segment.get("sha256"):
@@ -220,15 +223,7 @@ def _atomic_manifest(directory, manifest):
     Returns:
         写入后的manifest.json路径。
     """
-    path = directory / "manifest.json"
-    temporary = directory / ("manifest." + uuid.uuid4().hex + ".tmp")
-    content = json.dumps(manifest, sort_keys=True, ensure_ascii=False, allow_nan=False)
-    with temporary.open("w", encoding="utf-8") as stream:
-        stream.write(content)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
-    return path
+    return write_json_atomic(directory / "manifest.json", manifest)
 
 
 def _persist_page(directory, rows):
@@ -242,22 +237,13 @@ def _persist_page(directory, rows):
         分段文件名、首尾时间、行数和SHA256。
     """
     table = pa.Table.from_pylist(rows, schema=SCHEMA)
-    temporary = directory / ("segment." + uuid.uuid4().hex + ".tmp")
-    pq.write_table(table, temporary, compression="zstd")
-    with temporary.open("rb") as stream:
-        os.fsync(stream.fileno())
-    digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
-    name = f"{rows[0]['open_time']}-{rows[-1]['open_time']}-{digest[:16]}.parquet"
-    target = directory / name
-    if target.exists():
-        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-            temporary.unlink(missing_ok=True)
-            raise ValueError("长期行情文件名冲突")
-        temporary.unlink()
-    else:
-        os.replace(temporary, target)
+    target, digest = write_content_addressed_parquet(
+        table,
+        directory,
+        prefix=f"{rows[0]['open_time']}-{rows[-1]['open_time']}",
+    )
     return {
-        "file": name,
+        "file": target.name,
         "first_open_ms": rows[0]["open_time"],
         "last_open_ms": rows[-1]["open_time"],
         "last_close_ms": rows[-1]["close_time"],
@@ -312,16 +298,23 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
         return None
     base = Path(root) if root is not None else DATA_ROOT
     directory = _archive_directory(base, manifest["symbol"], interval)
-    rows = []
-    for segment in manifest["segments"]:
-        table = pq.read_table(directory / segment["file"])
-        rows.extend(table.to_pylist())
-    rows.sort(key=lambda row: row["open_time"])
-    if end_ms is not None:
-        rows = [row for row in rows if row["close_time"] <= end_ms]
-    selected = rows[-limit:]
+    segment_paths = [directory / segment["file"] for segment in manifest["segments"]]
+    available_count, first_open_ms, last_close_ms = parquet_row_stats(
+        segment_paths,
+        first_column="open_time",
+        last_column="close_time",
+        end_column="close_time" if end_ms is not None else None,
+        end_ms=end_ms,
+    )
+    selected = query_parquet_rows(
+        segment_paths,
+        order_column="open_time",
+        end_column="close_time" if end_ms is not None else None,
+        end_ms=end_ms,
+        limit=limit,
+    )
     digest_input = "".join(item["sha256"] for item in manifest["segments"])
-    manifest_sha256 = hashlib.sha256((directory / "manifest.json").read_bytes()).hexdigest()
+    manifest_sha256 = sha256_file(directory / "manifest.json")
     return {
         "asset_id": asset_id,
         "symbol": manifest["symbol"],
@@ -330,9 +323,9 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
             {**row, **{field: str(row[field]) for field in FIELDS}}
             for row in selected
         ],
-        "available_count": len(rows),
-        "first_open_ms": rows[0]["open_time"] if rows else None,
-        "last_close_ms": rows[-1]["close_time"] if rows else None,
+        "available_count": available_count,
+        "first_open_ms": first_open_ms,
+        "last_close_ms": last_close_ms,
         "requested_start_ms": manifest["requested_start_ms"],
         "updated_at_ms": manifest["updated_at_ms"],
         "status": manifest["status"],
@@ -456,7 +449,7 @@ def fetch_three_year_archive(
         status=status,
     )
     manifest_path = _atomic_manifest(directory, manifest)
-    dataset_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    dataset_hash = sha256_file(manifest_path)
     return {
         "asset_id": asset_id,
         "interval": interval,

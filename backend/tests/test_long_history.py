@@ -1,6 +1,7 @@
 """长期公开K线归档的隔离单元测试。"""
 
 import hashlib
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -407,6 +408,38 @@ def test_live_refresh_appends_only_closed_rows_and_keeps_open_snapshot(tmp_path)
     assert snapshot["stale"] is True
     assert len(result["live_snapshot_sha256"]) == 64
     assert len(snapshot["sha256"]) == 64
+
+
+def test_live_snapshot_reader_prefers_valid_redis_cache(monkeypatch):
+    """Read a valid short-lived Redis snapshot before using the disk fallback.
+
+    Args:
+        monkeypatch: pytest replacement fixture used to avoid networked Redis.
+
+    Returns:
+        None; asserts the exact product, period, digest and research-only flags.
+    """
+    asset_id = "binance_usdm:BTCUSDT"
+    payload = {
+        "schema_version": 1,
+        "asset_id": asset_id,
+        "symbol": "BTCUSDT",
+        "interval": "15m",
+        "fetched_at_ms": 1_797_900_000_000,
+        "source": "binance_usdm_public_rest_klines",
+        "candle": {"open_time": 1_797_899_100_000, "close": "60000.12"},
+    }
+    payload["sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    monkeypatch.setattr(live_market, "read_cached_live_candle", lambda *_args: payload)
+
+    snapshot = live_market.read_live_snapshot(asset_id, "15m")
+
+    assert snapshot["sha256"] == payload["sha256"]
+    assert snapshot["asset_id"] == asset_id
+    assert snapshot["stale"] is True
+    assert snapshot["research_only"] is True
 
 
 def test_live_refresh_api_requires_csrf_and_returns_incremental_snapshot(logged_in, monkeypatch):

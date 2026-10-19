@@ -2,9 +2,7 @@
 
 import hashlib
 import json
-import os
 import time
-import uuid
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
@@ -12,6 +10,8 @@ from threading import Lock
 
 from app.adapters.public_binance import BinancePublic, INTERVALS
 from app.core.config import DATA_ROOT
+from app.storage.parquet_files import sha256_file, write_json_atomic
+from app.storage.redis_cache import cache_live_candle, read_cached_live_candle
 from sqlalchemy import select
 
 from app.domains.models import Asset, MarketData
@@ -90,7 +90,7 @@ def _parse_live_row(raw, interval, now_ms):
     return {"open_time": open_ms, **prices, "close_time": close_ms, "is_closed": close_ms < now_ms}
 
 
-def _write_live_snapshot(directory, asset_id, symbol, interval, candle, fetched_at_ms):
+def _write_live_snapshot(directory, asset_id, symbol, interval, candle, fetched_at_ms, *, cache_live=False):
     """原子保存最近一次未收盘报价，供断网时标为陈旧快照。
 
     Args:
@@ -100,12 +100,12 @@ def _write_live_snapshot(directory, asset_id, symbol, interval, candle, fetched_
         interval: 交易所原生K线周期。
         candle: 仅本地显示的实时快照；不纳入闭合结构信号。
         fetched_at_ms: 读取时间，UTC毫秒。
+        cache_live: True时将同一已校验快照写入短TTL Redis缓存。
 
     Returns:
         已原子替换的live.json路径。
     """
     path = directory / "live.json"
-    temporary = directory / ("live." + uuid.uuid4().hex + ".tmp")
     payload = {
         "schema_version": 1,
         "asset_id": asset_id,
@@ -120,11 +120,45 @@ def _write_live_snapshot(directory, asset_id, symbol, interval, candle, fetched_
     }
     canonical = json.dumps(payload, sort_keys=True, allow_nan=False).encode("utf-8")
     payload["sha256"] = hashlib.sha256(canonical).hexdigest()
-    temporary.write_text(json.dumps(payload, sort_keys=True, allow_nan=False), encoding="utf-8")
-    with temporary.open("rb") as stream:
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    write_json_atomic(path, payload)
+    if cache_live:
+        cache_live_candle(asset_id, interval, payload)
     return path
+
+
+def _validate_live_snapshot(payload, asset_id, symbol, interval):
+    """Validate a cached or disk-backed forming candle before exposing it.
+
+    Args:
+        payload: Decoded JSON object from Redis or the local snapshot file.
+        asset_id: Expected market-namespaced product identifier.
+        symbol: Expected exact Binance perpetual symbol.
+        interval: Expected native candle period.
+
+    Returns:
+        Snapshot dictionary with verified SHA256 and research/staleness flags.
+
+    Raises:
+        ValueError: Snapshot identity or canonical SHA256 is invalid.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("实时行情快照格式无效")
+    payload = dict(payload)
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("asset_id") != asset_id
+        or payload.get("symbol") != symbol
+        or payload.get("interval") != interval
+    ):
+        raise ValueError("本地实时快照产品身份不匹配")
+    stored_digest = payload.pop("sha256", None)
+    canonical = json.dumps(payload, sort_keys=True, allow_nan=False).encode("utf-8")
+    if not stored_digest or hashlib.sha256(canonical).hexdigest() != stored_digest:
+        raise ValueError("本地实时快照SHA256校验失败")
+    payload["sha256"] = stored_digest
+    payload["research_only"] = True
+    payload["stale"] = True
+    return payload
 
 
 def read_live_snapshot(asset_id, interval, root=None):
@@ -144,6 +178,13 @@ def read_live_snapshot(asset_id, interval, root=None):
     if not isinstance(asset_id, str) or not asset_id.startswith("binance_usdm:") or interval not in INTERVALS:
         raise ValueError("不支持的实时行情资产或周期")
     symbol = asset_id.split(":", 1)[1]
+    if root is None:
+        cached = read_cached_live_candle(asset_id, interval)
+        if cached is not None:
+            try:
+                return _validate_live_snapshot(cached, asset_id, symbol, interval)
+            except ValueError:
+                pass
     base = Path(root) if root is not None else DATA_ROOT
     path = _archive_directory(base, symbol, interval) / "live.json"
     if not path.is_file():
@@ -152,21 +193,7 @@ def read_live_snapshot(asset_id, interval, root=None):
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raise ValueError("本地实时快照损坏") from None
-    if (
-        payload.get("schema_version") != 1
-        or payload.get("asset_id") != asset_id
-        or payload.get("symbol") != symbol
-        or payload.get("interval") != interval
-    ):
-        raise ValueError("本地实时快照产品身份不匹配")
-    stored_digest = payload.pop("sha256", None)
-    canonical = json.dumps(payload, sort_keys=True, allow_nan=False).encode("utf-8")
-    if not stored_digest or hashlib.sha256(canonical).hexdigest() != stored_digest:
-        raise ValueError("本地实时快照SHA256校验失败")
-    payload["sha256"] = stored_digest
-    payload["research_only"] = True
-    payload["stale"] = True
-    return payload
+    return _validate_live_snapshot(payload, asset_id, symbol, interval)
 
 
 def _append_closed_rows(directory, manifest, rows, now_ms):
@@ -340,9 +367,17 @@ def refresh_latest_candle(db, asset_id, interval, now_ms=None, adapter=None, roo
     additions = _append_closed_rows(directory, manifest, closed, current_ms)
     live_snapshot_sha256 = None
     if live is not None:
-        _write_live_snapshot(directory, asset_id, symbol, interval, live, current_ms)
-        live_snapshot_sha256 = hashlib.sha256((directory / "live.json").read_bytes()).hexdigest()
-    directory_manifest_sha = hashlib.sha256((directory / "manifest.json").read_bytes()).hexdigest()
+        _write_live_snapshot(
+            directory,
+            asset_id,
+            symbol,
+            interval,
+            live,
+            current_ms,
+            cache_live=root is None,
+        )
+        live_snapshot_sha256 = sha256_file(directory / "live.json")
+    directory_manifest_sha = sha256_file(directory / "manifest.json")
     return {
         "asset_id": asset_id,
         "symbol": symbol,

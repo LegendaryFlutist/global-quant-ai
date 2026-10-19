@@ -1,19 +1,16 @@
 import csv
-import hashlib
-import json
-import os
-import math
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import pyarrow as pa
-import pyarrow.parquet as pq
 from sqlalchemy import select, text
 from app.core.config import DATA_ROOT
 from app.domains.models import MarketData, utcnow
 from app.adapters.public_binance import INTERVALS
+from app.storage.duckdb_query import query_parquet_rows
+from app.storage.parquet_files import sha256_file, write_parquet_immutable
 
 MINUTES = {'1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'2h':120,'4h':240,'6h':360,'12h':720,'1d':1440,'1w':10080}
 FIELDS = ('open', 'high', 'low', 'close', 'volume')
@@ -90,10 +87,7 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     filename = f'{uuid.uuid4().hex}.parquet'
     target = DATA_ROOT / filename
-    temp = target.with_suffix('.tmp')
-    pq.write_table(pa.Table.from_pylist(rows,schema=SCHEMA),temp,compression='zstd')
-    os.replace(temp,target)
-    sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    _, sha = write_parquet_immutable(pa.Table.from_pylist(rows,schema=SCHEMA),target)
     values = dict(path=filename,row_count=len(rows),first_open_ms=rows[0]['open_time'],last_close_ms=rows[-1]['close_time'],sha256=sha,source=source,updated_at=utcnow())
     if metadata is None:
         db.add(MarketData(asset_id=asset_id,interval=interval,**values))
@@ -116,9 +110,9 @@ def read_dataset(metadata: MarketData):
     path = DATA_ROOT / metadata.path
     if path.parent != DATA_ROOT or not path.is_file():
         raise ValueError('历史数据文件不存在')
-    if hashlib.sha256(path.read_bytes()).hexdigest() != metadata.sha256:
+    if sha256_file(path) != metadata.sha256:
         raise ValueError('历史文件校验失败，停止读取')
-    return pq.read_table(path).to_pylist()
+    return query_parquet_rows([path], order_column='open_time')
 
 def bucket_bounds(ms: int, interval: str):
     """计算UTC固定周期、周一周线或自然月的聚合边界。

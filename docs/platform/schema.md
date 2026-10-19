@@ -18,6 +18,8 @@
 | system_settings | key, value JSON | 当前仅显示偏好；不接受API凭据 |
 | system_events | id, kind, detail JSON, created_at | 预留系统事件记录，目前无监控告警引擎 |
 
+行情事实文件由本地不可变Parquet保存，`market_data_metadata.path/sha256/row_count/time bounds/source`只作为PostgreSQL清单指针。DuckDB以进程内只读连接查询通过SHA256校验的文件；Redis用于任务队列、认证限流和20秒实时K线TTL缓存，缓存未命中时可读本地`live.json`快照。两种实时快照都不作为历史事实或策略配置的权威来源。当前尚无逐笔成交、历史订单簿、技术指标宽表或实盘账本表。
+
 ## Phase2 已迁移配置表（Alembic 0002）
 
 | 表 | 主键 / 关键字段 | 约束与用途 |
