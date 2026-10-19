@@ -173,3 +173,12 @@ bash scripts/platform.sh status
 - 未解决：worker当前未配置代理；宿主机代理只监听127.0.0.1:7897，对Binance的代理请求返回HTTP 451。用户需让代理仅在Docker网桥可达接口监听，并允许`fapi.binance.com:443`，之后在私有运行环境文件设置`PLATFORM_HTTPS_PROXY=http://host.docker.internal:7897`并重新运行`bash scripts/platform.sh up`。尚未验证通过代理获取Binance数据。
 - 本单元未触碰数据库或个人任务；无GitHub Actions状态。本次代码/Compose修改后已重建Docker服务。
 - 恢复：`bash scripts/resume.sh`；配置后启动 `bash scripts/platform.sh up`；查看健康 `bash scripts/platform.sh status`。不要打印`.runtime/platform.env`。
+
+
+## 当前开发单元（2026-10-19）：快照核验降级
+
+- 用户澄清的历史采集路径已核实：四个优先标的90日文件来自已连接的 Binance 公开行情工具，非私有App Key；使用公开行情工具可读取当前K线。平台Docker后台采集仍调用Binance REST，不会自动调用Codex连接器。
+- 代码：DNS/HTTP公开连接错误时，`VERIFY_ASSETS`若有本机`VERIFIED_SNAPSHOT`，保留原资产快照并成功完成为`VERIFIED_LOCAL_SNAPSHOT`，结果标明`live_refresh=false`及警告；任务页面显示此降级原因。历史错误任务保持原样。FETCH_HISTORY/FETCH_ARCHIVE仍要求API容器的DNS/网络可达。
+- 测试与运行：`bash scripts/platform.sh test` 53 passed（1条既有Starlette弃用警告）；前端2 passed/构建成功；`python3 scripts/check_docs.py` 564个函数通过；运行`bash scripts/platform.sh up`后API/Web健康、HTTP 200。数据库中最新VERIFY_ASSETS任务为`SUCCEEDED / VERIFIED_LOCAL_SNAPSHOT`，旧失败任务未改写。MCP公开K线探测BTC/KORU/CL/NVDA/OPENAI/INTC均返回记录；并未把这些临时响应写成后台采集成果。
+- 限制：需要后台下载新数据仍须容器可访问Binance REST；当前宿主代理返回HTTP 451，API Key不能解决DNS或代理策略。
+- 恢复：`bash scripts/resume.sh`；后端测试 `bash scripts/platform.sh test`；前端测试/构建 `cd frontend && npm test && npm run build`；部署 `bash scripts/platform.sh up`。

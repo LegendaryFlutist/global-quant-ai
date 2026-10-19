@@ -90,3 +90,9 @@
 
 - [x] Compose支持私有代理环境配置，API/worker可解析宿主机Docker网关；改动后执行平台重建并确认API/Web健康。
 - [ ] 用户/网络管理员需将代理监听设置为Docker可达接口（限制Docker网段），允许`fapi.binance.com:443`；配置私有`PLATFORM_HTTPS_PROXY`后重建并实际验证Binance GET。当前宿主机代理仍返回451，不能从代码端解除。
+
+
+## 2026-10-19：离线快照核验降级
+
+- [x] 已有已验证快照时，在线exchangeInfo故障不覆盖快照或将任务标失败；结果及后台任务页面明确显示`VERIFIED_LOCAL_SNAPSHOT`、实时核验不可用。后端53 passed，前端2 passed/构建成功，564函数文档检查通过；Docker重建后API/Web健康。
+- [ ] 新K线后台采集仍需允许API容器访问公开Binance REST；Binance MCP连接器的临时访问不会自动接入用户Docker服务。

@@ -228,6 +228,39 @@ def test_public_adapter_451_is_not_fabricated(monkeypatch):
     monkeypatch.setattr(httpx.Client,'get',fake_get)
     with pytest.raises(PublicDataError,match='HTTP 451'):BinancePublic().exchange_info()
 
+def test_verify_assets_retains_verified_snapshot_when_public_dns_fails(monkeypatch):
+    """保留已核验快照，且把在线解析失败报告为降级结果而非伪造实时核验。
+
+    Args:
+        monkeypatch: 临时替换公开exchangeInfo调用，禁止外部网络请求。
+
+    Returns:
+        无返回值；验证本机快照状态不被DNS故障覆盖。
+    """
+    from app.core.db import SessionLocal
+    from app.domains.models import Provider
+    from app.services.ingestion import verify_assets
+
+    def failed_exchange_info(self):
+        """模拟公开域名不可解析，不访问网络或改写行情数据。
+
+        Args:
+            self: 当前公开Binance适配器实例。
+
+        Returns:
+            不返回行情；抛出可识别的公开连接错误。
+        """
+        raise PublicDataError('Binance 公开连接失败：DNS 解析失败')
+
+    monkeypatch.setattr(BinancePublic, 'exchange_info', failed_exchange_info)
+    with SessionLocal() as db:
+        result = verify_assets(db)
+        assert result['verification_mode'] == 'VERIFIED_LOCAL_SNAPSHOT'
+        assert result['live_refresh'] is False
+        assert result['verified_assets'] > 0
+        assert db.get(Provider, 'binance_public').status == 'UNAVAILABLE'
+        assert db.get(Asset, AID).verification in ('VERIFIED_SNAPSHOT', 'VERIFIED')
+
 def test_task_dedup_and_real_redis_queue(logged_in):
     """验证真实Redis入队与相同进行中任务去重。
 

@@ -53,6 +53,8 @@ export default function JobsPage({
                 <td className="job-result">
                   {j.result.error
                     ? String(j.result.error)
+                    : j.result.verification_mode === "VERIFIED_LOCAL_SNAPSHOT"
+                      ? `沿用已核验交易所快照；实时核验未成功：${String(j.result.warning ?? "Binance公开接口不可用")}`
                     : j.result.rows
                       ? `${j.result.rows} 根真实 K 线${j.result.status ? ` · ${String(j.result.status)}` : ""}`
                       : j.kind === "FETCH_ARCHIVE"
