@@ -191,6 +191,6 @@ bash scripts/platform.sh status
 - 本机行情资产状态：13个精确Binance USDT永续合约的15m Parquet缓存各8,639根，合计112,307根，时间范围约90天；应用`read_dataset`已对全部13个检查SHA256成功。行情来自连接的公开Binance市场数据工具，无密钥；没有更改旧离线回测目录。
 - 实际验证（2026-10-19）：`bash scripts/platform.sh test`结果56 passed，1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build`结果6 passed，TypeScript/Vite构建通过；`python3 scripts/check_docs.py`结果569具名Python函数均有docstring；`bash scripts/platform.sh up`重建成功，API健康、Web/worker已启动。隔离检查确认13个MarketData记录及文件哈希均可读。
 - 未解决/边界：执行环境主机直连Binance REST DNS失败，配置代理HTTP 451，故虽然轮询代码已部署，实际不能取得实时更新；错误只会陈旧告警，不会伪造报价。尚未完成认证浏览器实时验收；高周期聚合仅从现有15m完整K线合法生成，不能得到更小周期。改动无数据库schema迁移。
-- 最新提交需在本单元创建后补录。无GitHub推送/CI状态；此单元代码尚未提交。
+- 功能提交`58528d5 feat: add realtime chart refresh and technical overlays`已推送至`feature/phase2-market-structure`。GitHub Actions状态未核验（本机未安装GitHub CLI）；API/Web/GPU runner镜像均已重建，健康检查通过。
 - 下一步：经本机浏览器登录Chart页，检查MA周期输入、趋势线/TD/MACD/布林/波浪显示和刷新陈旧状态；待代理允许`fapi.binance.com:443`后验证真实闭合K线更新与页面多周期分析重算。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch`；后端 `bash scripts/platform.sh test`；前端 `cd frontend && npm test && npm run build`；文档 `python3 scripts/check_docs.py`；平台重建 `bash scripts/platform.sh up`。

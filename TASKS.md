@@ -104,4 +104,4 @@
 - 本机持久行情：13个已登记精确Binance USDT永续合约各8,639根15m已收盘数据，共112,307根，约覆盖90日；通过Parquet SHA256读取校验。该数据采集是当前一次公开行情连接器回填，不表示容器REST已恢复。
 - 验证（2026-10-19）：`bash scripts/platform.sh test` 56 passed，1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build` 6 passed且TypeScript/Vite构建成功；`python3 scripts/check_docs.py` 569个具名Python函数通过；`bash scripts/platform.sh up`完成API/Web/runner重建，API健康且Web启动。数据文件在应用隔离检查中13/13读取和哈希校验通过。
 - 未解决：当前Binance公开REST依然受主机DNS/HTTP代理451阻断，所以5秒轮询会标记陈旧缓存且不会凭空补价；恢复真实自动更新需解决容器到`fapi.binance.com:443`的DNS及代理访问。暂未做认证浏览器的端到端交互验收。单进程锁不支持多API副本共享节流。无数据库schema变更。
-- 最近Git提交以`git log -1 --oneline`为准；本项代码待本地检查点提交。恢复：`bash scripts/resume.sh`；测试 `bash scripts/platform.sh test && (cd frontend && npm test && npm run build)`；文档 `python3 scripts/check_docs.py`；重建 `bash scripts/platform.sh up`。
+- 功能提交`58528d5 feat: add realtime chart refresh and technical overlays`已推送到功能分支；GitHub Actions状态未核验。恢复：`bash scripts/resume.sh`；测试 `bash scripts/platform.sh test && (cd frontend && npm test && npm run build)`；文档 `python3 scripts/check_docs.py`；重建 `bash scripts/platform.sh up`。
