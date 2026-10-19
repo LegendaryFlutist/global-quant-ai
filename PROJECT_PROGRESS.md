@@ -107,7 +107,7 @@ Git分支：`feature/phase2-market-structure`，从PR #10的功能分支`refacto
 - 修改`scripts/resume.sh`末尾，明确告知脚本只读并列出Web启动、GPU容器启动、模型回测和只读状态查看的准确命令；没有将恢复脚本改成自动启动，保留会话恢复无副作用约束。
 - 验证：`bash -n scripts/resume.sh`通过；`bash scripts/resume.sh | tail -n 18`显示正确命令；`bash scripts/platform.sh status`显示核心服务healthy/running；`bash scripts/container.sh run --check`退出码0，四个标的本地数据及运行环境均通过预检。
 - 尚未获得任何具体模型启动失败信息；若按新的`bash scripts/container.sh run`运行仍失败，需要保留该命令的报错全文供定位。无需重建或重置数据库。
-- 本项待本地提交；`.local/`继续保持未跟踪且不触碰。
+- 本项由`bd75e33 docs: clarify recovery and research launch commands`提交并推送至当前PR分支；GitHub Actions backend、frontend、risk-engine、publish-hygiene四项均success。`.local/`继续保持未跟踪且不触碰。
 
 ## 发布交接记录
 
