@@ -203,3 +203,10 @@ bash scripts/platform.sh status
 - 限制：当前无可接管的交互浏览器会话，未做用户浏览器实际截图验收；Binance REST仍有503，图表显示缓存属于预期降级行为。
 - 下一步：用户刷新 http://127.0.0.1:8080 并重新打开多周期行情；如仍复现，记录浏览器控制台第一条异常及标的/周期用于进一步定位。
 - 恢复：`bash scripts/resume.sh`；前端 `cd frontend && npm test && npm run build`；部署 `bash scripts/platform.sh up`；健康检查 `curl -sS http://127.0.0.1:8080/api/health`。
+
+## 当前开发单元补充（2026-10-19）：全页黑屏启动兜底
+
+- 根据用户截图，故障表现是整个React根节点为空/全黑，超出单一图表画布问题。为便于恢复和定位，HTML在React加载前显示启动状态，15秒内模块未完成启动则显示强制刷新提示；React子树渲染异常由`AppErrorBoundary`捕获并显示重新加载面板。
+- 验证：前端`npm test`为6 passed，`npm run build`通过；`python3 scripts/check_docs.py`通过（569个Python函数）；`git diff --check`通过。执行`bash scripts/platform.sh up`重建Web/API/runner后，首页HTTP 200，API健康且数据库/Redis连接正常。通过本机Chrome只读CDP检查实际用户标签页：新bundle加载，React根节点正常挂载登录页；该标签页认证已过期，`/auth/me`返回401。没有以用户身份提交凭据或执行登录。
+- 待用户操作：重新登录；进入多周期行情复验K线加载。如果再次出现全黑，当前启动/错误兜底会留下可见提示；收集浏览器控制台第一条异常继续定位。
+- 恢复：`bash scripts/resume.sh`；`cd frontend && npm test && npm run build`；`bash scripts/platform.sh up`；健康检查`curl -sS http://127.0.0.1:8080/api/health`。
