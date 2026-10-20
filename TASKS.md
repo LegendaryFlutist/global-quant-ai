@@ -79,8 +79,8 @@
 
 ## P1 — 运维与数据
 
-- [x] 平台API/worker不再隐式继承宿主机HTTP(S)代理；代理仅通过私有`PLATFORM_*_PROXY`显式配置。公开连接错误链可识别底层DNS异常；隔离后端74 passed、文档643个函数通过、Docker重建后API健康。
-- [ ] 恢复Binance公开网络访问：当前宿主机与容器都无法解析`fapi.binance.com`，宿主机经Clash请求返回HTTP 451。需要网络/DNS侧放行域名及443，或配置Docker可达且允许该域名的代理；保持TLS校验，成功公开GET后再记录真实采集结果。
+- [x] API/worker通过Docker主机网关上的受限TCP桥接使用本机Clash；只允许量化Compose网段，Clash仍仅监听本机loopback。容器代理请求控制站点HTTP 200，隔离后端75 passed，文档649个函数通过，Docker重建且API健康。
+- [ ] 当前Clash出口经代理请求Binance Futures仍返回CloudFront HTTP 451。需要选择/配置允许`fapi.binance.com:443`的出口节点或处理上游区域限制；成功GET时间接口HTTP 200后再重试实时更新与三年历史归档。
 - [ ] 私人状态备份后做隔离恢复演练；禁止在正在使用的数据库执行覆盖恢复。
 - [ ] 评估兼容的httpx2 TestClient迁移；不因弃用提示盲目替换生产HTTP适配器。
 - [ ] 由维护者明确选择开源许可证；此前不替用户授予额外许可证。
@@ -104,10 +104,11 @@
 - [ ] 网络阻塞：主机Binance DNS失败，代理返回451；需网络策略允许后重试公开REST，不改TLS、不使用替代数据冒充Binance；此阻塞下尚无全部标的真实回测结果。
 - [ ] Phase3：待实现页面训练和不可变模型版本；训练输入需包含按决策时点对齐的多周期结构事件、重复已确认背离、底部RSI钝化状态/后续确认结果、支撑区间及来源/确认时刻。底部未确认时只显示基于已确认支撑与ATR容差的观察区，不给确定性预测。
 
-## 2026-10-19：Docker代理接入（2026-10-20更新默认行为）
+## 2026-10-19：Docker代理接入（2026-10-20修正为Clash网关桥接）
 
-- [x] Compose保留私有代理环境配置；2026-10-20起默认不继承宿主机shell代理，只有私有`PLATFORM_*_PROXY`显式设置时才路由容器请求。
-- [ ] 实际Binance访问仍受阻：宿主机Clash返回HTTP 451，宿主机与容器DNS无法解析`fapi.binance.com`。待网络侧放行或提供Docker可达且允许Binance的线路后，执行公开GET验证；不关闭TLS验证。
+- [x] Compose保留私有代理环境配置；本机Clash只监听loopback，所以新增绑定在Docker host gateway的受限TCP桥接，API/worker经它访问本机Clash；未将代理暴露到LAN。
+- [x] 连通性核验：容器经代理访问控制站点HTTP 200；Binance Futures请求到达CloudFront并返回HTTP 451，已从“代理不可达”定位到当前Clash出口/上游限制。此前SNDK缓存来源是`binance_mcp_public`连接器。
+- [ ] 选择/配置能访问`fapi.binance.com:443`的代理出口并验证HTTP 200后，再触发真实采集；保持TLS验证。
 
 
 ## 2026-10-19：离线快照核验降级

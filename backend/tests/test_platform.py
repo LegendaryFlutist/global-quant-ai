@@ -295,6 +295,61 @@ def test_public_adapter_reports_dns_cause_without_proxy_misclassification(monkey
     with pytest.raises(PublicDataError,match='DNS 解析失败'):
         BinancePublic().exchange_info()
 
+def test_host_proxy_bridge_forwards_only_allowlisted_docker_clients():
+    """Verify the bridge relays TCP bytes and restricts use by client subnet.
+
+    Returns:
+        No value; unexpected forwarding or rejection fails the test. All sockets
+        bind to ephemeral loopback ports and never contact an external network.
+    """
+    import ipaddress
+    import socket
+    import threading
+    from app.services.host_proxy_bridge import _client_is_allowed, _relay_connection
+
+    allowed=ipaddress.ip_network('127.0.0.1/32')
+    assert _client_is_allowed('127.0.0.1',allowed)
+    assert not _client_is_allowed('10.1.2.3',allowed)
+
+    upstream=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    upstream.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+    upstream.bind(('127.0.0.1',0));upstream.listen(1)
+    upstream_port=upstream.getsockname()[1]
+    def upstream_echo():
+        """Echo one test payload to exercise both directions of the TCP relay.
+
+        Returns:
+            No value; closes the ephemeral upstream listener after one client.
+        """
+        connection,_=upstream.accept()
+        with connection:
+            connection.sendall(b'proxy:'+connection.recv(128))
+        upstream.close()
+    upstream_thread=threading.Thread(target=upstream_echo,daemon=True);upstream_thread.start()
+
+    bridge=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    bridge.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+    bridge.bind(('127.0.0.1',0));bridge.listen(1)
+    bridge_port=bridge.getsockname()[1]
+    def bridge_once():
+        """Relay one loopback test client using the allowlist under test.
+
+        Returns:
+            No value; closes the ephemeral bridge listener after one client.
+        """
+        client,_=bridge.accept();bridge.close()
+        _relay_connection(client,'127.0.0.1',upstream_port,allowed)
+    bridge_thread=threading.Thread(target=bridge_once,daemon=True);bridge_thread.start()
+
+    with socket.create_connection(('127.0.0.1',bridge_port),timeout=3) as client:
+        client.settimeout(3)
+        client.sendall(b'CONNECT test.invalid:443')
+        assert client.recv(128)==b'proxy:CONNECT test.invalid:443'
+        client.shutdown(socket.SHUT_WR)
+    bridge_thread.join(timeout=3)
+    upstream_thread.join(timeout=3)
+    assert not bridge_thread.is_alive() and not upstream_thread.is_alive()
+
 def test_verify_assets_retains_verified_snapshot_when_public_dns_fails(monkeypatch):
     """保留已核验快照，且把在线解析失败报告为降级结果而非伪造实时核验。
 

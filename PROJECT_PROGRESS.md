@@ -285,3 +285,14 @@ bash scripts/platform.sh status
 - 未解决：清除了平台误继承的宿主代理，但网络端仍阻止直接解析Binance；宿主机Clash路径返回451。需网络/DNS侧允许`fapi.binance.com`解析并可访问443，或由用户后续显式配置一条Docker可达且确实允许Binance的代理；验证公开GET成功后，再重试实时行情与三年归档。当前历史缓存保持原样且继续标为缓存，不伪装成实时。
 - Git：实现提交`c602b23 fix: isolate platform from host proxy and classify DNS failures`已推送到`feature/phase2-market-structure`；远端分支SHA核验与本地一致。GitHub Actions状态未核验。`.local/`保持未跟踪。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；服务`bash scripts/platform.sh status`；测试`bash scripts/platform.sh test`；重新构建`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。
+
+
+## 当前开发单元（2026-10-20）：让平台容器通过Clash代理访问Binance
+
+- 数据来源核对：PostgreSQL中SNDKUSDT的15m缓存为8,639根，`source.provider`记为`binance_mcp_public`。旧SNDK数据由已连接的Binance公共数据连接器拉取并写入本地缓存；它不是本机Docker API/worker通过REST自行取得，两个路径不能混为一谈。
+- 根因：Clash Verge当前`allow-lan=false`，混合代理只监听宿主机loopback；Compose的`host.docker.internal`解析为宿主机Docker网关，但原容器代理变量为空/指向容器loopback，无法连接该Clash监听。前一单元的“完全去掉宿主机代理继承”没有满足用户必须走代理的实际网络要求，本单元已恢复并修正。
+- 已实现：增加一个无凭据TCP桥接服务，使用host network访问宿主机loopback Clash，再只绑定Docker主机网关地址；桥接拒绝非量化Docker网段客户端，TCP数据不记录日志。私有运行配置显式让API/worker通过此桥接使用HTTP(S)代理；`scripts/platform.sh up/stop`管理桥接生命周期。未改写Clash配置、未开放LAN监听、未关闭用户Clash进程。SNDK既有缓存和其他历史数据保持原样。
+- 验证（2026-10-20）：Compose配置校验及`bash -n scripts/platform.sh`通过；`python3 scripts/check_docs.py`通过（649个具名Python函数）；`bash scripts/platform.sh test`为75 passed、1条既有Starlette TestClient/httpx弃用警告。`bash scripts/platform.sh up`成功重建；API、worker、proxy-bridge、Web、PostgreSQL和Redis运行健康，API health HTTP 200。API和worker经Clash桥接请求`https://example.com/`均返回HTTP 200；经同一代理请求Binance Futures时间接口，收到CloudFront HTTP 451。适配器现显示HTTP 451而非代理连接失败，证明容器代理链路已通，当前代理出口/上游仍拒绝该Binance请求。
+- 未解决：需要在Clash中选择/配置一个实际允许访问`fapi.binance.com:443`的出口节点或由网络侧解决451；确定可用节点前不重试大批历史下载，避免连续失败。通过该节点验证公开时间接口HTTP 200后，重试页面实时行情和三年归档任务。
+- Git：实现与测试待创建本地提交；私有`.runtime/platform.env`仅在本机更新，未纳入Git。`.local/`保持未跟踪。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；服务`bash scripts/platform.sh status`；健康`curl -fsS http://127.0.0.1:8080/api/health`；回归`bash scripts/platform.sh test`；部署`bash scripts/platform.sh up`。

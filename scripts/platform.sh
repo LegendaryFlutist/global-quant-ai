@@ -26,7 +26,7 @@ fi
 COMPOSE=(docker compose --env-file .runtime/platform.env -p quant-lab -f compose.yaml -f compose.platform.yaml)
 case "${1:-up}" in
   up|start) "${COMPOSE[@]}" build api web research-runner
-    "${COMPOSE[@]}" up -d --no-build --pull never postgres redis api worker web research-runner ;;
+    "${COMPOSE[@]}" up -d --no-build --pull never postgres redis proxy-bridge api worker web research-runner ;;
   build) "${COMPOSE[@]}" build api web research-runner ;;
   status) "${COMPOSE[@]}" ps ;;
   logs) "${COMPOSE[@]}" logs --tail=100 "${2:-api}" ;;
@@ -34,7 +34,7 @@ case "${1:-up}" in
     "${COMPOSE[@]}" --profile test run --rm backend-tests || TEST_EXIT_CODE=$?
     "${COMPOSE[@]}" --profile test stop postgres-test redis-test
     exit "$TEST_EXIT_CODE" ;;
-  stop) "${COMPOSE[@]}" stop web worker research-runner api redis postgres ;;
+  stop) "${COMPOSE[@]}" stop web worker research-runner api proxy-bridge redis postgres ;;
   credentials) if [[ -f .runtime/bootstrap-admin.txt ]]; then cat .runtime/bootstrap-admin.txt; else echo '先运行 scripts/platform.sh up'; fi ;;
   *) echo '用法: scripts/platform.sh {up|build|status|logs [服务]|test|stop|credentials}' >&2; exit 2 ;;
 esac

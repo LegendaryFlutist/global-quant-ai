@@ -25,6 +25,25 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+  proxy-bridge:
+    image: global-quant-api:phase1
+    network_mode: host
+    environment:
+      PROXY_BRIDGE_BIND_ADDRESS: ${PLATFORM_PROXY_BRIDGE_BIND_ADDRESS:-172.17.0.1}
+      PROXY_BRIDGE_BIND_PORT: ${PLATFORM_PROXY_BRIDGE_PORT:-17897}
+      PROXY_BRIDGE_UPSTREAM_HOST: ${PLATFORM_PROXY_UPSTREAM_HOST:-127.0.0.1}
+      PROXY_BRIDGE_UPSTREAM_PORT: ${PLATFORM_PROXY_UPSTREAM_PORT:-7897}
+      PROXY_BRIDGE_CLIENT_CIDR: ${PLATFORM_PROXY_CLIENT_CIDR:-172.26.0.0/16}
+    command: [python, -m, app.services.host_proxy_bridge]
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1', int(__import__('os').environ['PROXY_BRIDGE_UPSTREAM_PORT'])), timeout=2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
   api:
     image: global-quant-api:phase1
     build:
@@ -37,8 +56,7 @@ services:
       RESEARCH_ROOT: /research
       RESEARCH_RUNS_ROOT: /research/research-runs
       RESEARCH_WORKER_TOKEN: ${PLATFORM_RESEARCH_TOKEN:?Use scripts/platform.sh to generate local credentials}
-      # Container proxying must be explicitly configured for this platform; host
-      # loopback proxies are not reachable from a container's 127.0.0.1.
+      # This host-specific runtime setting reaches Clash through the restricted bridge.
       HTTP_PROXY: ${PLATFORM_HTTP_PROXY:-}
       HTTPS_PROXY: ${PLATFORM_HTTPS_PROXY:-}
       ALL_PROXY: ${PLATFORM_ALL_PROXY:-}
@@ -56,6 +74,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      proxy-bridge: {condition: service_started}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3)"]
       interval: 10s
