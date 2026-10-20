@@ -14,10 +14,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
-from app.core.config import RESEARCH_ROOT, RESEARCH_RUNS_ROOT, RESEARCH_WORKER_TOKEN
+from app.core.config import DATA_ROOT, RESEARCH_ROOT, RESEARCH_RUNS_ROOT, RESEARCH_WORKER_TOKEN
 from app.core.db import get_db
 from app.core.security import current_user
-from app.domains.models import Audit, Task, User, utcnow
+from app.domains.models import Audit, MarketData, Task, User, utcnow
+from app.storage.parquet_files import sha256_file
 
 router = APIRouter()
 RESEARCH_SYMBOLS = (
@@ -214,54 +215,112 @@ def create_research_backtest(
     return {"id": task.id, "status": task.status}
 
 
-def _has_local_source(symbol: str) -> bool:
-    """确认本机存在真实来源、资金费、标记价和冻结评估计划文件。
+def _research_input_status(symbol: str) -> dict:
+    """检查历史研究所需行情文件、来源证明和冻结验证边界。
 
     Args:
         symbol: 已核验的公开合约代码之一。
 
     Returns:
-        当所有必需本地文件存在时返回True；本函数不发起网络行情请求。
+        含就绪状态和缺失项的诊断字典；不发起网络请求或改写冻结文件。
     """
     data = RESEARCH_ROOT / "data" / f"{symbol.lower()}_90d_connector"
     baseline = RESEARCH_ROOT / "runs" / f"{symbol.lower()}_1h_15m_20261017" / "report.json"
     plan = data / "evaluation_plan.json"
     if plan.is_file():
         baseline = plan
-    bars, funding, mark, source_path = (data / name for name in
-                                        ("bars.csv", "funding.csv", "mark_bars.csv", "source.json"))
-    if not all(path.is_file() for path in (bars, funding, mark, baseline)):
-        return False
+    filenames = {
+        "bars.csv": "交易价K线",
+        "funding.csv": "资金费率",
+        "mark_bars.csv": "标记价K线",
+        "source.json": "行情来源证明",
+    }
+    missing = [label for name, label in filenames.items() if not (data / name).is_file()]
+    if not baseline.is_file():
+        missing.append("冻结评估区间")
+    if missing:
+        return {"ready": False, "status": "MISSING_INPUTS", "requirements": missing,
+                "reason": "缺少" + "、".join(missing)}
+    bars, funding, mark = (data / name for name in ("bars.csv", "funding.csv", "mark_bars.csv"))
     try:
-        source = json.loads(source_path.read_text(encoding="utf-8"))
+        source = json.loads((data / "source.json").read_text(encoding="utf-8"))
         plan = json.loads(baseline.read_text(encoding="utf-8"))
         digest = hashlib.sha256(bars.read_bytes() + funding.read_bytes()).hexdigest()
-        return (source.get("symbol") == symbol and source.get("synthetic") is False
-                and plan.get("dataset_sha256") == digest
-                and isinstance(plan.get("holdout_period_ms"), list)
-                and len(plan["holdout_period_ms"]) == 2)
+        if source.get("symbol") != symbol or source.get("synthetic") is not False:
+            return {"ready": False, "status": "INVALID_SOURCE", "requirements": ["真实来源与标的匹配"],
+                    "reason": "行情来源证明与标的不匹配或标注为合成数据"}
+        if plan.get("dataset_sha256") != digest:
+            return {"ready": False, "status": "FROZEN_PLAN_MISMATCH", "requirements": ["匹配当前数据的冻结评估区间"],
+                    "reason": "冻结评估区间与当前行情数据哈希不匹配"}
+        holdout = plan.get("holdout_period_ms")
+        if not isinstance(holdout, list) or len(holdout) != 2 or not all(isinstance(value, int) for value in holdout) or holdout[1] <= holdout[0]:
+            return {"ready": False, "status": "INVALID_EVALUATION_WINDOW", "requirements": ["有效冻结评估区间"],
+                    "reason": "冻结评估区间缺失或格式无效"}
+        return {"ready": True, "status": "READY", "requirements": [], "reason": "完整研究行情包与冻结评估区间已校验"}
     except (OSError, ValueError, TypeError, AttributeError):
-        return False
+        return {"ready": False, "status": "INVALID_INPUTS", "requirements": ["有效行情来源和评估文件"],
+                "reason": "本地研究文件无法读取或格式无效"}
+
+
+def _has_local_source(symbol: str) -> bool:
+    """确认本机具备完整、可审计的多模型研究数据输入。
+
+    Args:
+        symbol: 已核验的公开合约代码之一。
+
+    Returns:
+        存在真实交易价、标记价、资金费率、来源证明及匹配冻结评估边界时返回True。
+    """
+    return _research_input_status(symbol)["ready"]
+
+
+def _market_cache_status(db: DBSession, symbol: str) -> dict:
+    """报告15分钟Parquet行情缓存是否存在并通过SHA256校验。
+
+    Args:
+        db: 当前认证请求使用的SQLAlchemy数据库会话。
+        symbol: 已核验的Binance USD-M合约代码。
+
+    Returns:
+        本地缓存的存在状态、已验证行数及最后收盘UTC毫秒；不请求上游。
+    """
+    record = db.scalar(select(MarketData).where(
+        MarketData.asset_id == f"binance_usdm:{symbol}", MarketData.interval == "15m"))
+    if record is None:
+        return {"available": False, "verified": False, "rows": 0, "last_close_ms": None}
+    root = DATA_ROOT.resolve()
+    path = (root / record.path).resolve()
+    if path.parent != root or not path.is_file():
+        return {"available": True, "verified": False, "rows": 0, "last_close_ms": None}
+    try:
+        valid = sha256_file(path) == record.sha256
+    except OSError:
+        valid = False
+    return {"available": True, "verified": valid,
+            "rows": int(record.row_count) if valid else 0,
+            "last_close_ms": int(record.last_close_ms) if valid else None}
 
 
 @router.get("/api/research/backtests/coverage")
-def research_backtest_coverage(user: User = Depends(current_user)):
+def research_backtest_coverage(user: User = Depends(current_user), db: DBSession = Depends(get_db)):
     """Return exchange-verified contract coverage and local frozen-plan readiness.
 
     Args:
         user: Authenticated user; coverage itself contains no private account data.
+        db: 当前请求的SQLAlchemy会话，用于读取经过本地哈希验证的K线缓存索引。
 
     Returns:
-        One row per verified contract with a truthful local-data readiness flag.
+        One row per verified contract with separate recent-cache and full-research readiness.
         This endpoint performs no network requests and never fabricates coverage.
     """
     del user
     assets = []
     for symbol in RESEARCH_SYMBOLS:
-        ready = _has_local_source(symbol)
-        assets.append({"symbol": symbol, "ready": ready,
-                       "reason": "本地行情与冻结评估计划齐全" if ready
-                       else "缺少匹配的本地行情或冻结评估计划；采集与评估边界准备后可回测"})
+        research = _research_input_status(symbol)
+        assets.append({"symbol": symbol, "ready": research["ready"],
+                       "status": research["status"], "reason": research["reason"],
+                       "requirements": research["requirements"],
+                       "cached_15m": _market_cache_status(db, symbol)})
     return {"assets": assets, "models": list(RESEARCH_MODELS)}
 
 

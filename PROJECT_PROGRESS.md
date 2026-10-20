@@ -264,3 +264,13 @@ bash scripts/platform.sh status
 - Git：功能提交`28c732a feat: add multi-model deep research backtests`已推送到`feature/phase2-market-structure`，`git ls-remote`确认远端SHA匹配。GitHub Actions run `39360592258`的backend、frontend、risk-engine、publish-hygiene四项均success（https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39360592258）。`.local/`为既存未跟踪目录，未加入提交。
 - 下一步：登录`http://localhost:8080`，在“模拟与回测”页勾选四算法及有本地数据就绪的标的启动任务；观察进度完成后检查总体报告和每模型/标的曲线、收益、回撤、成交与持仓。独立开发滚动样本外基准，不能用已查看的留出区间择模。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；启动/重建`bash scripts/platform.sh up`；隔离后端测试`bash scripts/platform.sh test`；研究测试`bash scripts/container.sh test`；前端`cd frontend && npm test && npm run build`；文档`python3 scripts/check_docs.py`；健康`curl -fsS http://127.0.0.1:8080/api/health`。
+
+## 2026-10-20：回测数据就绪诊断、中文退出原因与模拟边界
+
+- 已完成：多模型回测覆盖接口现在分开返回完整研究包状态与近期15m Parquet缓存状态；缓存文件按元数据SHA256校验，缺项准确列出K线、标记价、资金费率、来源证明及冻结评估区间。前端显示两种覆盖数，不再把有图表K线等同于可进行合约回测。
+- 实际环境核验：13/13 Binance USDM标的均有经SHA256验证的15m缓存，每个8,639根；完整多模型研究包为4/13（KORUUSDT、CLUSDT、NVDAUSDT、BTCUSDT）。其余9个本地只有近期K线缓存，仍缺研究所需标记价、资金费率、来源及匹配冻结评估计划；未伪造或绕过校验。平台历史记录显示容器Binance REST访问受DNS/代理限制，需Docker可达且获准访问`fapi.binance.com:443`后采集。完整包仍缺的资产继续禁用回测选择。
+- 已完成：多模型回测、账号逐笔和风险研究表统一中文解释退出代码；未知代码以中文“其他退出原因”展示并保留代码文本。账号页注明其支持配置和历史回测，没有持续运行的模拟撮合。
+- 边界/未解决：可在多模型页选择已开放的算法做离线回测，尚未把算法版本绑定到配置账号；独立持续纸面账户/余额/持仓台账仍为Phase5 PLANNED。根据根目录AGENTS.md，当前阶段只提供认证公开数据研究，不启用纸面或真实订单。所有13个资产及已有4个研究包的真实回测数据下载和新收益结果未在本轮运行。
+- 验证（2026-10-20）：`bash scripts/platform.sh test`：73 passed，1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build`：3 passed，TypeScript/Vite构建成功；`python3 scripts/check_docs.py`：640个具名Python函数通过；`python3 -m compileall -q backend/app backend/tests`及`git diff --check`通过。Docker已按要求执行`bash scripts/platform.sh up`重建；API健康报告PostgreSQL/Redis已连接，Web与worker运行，NGC runner及原lab容器保持运行。没有修改数据库schema或既有研究报告。
+- 下一步：恢复Docker对Binance公开REST的DNS/代理访问后，重新采集缺失标记价/资金费率，生成数据哈希绑定的新评估版本，再运行13标的比较；Phase4做账号模型绑定，Phase5独立设计持久纸面撮合器并继续保持未实现状态直至该阶段验收。
+- 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；验证`bash scripts/platform.sh test && (cd frontend && npm test && npm run build) && python3 scripts/check_docs.py`；重建`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。`.local/`保持为既有未跟踪用户目录。

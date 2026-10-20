@@ -6,6 +6,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import type { Asset, SimulationAccount, SimulationBacktestRun, SimulationEquityPoint } from "../types";
 import { api, post } from "../services/api";
 import FullResearchBacktests from "./FullResearchBacktests";
+import { formatExitReason } from "../utils/labels";
 
 echarts.use([LineChart, DataZoomComponent, GridComponent, TooltipComponent, CanvasRenderer]);
 
@@ -236,7 +237,7 @@ export default function SimulationPage() {
   return (
     <>
       <header className="page-heading">
-        <div><span className="eyebrow">ISOLATED RESEARCH CONFIGS</span><h1>模拟账号与模型组合</h1><p>账号分别保存策略权重与风险参数；回测只读取本地归档行情，并生成研究账本和净值报告。</p></div>
+        <div><span className="eyebrow">ISOLATED RESEARCH CONFIGS</span><h1>模拟账号与模型组合</h1><p>账号保存策略权重与风险参数，支持本地历史回测。持续纸面撮合、实时余额/持仓账本仍标记为后续阶段。</p></div>
         <button onClick={() => void refreshAccounts()} disabled={loading}>刷新账号</button>
       </header>
       {error && <div role="alert" className="alert error">{error}</div>}
@@ -267,7 +268,7 @@ export default function SimulationPage() {
           <div className="filters">
             {WEIGHTS.map(({ key, label }) => <label key={key}>{label}<input inputMode="decimal" value={draft.configuration.weights[key]} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, weights: { ...draft.configuration.weights, [key]: event.target.value } } })} /></label>)}
           </div>
-          <p>权重合计：{weightTotal.toFixed(2)}。此配置账号的深度模型版本加载尚未接入；下方独立的多模型研究页可运行已开放算法。</p>
+          <p>权重合计：{weightTotal.toFixed(2)}。这里保存理论组合参数；下方多模型研究页可选择已开放算法并运行历史回测。深度模型版本尚未绑定到账户回测。</p>
           {Number(draft.configuration.weights.deep_model) > 0 && <label>深度模型版本ID<input value={draft.configuration.deep_model_version ?? ""} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, deep_model_version: event.target.value || null } })} /></label>}
           <fieldset><legend>回测标的（已选 {draft.configuration.asset_ids.length} 个；仅精确核验永续）</legend>
             {VERIFIED_ASSET_GROUPS.map((group) => {
@@ -333,7 +334,7 @@ export default function SimulationPage() {
                 {backtestLoadingId === account.id ? "排队中…" : "运行本地合约回测"}
               </button>
             </div>
-            <p className="muted">隔离研究账号 · 手续费按单边0.05%、滑点按单边0.02%假设；结果绑定本地数据SHA256。深度模型暂不支持Web版本加载。</p>
+            <p className="muted">隔离研究账号 · 历史回测手续费按单边0.05%、滑点按单边0.02%假设；结果绑定本地数据SHA256。当前没有持续运行的纸面交易撮合器。</p>
             <h4>历史回测比较（{runs[account.id]?.length ?? 0}）</h4>
             {(runs[account.id] ?? []).map((run) => <article key={run.id} className="panel">
               <div className="section-title"><strong>{run.result.status ?? run.status}</strong><small>{new Date(run.created_at).toLocaleString()}</small></div>
@@ -373,7 +374,7 @@ function RunTrades({ accountId, runId }: { accountId: string; runId: string }) {
     <tbody>{trades.map((trade, index) => <tr key={`${String(trade.position_id)}-${index}`}>
       <td>{String(trade.asset_id ?? "—")}</td><td>{Number(trade.direction) > 0 ? "多" : "空"}</td>
       <td>{new Date(Number(trade.entry_time)).toLocaleString()}</td><td>{new Date(Number(trade.exit_time)).toLocaleString()}</td>
-      <td>{String(trade.holding_hours ?? "—")}</td><td>{String(trade.net_pnl ?? "—")}</td><td>{String(trade.exit_reason ?? "—")}</td>
+      <td>{String(trade.holding_hours ?? "—")}</td><td>{String(trade.net_pnl ?? "—")}</td><td>{formatExitReason(String(trade.exit_reason ?? ""))}</td>
       {["72h", "168h", "720h"].map((horizon) => <td key={horizon}>{String(trade[`scenario_${horizon}_center`] ?? "—")}<small className="muted"> [{String(trade[`scenario_${horizon}_lower`] ?? "—")} – {String(trade[`scenario_${horizon}_upper`] ?? "—")} ]<br />事后实际 {String(trade[`actual_${horizon}_close`] ?? "—")}（{String(trade[`actual_${horizon}_return_pct`] ?? "—")}%）</small></td>)}
     </tr>)}</tbody></table>{trades.length === 0 && <p>该次回测没有成交。</p>}</div>;
 }

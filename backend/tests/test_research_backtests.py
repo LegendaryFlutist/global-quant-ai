@@ -1,11 +1,13 @@
 """Authenticated system-page full-research task and report tests."""
 
 import csv
+import hashlib
 import json
 
 from app.api import research_backtests
 from app.core.db import SessionLocal
-from app.domains.models import Task
+from app.domains.models import MarketData, Task
+from app.storage.parquet_files import sha256_file
 
 
 def _queue_task(client, monkeypatch):
@@ -47,12 +49,60 @@ def test_research_task_is_validated_and_owner_scoped(logged_in, monkeypatch):
 
 def test_backtest_coverage_lists_verified_assets_and_registered_algorithms(logged_in, monkeypatch):
     """Expose verified product coverage and all four registered rule/deep algorithms."""
-    monkeypatch.setattr(research_backtests, "_has_local_source", lambda symbol: symbol == "BTCUSDT")
+    monkeypatch.setattr(research_backtests, "_research_input_status", lambda symbol: {
+        "ready": symbol == "BTCUSDT", "status": "READY" if symbol == "BTCUSDT" else "MISSING_INPUTS",
+        "reason": "完整" if symbol == "BTCUSDT" else "缺少标记价", "requirements": [] if symbol == "BTCUSDT" else ["标记价K线"],
+    })
     body = logged_in.get("/api/research/backtests/coverage").json()
     assert len(body["assets"]) == 13
     assert {row["symbol"] for row in body["assets"]} == set(research_backtests.RESEARCH_SYMBOLS)
     assert [row["symbol"] for row in body["assets"] if row["ready"]] == ["BTCUSDT"]
     assert body["models"] == ["analysis_dow123", "patchtst", "tft_attention", "tcn"]
+    bitcoin = next(row for row in body["assets"] if row["symbol"] == "BTCUSDT")
+    assert bitcoin["cached_15m"] == {"available": False, "verified": False, "rows": 0, "last_close_ms": None}
+    assert next(row for row in body["assets"] if row["symbol"] == "KORUUSDT")["requirements"] == ["标记价K线"]
+
+
+def test_research_input_status_reports_missing_and_hash_mismatch(logged_in, monkeypatch, tmp_path):
+    """Explain missing local components and reject an evaluation plan for other bytes."""
+    monkeypatch.setattr(research_backtests, "RESEARCH_ROOT", tmp_path)
+    assert research_backtests._research_input_status("BTCUSDT")["requirements"] == [
+        "交易价K线", "资金费率", "标记价K线", "行情来源证明", "冻结评估区间",
+    ]
+    data = tmp_path / "data" / "btcusdt_90d_connector"
+    data.mkdir(parents=True)
+    bars = b"open_time,close\n1,100\n"
+    funding = b"funding_time,rate\n2,0.001\n"
+    (data / "bars.csv").write_bytes(bars)
+    (data / "funding.csv").write_bytes(funding)
+    (data / "mark_bars.csv").write_text("open_time,close\n1,100\n", encoding="utf-8")
+    (data / "source.json").write_text(json.dumps({"symbol": "BTCUSDT", "synthetic": False}), encoding="utf-8")
+    digest = hashlib.sha256(bars + funding).hexdigest()
+    (data / "evaluation_plan.json").write_text(json.dumps({
+        "dataset_sha256": "0" * 64, "holdout_period_ms": [10, 20],
+    }), encoding="utf-8")
+    assert research_backtests._research_input_status("BTCUSDT")["status"] == "FROZEN_PLAN_MISMATCH"
+    (data / "evaluation_plan.json").write_text(json.dumps({
+        "dataset_sha256": digest, "holdout_period_ms": [10, 20],
+    }), encoding="utf-8")
+    assert research_backtests._research_input_status("BTCUSDT")["ready"] is True
+
+
+def test_market_cache_coverage_checks_file_digest(logged_in, monkeypatch, tmp_path):
+    """Expose cached candle rows only when the file matches its metadata digest."""
+    monkeypatch.setattr(research_backtests, "DATA_ROOT", tmp_path)
+    path = tmp_path / "market.parquet"
+    path.write_bytes(b"test-only-parquet-bytes")
+    with SessionLocal() as db:
+        db.add(MarketData(
+            asset_id="binance_usdm:BTCUSDT", interval="15m", path=path.name,
+            row_count=8640, first_open_ms=1000, last_close_ms=9999,
+            sha256=sha256_file(path), source={},
+        ))
+        db.commit()
+    body = logged_in.get("/api/research/backtests/coverage").json()
+    bitcoin = next(row for row in body["assets"] if row["symbol"] == "BTCUSDT")
+    assert bitcoin["cached_15m"] == {"available": True, "verified": True, "rows": 8640, "last_close_ms": 9999}
 
 
 def test_completed_task_serves_scoped_curve_and_operations(logged_in, monkeypatch, tmp_path):

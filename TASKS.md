@@ -156,3 +156,12 @@
 - [x] 验证：`bash scripts/platform.sh test`为69 passed、1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build`为1 passed且构建成功；`python3 scripts/check_docs.py`为608个具名Python函数通过；`py_compile`及`git diff --check`通过。Docker重建后API/数据库/Redis健康，首页HTTP 200；启动自动建立覆盖13个合约的批任务，worker因代理不可达重试三次后失败，没有新增三年数据。
 - [x] GitHub：实现提交`5d3b6a9`已推送到PR #11；Actions run #53的frontend、backend、publish-hygiene、risk-engine均成功。
 - [ ] 网络管理员/用户需配置Docker可达且允许`fapi.binance.com:443`的代理，之后查看任务页的自动归档及实时状态；451拒绝期间数据不会伪造，也不会被缓存误报为实时。
+
+## 2026-10-20：回测数据就绪诊断与中文退出原因
+
+- [x] 多模型回测页拆分显示15m行情缓存与完整研究包状态；就绪接口核验缓存Parquet SHA256，并逐资产给出缺少的交易价K线、标记价K线、资金费率、来源证明或冻结评估边界。
+- [x] 多模型、模拟账号和风险研究操作表使用统一中文退出原因标签；未知原因仍保留原始码，便于排障。
+- [x] 页面明确账号配置/模型对比/历史回测能力与持续纸面交易的区别。账号绑定模型和实时持久模拟账本仍属Phase4/Phase5计划；遵守当前AGENTS.md公开行情研究阶段边界，不启动订单或纸面撮合。
+- [ ] 数据阻塞：目前13/13有哈希验证通过的近期15m缓存，只有4/13拥有多模型研究包；其余9个缺少交易价/标记价/资金费率研究文件、来源证明和匹配冻结评估区间。Docker Binance REST的DNS/代理访问仍失败；需恢复可达Binance公开接口的网络后按需采集并生成新的不可变评估版本，不能用K线缓存冒充完整合约数据。
+- [ ] Phase4：将已注册算法版本明确绑定到模拟配置账号，完成滚动与消融评估、跨账户收益/风险对照；仅使用训练时间窗拟合。
+- [ ] Phase5：实现独立持久纸面账户、Decimal余额/持仓/逐笔台账、幂等撮合与重启恢复；在边界获更新前保持PLANNED，不启用实盘订单。

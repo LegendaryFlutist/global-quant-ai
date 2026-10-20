@@ -4,6 +4,7 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, DataZoomComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { api, post } from "../services/api";
+import { formatExitReason } from "../utils/labels";
 
 echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, CanvasRenderer]);
 
@@ -26,7 +27,7 @@ const EXIT_LABELS: Record<string, string> = {
 type Progress = { percent: number; phase: string; symbol?: string; timeframe?: string; model?: string; fold?: number };
 type Run = { id: string; status: string; kind?: string; parameters: { symbols: string[]; models: string[]; timeframes: string[] }; progress: Progress; error?: string | null; created_at: string };
 type Summary = { models: string[]; symbols: string[]; configurations: number; sources: { symbol: string; status: string; configurations: number }[] };
-type Coverage = { assets: { symbol: string; ready: boolean; reason: string }[]; models: string[] };
+type Coverage = { assets: { symbol: string; ready: boolean; status: string; reason: string; requirements: string[]; cached_15m: { available: boolean; verified: boolean; rows: number; last_close_ms: number | null } }[]; models: string[] };
 type Ranking = { timeframe: string; model: string; exit_mode: string; net_return: number; max_drawdown: number; entries: number; liquidations: number; validation_score: number; eligible: boolean; rejection_reasons: string[]; holding_hours_mean: number; holding_hours_median: number; holding_hours_max: number };
 type ModelOperation = { position_id?: string; direction?: string; entry_time?: string; exit_time?: string; holding_hours?: string; entry_price?: string; exit_price?: string; net_pnl?: string; exit_reason?: string; partial_exit_count?: string };
 type ModelReport = { symbol: string; model: string; status: string; dataset_sha256: string; selected: Ranking | null; holdout: Record<string, number> | null; rankings: Ranking[]; curve: [number, number][]; curve_key: string; operations: ModelOperation[]; short_operations: number; long_operations: number; real_orders_enabled: false };
@@ -130,12 +131,14 @@ export default function FullResearchBacktests() {
   const filteredRankings = report?.rankings.filter((row) => row.timeframe === timeframe) ?? [];
   return <section className="panel full-research-panel">
     <div className="section-title"><div><span className="eyebrow">MULTI-MODEL RESEARCH</span><h2>多模型回测 · 全标的覆盖</h2></div><button onClick={() => void refreshRuns()} disabled={busy}>刷新任务</button></div>
-    <p>统一验证窗比较道氏 1-2-3、PatchTST、TFT-Attention 与 TCN，使用相同多周期过滤、成本、风险和退出评估。深度模型只使用当时可见的已收盘K线，并在各自训练折拟合标准化；不能据历史收益保证未来收益。全部13个已核验合约会列出，仅匹配本地行情与冻结计划的标的可选。</p>
+    <p>统一验证窗比较道氏 1-2-3、PatchTST、TFT-Attention 与 TCN，使用相同多周期过滤、成本、风险和退出评估。深度模型只使用当时可见的已收盘K线，并在各自训练折拟合标准化；不能据历史收益保证未来收益。完整研究回测需要交易价、标记价、资金费率、来源证明和匹配的冻结评估区间；15 分钟图表缓存本身不足以替代这些数据。</p>
     {error && <div role="alert" className="alert error">{error}</div>}
     <div className="filters">
-      <fieldset><legend>回测标的（就绪 {coverage?.assets.filter((asset) => asset.ready).length ?? 0}/{SYMBOLS.length}）</legend>{SYMBOLS.map((value) => {
+      <fieldset><legend>完整研究包就绪 {coverage?.assets.filter((asset) => asset.ready).length ?? 0}/{SYMBOLS.length} · 15m行情缓存 {coverage?.assets.filter((asset) => asset.cached_15m.verified).length ?? 0}/{SYMBOLS.length}</legend>{SYMBOLS.map((value) => {
         const asset = coverage?.assets.find((row) => row.symbol === value);
-        return <label className="toggle" key={value} title={asset?.reason ?? "正在检查本地数据"}><input type="checkbox" checked={symbols.includes(value)} disabled={!asset?.ready} onChange={() => toggle(symbols, value, setSymbols)} />{value}{asset && !asset.ready ? " · 待数据" : ""}</label>;
+        const cacheStatus = asset?.cached_15m.verified ? `15m缓存 ${asset.cached_15m.rows} 根` : "无已校验15m缓存";
+        const readiness = asset?.ready ? "研究就绪" : asset?.cached_15m.verified ? "待补数据包" : "待行情";
+        return <label className="toggle" key={value} title={`${asset?.reason ?? "正在检查本地数据"}；${cacheStatus}`}><input type="checkbox" checked={symbols.includes(value)} disabled={!asset?.ready} onChange={() => toggle(symbols, value, setSymbols)} />{value}{asset ? ` · ${readiness}` : ""}</label>;
       })}</fieldset>
       <fieldset><legend>模型</legend>{MODELS.map((value) => <label className="toggle" key={value}><input type="checkbox" checked={models.includes(value)} onChange={() => toggle(models, value, setModels)} />{MODEL_LABELS[value]}</label>)}</fieldset>
       <fieldset><legend>入场周期</legend>{TIMEFRAMES.map((value) => <label className="toggle" key={value}><input type="checkbox" checked={timeframes.includes(value)} onChange={() => toggle(timeframes, value, setTimeframes)} />{value}</label>)}</fieldset>
@@ -176,7 +179,7 @@ export default function FullResearchBacktests() {
             <td>{trade.entry_time ? new Date(Number(trade.entry_time)).toLocaleString() : "—"}</td>
             <td>{trade.exit_time ? new Date(Number(trade.exit_time)).toLocaleString() : "—"}</td>
             <td>{trade.holding_hours ?? "—"}</td><td>{trade.entry_price ?? "—"}</td><td>{trade.exit_price ?? "—"}</td>
-            <td>{trade.net_pnl ?? "—"}</td><td>{trade.exit_reason ?? "—"}</td><td>{trade.partial_exit_count ?? "0"}</td>
+            <td>{trade.net_pnl ?? "—"}</td><td>{formatExitReason(trade.exit_reason)}</td><td>{trade.partial_exit_count ?? "0"}</td>
           </tr>)}</tbody></table>{report.operations.length === 0 && <p className="muted">所选配置没有完整平仓记录。</p>}</div>
         <small className="mono break">数据 SHA256：{report.dataset_sha256}</small>
       </>}
