@@ -138,3 +138,12 @@
 - [x] Docker：`bash scripts/platform.sh up`成功重建API、Web与NGC runner；API、Web、PostgreSQL、Redis健康，worker与runner运行；未重置数据库卷或触碰原lab服务。健康接口返回`status=ok,database=connected,redis=true`。只读DB检查仍为13个已核验USDM合约、13份15m近期缓存、112,307根近期K线；长期归档manifest仍为0，因为功能是点击触发，本轮未自动发起请求。
 - [ ] Binance实际采集待用户在图表页点击批量按钮后确认；现有网络状态记录为容器DNS/代理HTTP 451阻断，接口失败会显示在任务页，已有数据不会被覆盖。需要配置可从Docker网段访问并允许`fapi.binance.com:443`的代理后再运行批量任务。
 - [ ] 覆盖仍限已核验13个Binance永续；其它67项需未来单独选择数据供应商。实现提交`1d92274`已推送；GitHub Actions状态未核验。
+
+## 2026-10-20：精简图表指标与启动补档
+
+- [x] 图表默认只显示MA和量柱；布林带、MACD、九转、趋势线、123、背离、波浪放入单独设置，设置存入`system_settings.chart_indicators`；通过认证/CSRF保护的API保存，未引入数据库迁移。
+- [x] 实时状态条展示当前连接、最后请求时间和上游失败原因；折叠行情来源/多周期分析细节，数据管理操作收进菜单。
+- [x] API启动时对13个已核验Binance永续检查三年15m归档，仅缺失/不完整时排队；跳过完整数据及活动任务，对近期公开连接/HTTP失败有15分钟冷却，代理配置修复可触发新尝试；网络请求由worker执行，不阻塞启动。
+- [x] Compose把宿主机HTTP(S)代理环境转发给API/worker；SOCKS依赖已固定到镜像，系统级`ALL_PROXY`需显式配置才转发。本机测试确认宿主机代理返回HTTP 451，API容器无法访问宿主机loopback代理，因此实时请求仍需Docker可达的代理地址。
+- [x] 验证：`bash scripts/platform.sh test`为69 passed、1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build`为1 passed且构建成功；`python3 scripts/check_docs.py`为608个具名Python函数通过；`py_compile`及`git diff --check`通过。Docker重建后API/数据库/Redis健康，首页HTTP 200；启动自动建立覆盖13个合约的批任务，worker因代理不可达重试三次后失败，没有新增三年数据。
+- [ ] 网络管理员/用户需配置Docker可达且允许`fapi.binance.com:443`的代理，之后查看任务页的自动归档及实时状态；451拒绝期间数据不会伪造，也不会被缓存误报为实时。

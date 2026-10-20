@@ -183,8 +183,33 @@ export interface Display {
   default_interval: string;
   default_asset: string;
 }
+/** Persisted display-only chart overlays; these preferences never change model decisions. */
+export interface ChartIndicators {
+  show_ma: boolean;
+  ma_periods: number[];
+  show_bollinger: boolean;
+  show_macd: boolean;
+  show_td: boolean;
+  show_trendlines: boolean;
+  show_dow123: boolean;
+  show_divergence: boolean;
+  show_wave: boolean;
+}
+/** Compact chart defaults inspired by common exchange chart workspaces. */
+export const DEFAULT_CHART_INDICATORS: ChartIndicators = {
+  show_ma: true,
+  ma_periods: [5, 10, 20],
+  show_bollinger: false,
+  show_macd: false,
+  show_td: false,
+  show_trendlines: false,
+  show_dow123: false,
+  show_divergence: false,
+  show_wave: false,
+};
 export interface Settings {
   display: Display;
+  chart_indicators: ChartIndicators;
   execution: { mode: string; live_enabled: boolean; implemented: boolean };
   notifications: Record<string, unknown>;
   credentials: Record<string, unknown>;

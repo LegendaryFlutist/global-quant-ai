@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Asset, Job, PageId, User } from "./types";
+import { DEFAULT_CHART_INDICATORS } from "./types";
 import { post } from "./services/api";
 import { useAuth } from "./hooks/useAuth";
 import { useWorkspaceData } from "./hooks/useWorkspaceData";
@@ -121,6 +122,7 @@ export default function App() {
           initialInterval={data.settings?.display.default_interval ?? "4h"}
           timezone={timezone}
           onTask={setNotice}
+          indicatorPreferences={data.settings?.chart_indicators ?? DEFAULT_CHART_INDICATORS}
         />
       )}
       {page === "risk" && <RiskPage />}

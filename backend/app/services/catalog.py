@@ -35,6 +35,12 @@ def seed(db):
         db.add(Asset(id=aid,symbol=symbol,name=name,underlying_id=underlying,asset_type=kind,venue=venue,priority=100,verification='RESEARCH_ONLY',specification={'currency':{'US':'USD','HK':'HKD','CN':'CNY','KRX':'KRW'}.get(venue,'UNKNOWN'),'trading_calendar':'UNVERIFIED','listing_range':'UNKNOWN','data_source':'NOT_CONNECTED','symbol_is_provider_verified':False}));db.flush()
         for theme in themes:db.add(Membership(asset_id=aid,sector=theme))
     if db.get(Setting,'display') is None:db.add(Setting(key='display',value={'timezone':'Asia/Shanghai','default_interval':'4h','default_asset':'binance_usdm:KORUUSDT'}))
+    if db.get(Setting,'chart_indicators') is None:
+        db.add(Setting(key='chart_indicators',value={
+            'show_ma':True,'ma_periods':[5,10,20],'show_bollinger':False,
+            'show_macd':False,'show_td':False,'show_trendlines':False,
+            'show_dow123':False,'show_divergence':False,'show_wave':False,
+        }))
     for symbol,_,_,_,themes in entries:
         asset=db.get(Asset,'binance_usdm:'+symbol)
         if asset and asset.specification.get('underlyingType')=='PREMARKET':asset.asset_type='preipo_related_perpetual'

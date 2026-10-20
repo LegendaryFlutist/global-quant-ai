@@ -37,6 +37,8 @@ def main():
                 timeout=21600 if task.kind=='FETCH_BINANCE_ARCHIVES' else 900
                 queue().enqueue(execute,task.id,job_id=task.id,retry=Retry(max=2,interval=[5,30]),job_timeout=timeout);task.status='QUEUED'
         db.commit()
+        from app.services.startup_market_data import queue_missing_binance_archives
+        queue_missing_binance_archives(db)
         for symbol,*_ in PRIORITY:
             aid='binance_usdm:'+symbol
             kinds=['IMPORT_LOCAL','FETCH_HISTORY']

@@ -15,12 +15,14 @@
 | sector_membership | asset_id, sector | 组合主键；一个资产可有多个行业/主题 |
 | market_data_metadata | id, asset_id, interval, path, row_count, first_open_ms, last_close_ms, sha256, source JSON, updated_at | asset+interval唯一；指向不可变Parquet快照 |
 | scheduled_tasks | id UUID, kind, status, parameters JSON, result JSON, attempts, created_at, updated_at | 持久任务记录，对应RQ job_id；批量Binance归档将已完成合约ID、当前合约和计数保存在result供重试/页面恢复；失败原因可见 |
-| system_settings | key, value JSON | 当前仅显示偏好；不接受API凭据 |
+| system_settings | key, value JSON | `display`和`chart_indicators`保存经过认证的界面偏好；不接受API凭据 |
 | system_events | id, kind, detail JSON, created_at | 预留系统事件记录，目前无监控告警引擎 |
 
 行情事实文件由本地不可变Parquet保存，`market_data_metadata.path/sha256/row_count/time bounds/source`只作为PostgreSQL清单指针。DuckDB以进程内只读连接查询通过SHA256校验的文件；Redis用于任务队列、认证限流和20秒实时K线TTL缓存，缓存未命中时可读本地`live.json`快照。两种实时快照都不作为历史事实或策略配置的权威来源。当前尚无逐笔成交、历史订单簿、技术指标宽表或实盘账本表。
 
 三年Binance长期历史仍以`DATA_ROOT/long_history/<symbol>/<interval>/`内的不可变Parquet分段及manifest为权威。`FETCH_BINANCE_ARCHIVES`任务参数保存本次确切资产ID列表，任务result保存合约级检查点，不新增数据库表或迁移；仅对已核验USDM合约排队。长期图表目标周期缺少独立归档时，API可从较长覆盖范围的15m真实K线聚合更大周期，并返回`source_interval`和源manifest/分段哈希；向下插值禁止。
+
+`system_settings.chart_indicators`记录图表显示偏好：MA开关和2–500的均线长度列表，以及布林、MACD、TD九转、趋势线、道氏123、背离和波浪候选的可见开关。精简默认只显示MA与量柱。写入要求当前会话和CSRF，并产生审计事件；偏好只影响图表，不参与回测或策略计算。新增该JSON键无需数据库迁移。
 
 ## Phase2 已迁移配置表（Alembic 0002）
 

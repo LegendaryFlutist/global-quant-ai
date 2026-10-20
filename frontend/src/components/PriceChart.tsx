@@ -36,6 +36,10 @@ export default function PriceChart({
   showBollinger,
   showMACD,
   showTD,
+  showTrendlines,
+  showDow123,
+  showDivergence,
+  showWave,
 }: {
   candles: Candle[];
   timezone: string;
@@ -46,6 +50,10 @@ export default function PriceChart({
   showBollinger: boolean;
   showMACD: boolean;
   showTD: boolean;
+  showTrendlines: boolean;
+  showDow123: boolean;
+  showDivergence: boolean;
+  showWave: boolean;
 }) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -55,7 +63,7 @@ export default function PriceChart({
     const bands = bollingerBands(candles);
     const macdValues = macd(candles);
     const td = tdSetup(candles);
-    const macdDivergenceEvents = showMACD ? macdDivergences(analysisCandles) : [];
+    const macdDivergenceEvents = showDivergence ? macdDivergences(analysisCandles) : [];
     /** Find the first candle closing at or after an event time in O(log n) on sorted UTC candles. */
     function candleAtOrAfter(time: number) {
       let low = 0;
@@ -67,7 +75,7 @@ export default function PriceChart({
       }
       return candles[low];
     }
-    const lineSeries = (["support", "resistance"] as const).flatMap((name) => {
+    const lineSeries = showTrendlines ? (["support", "resistance"] as const).flatMap((name) => {
       const line = structure?.trend_lines?.[name];
       if (!line || line.anchors.length < 2) return [];
       const [a, b] = line.anchors;
@@ -83,8 +91,8 @@ export default function PriceChart({
         lineStyle: { width: 1.8, type: "dashed" as const, color: name === "support" ? "#46c8a6" : "#ee7485" },
         itemStyle: { color: name === "support" ? "#46c8a6" : "#ee7485" },
       }];
-    });
-    const localTrendLines = threePivotTrendlines(analysisCandles).map((line) => ({
+    }) : [];
+    const localTrendLines = showTrendlines ? threePivotTrendlines(analysisCandles).map((line) => ({
       name: line.kind === "support" ? "三点支撑趋势线" : "三点压力趋势线",
       type: "line" as const,
       data: candles.map((_, index) => index < line.points[0].index ? null :
@@ -92,7 +100,7 @@ export default function PriceChart({
       showSymbol: false,
       connectNulls: false,
       lineStyle: { width: 2, color: line.kind === "support" ? "#46c8a6" : "#ee7485" },
-    }));
+    })) : [];
     const tdMarkers = showTD ? (["buy", "sell"] as const).flatMap((direction) => {
       const points = td.flatMap((setup, index) => setup.count === 0 || setup.direction !== direction ? [] : [
         [date(candles[index].open_time, timezone), Number(candles[index].close), setup.count],
@@ -106,20 +114,22 @@ export default function PriceChart({
         label: { show: true, formatter: (params: { value: (string | number)[] }) => String(params.value[2]), position: direction === "buy" ? "bottom" : "top", color: "#dbe6f7", fontSize: 8 },
       }] : [];
     }) : [];
-    const wavePoints = (structure?.wave?.points ?? []).flatMap((point, index) => {
+    const wavePoints = showWave ? (structure?.wave?.points ?? []).flatMap((point, index) => {
       const target = candleAtOrAfter(Number(point.time));
       return target ? [{
         time: date(target.open_time, timezone),
         price: Number(point.price),
         label: structure?.wave?.labels?.[index] ?? "波",
       }] : [];
-    });
+    }) : [];
     // Keep ECharts series count bounded: a separate series for every event freezes browsers on long histories.
     const eventGroups = [
-      { name: "趋势破位", match: (event: StructureEvent) => event.kind === "TRENDLINE_BREAK", label: "破位", color: "#f2ae52", symbol: "diamond" as const, position: "top" as const },
-      { name: "道氏123", match: (event: StructureEvent) => event.kind === "DOW123_CONFIRMED", label: "123", color: "#64a7ff", symbol: "circle" as const, position: "bottom" as const },
-      { name: "底背离", match: (event: StructureEvent) => event.kind === "BULLISH_RSI_DIVERGENCE", label: "底背离", color: "#47d1a2", symbol: "circle" as const, position: "bottom" as const },
-      { name: "顶背离", match: (event: StructureEvent) => event.kind === "BEARISH_RSI_DIVERGENCE", label: "顶背离", color: "#d87cf2", symbol: "circle" as const, position: "top" as const },
+      ...(showTrendlines ? [{ name: "趋势破位", match: (event: StructureEvent) => event.kind === "TRENDLINE_BREAK", label: "破位", color: "#f2ae52", symbol: "diamond" as const, position: "top" as const }] : []),
+      ...(showDow123 ? [{ name: "道氏123", match: (event: StructureEvent) => event.kind === "DOW123_CONFIRMED", label: "123", color: "#64a7ff", symbol: "circle" as const, position: "bottom" as const }] : []),
+      ...(showDivergence ? [
+        { name: "底背离", match: (event: StructureEvent) => event.kind === "BULLISH_RSI_DIVERGENCE", label: "底背离", color: "#47d1a2", symbol: "circle" as const, position: "bottom" as const },
+        { name: "顶背离", match: (event: StructureEvent) => event.kind === "BEARISH_RSI_DIVERGENCE", label: "顶背离", color: "#d87cf2", symbol: "circle" as const, position: "top" as const },
+      ] : []),
     ];
     const markers = eventGroups.flatMap((group) => {
       const points = events.filter(group.match).flatMap((event) => {
@@ -136,7 +146,7 @@ export default function PriceChart({
         label: { show: true, formatter: group.label, position: group.position, color: "#dbe6f7", fontSize: 9 },
       }] : [];
     });
-    const macdMarkers = (["bullish", "bearish"] as const).flatMap((kind) => {
+    const macdMarkers = showDivergence ? (["bullish", "bearish"] as const).flatMap((kind) => {
       const points = macdDivergenceEvents.filter((event) => event.kind === kind).map((event) => [
         date(analysisCandles[event.index].open_time, timezone), event.price,
       ]);
@@ -149,7 +159,7 @@ export default function PriceChart({
         itemStyle: { color: kind === "bullish" ? "#47d1a2" : "#ef8090" },
         label: { show: true, formatter: kind === "bullish" ? "MACD底背" : "MACD顶背", position: kind === "bullish" ? "bottom" : "top", color: "#dbe6f7", fontSize: 8 },
       }] : [];
-    });
+    }) : [];
     const waveMarkers = wavePoints.length ? [{
       name: "波浪候选",
       type: "scatter" as const,
@@ -297,7 +307,7 @@ export default function PriceChart({
       observer.disconnect();
       chart.dispose();
     };
-  }, [candles, timezone, showMA, structure, events, maPeriods, showBollinger, showMACD, showTD]);
+  }, [candles, timezone, showMA, structure, events, maPeriods, showBollinger, showMACD, showTD, showTrendlines, showDow123, showDivergence, showWave]);
   return (
     <div
       ref={element}

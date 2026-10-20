@@ -1,10 +1,10 @@
 # 项目进度与会话交接
 
-更新时间：2026-10-19（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
+更新时间：2026-10-20（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
 
 ## 当前阶段
 
-**Phase1及GitHub恢复机制已交付。Phase2已实现本地市场结构、多模拟策略回测以及系统页面上的整套离线多模型任务、真实进度和分模型/标的报告。2026-10-19开发单元本机隔离后端51 passed，前端2 passed/生产构建成功，文档检查559函数通过；NVIDIA runner、API与Web已重建并运行，API健康且CUDA可用。尚未通过已登录浏览器提交一次完整GPU任务；真实三年数据收益尚无结论，未实现模型注册/自动择优或持续纸面执行。**
+**截至2026-10-20，Phase2已实现本地市场结构、多模拟策略回测、整套离线模型任务及分模型/标的报告。本轮后端隔离测试69 passed，前端测试1 passed且生产构建成功，608个Python函数文档检查通过；API/Web/worker/NVIDIA runner已重建，API数据库与Redis健康。服务启动已自动排入13个已核验合约的三年归档补档任务，但当前Docker容器无法连接宿主机loopback代理，任务重试耗尽后FAILED，长期归档manifest为0，实时行情未连通。待设置Docker可达且获准访问Binance的代理后手工重试或重启等待冷却结束。尚未通过已登录浏览器提交一次完整GPU任务；真实三年数据收益尚无结论，未实现模型注册/自动择优或持续纸面执行。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -230,6 +230,18 @@ bash scripts/platform.sh status
 - Git状态：实现提交`c2557eb refactor: unify market data storage adapters`已推送到`feature/phase2-market-structure`，`git ls-remote`确认远端ref相同；GitHub Actions尚未查询。未查看或输出`.runtime`密钥；`.local/`是已有未跟踪用户目录，保持不动、不提交。
 - 下一步：先为其余67项建立有来源证据的`venue + asset_type + provider + symbol + calendar`映射与覆盖状态报告；然后增加可插拔公开行情adapter并按原生周期/交易日历采集。另为Redis TTL键增加隔离Redis端到端过期测试，再分批把回测Parquet读路径切到DuckDB并对比冻结报告。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；后端隔离测试`bash scripts/platform.sh test`；文档检查`python3 scripts/check_docs.py`；重建并启动`bash scripts/platform.sh up`；健康检查`curl -fsS http://127.0.0.1:8080/api/health`；Git检查`git status --short --branch && git log -5 --oneline`。
+
+## 当前开发单元（2026-10-20）：精简图表指标与启动自动补档
+
+- 用户要求图表参照交易所布局减少常驻指标，提供可配置指标体系，解决实时行情未更新，并在服务启动时自动补齐缺失行情。当前覆盖范围仍按用户此前选择，仅限已核验Binance USDM合约。
+- 只读检查：13个已核验USDM合约均有15m、8,639根近期K线，共112,307根；所有缓存来自本地历史快照，不代表实时。13个长期15m归档缺失。API容器公开GET失败为DNS解析失败；宿主机经当前代理请求得到HTTP 451。未读取或输出代理地址/凭据。
+- 已实现：图表默认只开MA(5,10,20)和量柱。布林带、MACD、TD九转、趋势线、道氏123、背离和波浪候选在可折叠“指标设置”面板中分别开关；有效配置通过已认证且CSRF保护的PUT保存到`system_settings.chart_indicators`，没有加迁移。图表数据管理入口收拢到菜单，多周期分析与数据溯源折叠；实时状态条公开显示当前连接状态、最近尝试时间及上游错误。
+- 已实现：API启动调用幂等补档协调器，只扫描已核验USDM的三年15m清单；缺失/不完整数据进持久后台任务，完整归档/活动任务会跳过，最近公开连接/HTTP失败有15分钟冷却。API启动线程不发网络请求，下载由worker执行；失败任务仍可在页面看到/手工重试。Compose把宿主机HTTP(S)代理传给API/worker，SOCKS协议客户端已加锁；系统`ALL_PROXY`只在私有`PLATFORM_ALL_PROXY`中显式设置时转发。
+- 已验证（2026-10-20）：`bash scripts/platform.sh test`为69 passed、1条既有Starlette TestClient/httpx弃用警告；覆盖指标设置缺省/持久化/范围检查/认证CSRF、启动归档任务创建/去重及修复代理依赖后可重试。`cd frontend && npm test && npm run build`为1 passed，TypeScript/Vite生产构建成功。`python3 scripts/check_docs.py`为608个Python具名函数通过；相关模块`py_compile`和`git diff --check`通过。
+- Docker：`bash scripts/platform.sh up`成功重建并启动API/Web/worker/NVIDIA runner；API健康端点报告数据库、Redis connected，Web首页HTTP 200，原lab和PostgreSQL数据卷仍运行。启动自动创建一条13合约`FETCH_BINANCE_ARCHIVES`任务，worker三次尝试后状态为`FAILED`，错误为“代理连接失败或目标不可达”；历史15m缓存仍为13份、112,307根，三年manifest仍为0，未覆盖现有数据。宿主机公开请求之前返回HTTP 451；宿主代理绑定loopback，不能被Docker容器直连。
+- 未解决：当前不能取得实时K线或三年历史。需将代理服务绑定到Docker可达的地址并限制Docker网段，配置私有`.runtime/platform.env`中的`PLATFORM_HTTPS_PROXY`（SOCKS时使用显式`PLATFORM_ALL_PROXY`），并由网络侧允许`fapi.binance.com:443`，然后重启服务让启动补档重试。451/连接失败期间系统保留旧缓存并显示错误，不伪造报价。
+- Git状态：本开发单元的代码、验证结果与交接文件随当前检查点提交；`.local/`是既存用户目录，保持未跟踪，不纳入提交。GitHub PR #11分支此前已推送，本单元的新提交需在检查点后推送并核验CI状态。
+- 下一阶段：打开多周期行情页验收默认布局与指标偏好保存；配置可达Binance的Docker代理后，观察自动补档进度并核验真实最新K线。恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && bash scripts/platform.sh status`；测试`bash scripts/platform.sh test && (cd frontend && npm test && npm run build)`；文档`python3 scripts/check_docs.py`；部署`bash scripts/platform.sh up`；Git`git status --short --branch && git log -5 --oneline`。
 
 ## 当前开发单元（2026-10-20）：Binance永续批量三年归档
 

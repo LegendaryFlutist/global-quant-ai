@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ArchiveResult, Asset, Candle, CandleResult, Interval, LiveMarketResult, StructureResult } from "../types";
+import { DEFAULT_CHART_INDICATORS, type ArchiveResult, type Asset, type Candle, type CandleResult, type ChartIndicators, type Interval, type LiveMarketResult, type StructureResult } from "../types";
 import { api, date, post } from "../services/api";
 import PriceChart from "../components/PriceChart";
 /** 按标的/周期读取已校验历史；切换后忽略旧请求，采集作为独立后台任务。 */
@@ -9,12 +9,14 @@ export default function ChartPage({
   initialInterval,
   timezone,
   onTask,
+  indicatorPreferences,
 }: {
   assets: Asset[];
   initialAsset: string;
   initialInterval: string;
   timezone: string;
   onTask: (message: string) => void;
+  indicatorPreferences: ChartIndicators;
 }) {
   const [assetId, setAssetId] = useState(initialAsset);
   const [interval, setInterval] = useState(initialInterval);
@@ -26,13 +28,17 @@ export default function ChartPage({
   const [showArchive, setShowArchive] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [ma, setMA] = useState(true);
-  const [maPeriodsText, setMAPeriodsText] = useState("5,10,20");
-  const [showBollinger, setShowBollinger] = useState(true);
-  const [showMACD, setShowMACD] = useState(true);
-  const [showTD, setShowTD] = useState(true);
+  const [indicators, setIndicators] = useState<ChartIndicators>(indicatorPreferences);
+  const [savedIndicators, setSavedIndicators] = useState<ChartIndicators>(indicatorPreferences);
+  const [maPeriodsText, setMAPeriodsText] = useState(indicatorPreferences.ma_periods.join(","));
+  const [indicatorPanelOpen, setIndicatorPanelOpen] = useState(false);
   const [reload, setReload] = useState(0);
   const asset = assets.find((a) => a.id === assetId);
+  useEffect(() => {
+    setIndicators(indicatorPreferences);
+    setSavedIndicators(indicatorPreferences);
+    setMAPeriodsText(indicatorPreferences.ma_periods.join(","));
+  }, [indicatorPreferences]);
   const verifiedBinanceCount = assets.filter((item) =>
     item.venue === "BINANCE_USDM" && ["VERIFIED", "VERIFIED_SNAPSHOT"].includes(item.verification),
   ).length;
@@ -210,14 +216,41 @@ export default function ChartPage({
     : chartCandles;
   const currentStructure = structure?.timeframes[interval];
   const currentEvents = structure?.events.filter((event) => event.timeframe === interval) ?? [];
-  const maPeriods = [...new Set(maPeriodsText.split(",").map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0 && value <= 500))].slice(0, 8);
+  const parsedMAPeriods = maPeriodsText.split(",").map((value) => Number(value.trim()));
+  const validMAPeriods = parsedMAPeriods.length >= 1 && parsedMAPeriods.length <= 8
+    && parsedMAPeriods.every((value) => Number.isInteger(value) && value >= 2 && value <= 500)
+    && new Set(parsedMAPeriods).size === parsedMAPeriods.length;
+  const maPeriods = validMAPeriods ? parsedMAPeriods : indicators.ma_periods;
+  const indicatorDraft = { ...indicators, ma_periods: validMAPeriods ? parsedMAPeriods : indicators.ma_periods };
+  const hasUnsavedIndicators = JSON.stringify(indicatorDraft) !== JSON.stringify(savedIndicators);
+  /** Update one display-only indicator toggle while preserving the other saved preferences. */
+  function updateIndicator(key: Exclude<keyof ChartIndicators, "ma_periods">, checked: boolean) {
+    setIndicators((previous) => ({ ...previous, [key]: checked }));
+  }
+  /** Validate and persist chart overlays in PostgreSQL; indicator choices do not affect backtests. */
+  async function saveIndicatorSettings() {
+    if (!validMAPeriods) return;
+    try {
+      const saved = await api<ChartIndicators>("/settings/chart-indicators", {
+        method: "PUT",
+        body: JSON.stringify(indicatorDraft),
+      });
+      setIndicators(saved);
+      setSavedIndicators(saved);
+      setMAPeriodsText(saved.ma_periods.join(","));
+      setError("");
+      onTask("图表指标设置已保存");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
     <>
       <header className="page-heading">
         <div>
           <span className="eyebrow">MARKET WORKSPACE</span>
           <h1>多周期行情</h1>
-          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示；每5秒尝试刷新当前周期，结构评分只使用闭合K线。批量长期缓存以15m为基础周期，再聚合较大周期。</p>
+          <p>公开行情 · 15分钟基础数据聚合高周期 · 只显示已收盘结构信号</p>
         </div>
         <button onClick={() => setReload((n) => n + 1)}>重新读取缓存</button>
       </header>
@@ -234,23 +267,17 @@ export default function ChartPage({
               </option>
             ))}
           </select>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={ma}
-              onChange={(e) => setMA(e.target.checked)}
-            />
-            均线
-          </label>
-          <label className="toggle">均线(日)
-            <input aria-label="均线周期(日)" style={{ width: "110px", padding: "6px 8px" }} value={maPeriodsText} onChange={(event) => setMAPeriodsText(event.target.value)} placeholder="5,10,20" />
-          </label>
-          <label className="toggle"><input type="checkbox" checked={showBollinger} onChange={(event) => setShowBollinger(event.target.checked)} />布林线</label>
-          <label className="toggle"><input type="checkbox" checked={showMACD} onChange={(event) => setShowMACD(event.target.checked)} />MACD</label>
-          <label className="toggle"><input type="checkbox" checked={showTD} onChange={(event) => setShowTD(event.target.checked)} />九转</label>
-          <button onClick={collect}>采集最近90天</button>
-          <button disabled={asset?.venue !== "BINANCE_USDM" || !["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset?.verification ?? "")} onClick={() => void collectArchive()}>采集所选合约三年</button>
-          {verifiedBinanceCount > 0 && <button onClick={() => void collectAllBinanceArchives()}>采集全部 Binance 合约三年15m（{verifiedBinanceCount}）</button>}
+          <button className={indicatorPanelOpen ? "selected" : ""} aria-expanded={indicatorPanelOpen} onClick={() => setIndicatorPanelOpen((open) => !open)}>
+            指标设置
+          </button>
+          <details className="chart-actions">
+            <summary>数据管理</summary>
+            <div className="chart-actions-menu">
+              <button onClick={collect}>补齐最近90天</button>
+              <button disabled={asset?.venue !== "BINANCE_USDM" || !["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset?.verification ?? "")} onClick={() => void collectArchive()}>补齐所选合约三年</button>
+              {verifiedBinanceCount > 0 && <button onClick={() => void collectAllBinanceArchives()}>补齐全部 Binance 合约三年（{verifiedBinanceCount}）</button>}
+            </div>
+          </details>
           <button
             aria-pressed={showArchive}
             onClick={() => setShowArchive((value) => !value)}
@@ -258,6 +285,36 @@ export default function ChartPage({
             {showArchive ? "查看90天缓存" : "查看三年缓存"}
           </button>
         </div>
+        {indicatorPanelOpen && (
+          <section className="indicator-panel" aria-label="图表指标设置">
+            <div className="indicator-panel-heading">
+              <div><strong>图表指标</strong><small>只控制显示；计算模型不受影响</small></div>
+              {hasUnsavedIndicators && <span>有未保存的修改</span>}
+            </div>
+            <div className="indicator-groups">
+              <div>
+                <strong>主图</strong>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_ma} onChange={(event) => updateIndicator("show_ma", event.target.checked)} />均线</label>
+                <label className="toggle">周期<input aria-label="均线周期" className="indicator-periods" value={maPeriodsText} onChange={(event) => setMAPeriodsText(event.target.value)} placeholder="5,10,20" /></label>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_bollinger} onChange={(event) => updateIndicator("show_bollinger", event.target.checked)} />布林带</label>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_trendlines} onChange={(event) => updateIndicator("show_trendlines", event.target.checked)} />趋势线与破位</label>
+              </div>
+              <div>
+                <strong>副图与结构</strong>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_macd} onChange={(event) => updateIndicator("show_macd", event.target.checked)} />MACD</label>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_td} onChange={(event) => updateIndicator("show_td", event.target.checked)} />九转序列</label>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_dow123} onChange={(event) => updateIndicator("show_dow123", event.target.checked)} />道氏 1-2-3</label>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_divergence} onChange={(event) => updateIndicator("show_divergence", event.target.checked)} />价格 / MACD 背离</label>
+                <label className="toggle"><input type="checkbox" checked={indicators.show_wave} onChange={(event) => updateIndicator("show_wave", event.target.checked)} />波浪候选</label>
+              </div>
+            </div>
+            {!validMAPeriods && <small className="error">均线周期填写1到8个互不重复的整数，范围为2–500。</small>}
+            <div className="indicator-actions">
+              <button onClick={() => { setIndicators({ ...DEFAULT_CHART_INDICATORS, ma_periods: [...DEFAULT_CHART_INDICATORS.ma_periods] }); setMAPeriodsText(DEFAULT_CHART_INDICATORS.ma_periods.join(",")); }}>恢复简洁默认</button>
+              <button className="primary" disabled={!validMAPeriods || !hasUnsavedIndicators} onClick={() => void saveIndicatorSettings()}>保存指标设置</button>
+            </div>
+          </section>
+        )}
         <div className="intervals">
           {(intervals.length
             ? intervals.map((i) => i.interval)
@@ -285,6 +342,13 @@ export default function ChartPage({
           <span>{asset?.name}</span>
           <span className="badge neutral">仅研究</span>
         </div>
+        <div className="chart-live-status">
+          <span className={`badge ${live?.stale ? "negative" : live ? "positive" : "neutral"}`}>
+            {!canRefresh ? "等待本地K线" : live?.stale ? "实时连接中断" : live ? "实时已连接" : "正在连接行情"}
+          </span>
+          <span>{live?.updated_at_ms ? `最近尝试 ${date(live.updated_at_ms, timezone)}` : "当前周期每5秒自动刷新；页面不显示逐笔盘口"}</span>
+          {live?.refresh_error && <span className="error">{live.refresh_error}</span>}
+        </div>
         {loading ? (
           <div className="empty">正在校验并加载历史行情…</div>
         ) : error ? (
@@ -293,55 +357,56 @@ export default function ChartPage({
             <small>可选择已有数据的周期，或创建公开行情采集任务。</small>
           </div>
         ) : chartCandles.length ? (
-          <PriceChart candles={displayCandles} timezone={timezone} showMA={ma} structure={currentStructure} events={currentEvents} maPeriods={maPeriods} showBollinger={showBollinger} showMACD={showMACD} showTD={showTD} />
+          <PriceChart
+            candles={displayCandles}
+            timezone={timezone}
+            showMA={indicators.show_ma}
+            structure={currentStructure}
+            events={currentEvents}
+            maPeriods={maPeriods}
+            showBollinger={indicators.show_bollinger}
+            showMACD={indicators.show_macd}
+            showTD={indicators.show_td}
+            showTrendlines={indicators.show_trendlines}
+            showDow123={indicators.show_dow123}
+            showDivergence={indicators.show_divergence}
+            showWave={indicators.show_wave}
+          />
         ) : showArchive && archive?.available === false ? (
           <div className="empty">本地尚无该标的/周期的长期缓存；点击“采集三年历史”创建后台任务。</div>
         ) : (
           <div className="empty">没有完整周期 K 线；当前不做预测或插值。</div>
         )}
-        <div
-          className="chart-footer"
-          data-loaded-interval={data?.interval}
-          data-loaded-asset={showArchive ? archive?.asset_id : data?.asset_id}
-        >
-          <span>
-            {showArchive
-              ? `长期缓存截止：${date(archive?.last_close_ms, timezone)} · 覆盖状态 ${archive?.status ?? "未缓存"} · ${live?.stale ? "实时更新中断，显示旧缓存" : live ? `更新时间 ${date(live.updated_at_ms, timezone)}` : "等待实时更新"}`
-              : `数据截止：${date(data?.as_of_ms, timezone)} · ${live?.stale ? "实时连接中断，显示旧缓存" : live ? `刷新于 ${date(live.updated_at_ms, timezone)}` : canRefresh ? "正在刷新" : "等待本地行情"}`} · 当前显示{" "}
-            {displayCandles.length} 根 / 可用{" "}
-            {showArchive ? archive?.available_count ?? 0 : data?.available_count ?? 0} 根
-          </span>
-          <span>
-            {showArchive
-              ? `归档来源周期 ${archive?.source_interval ?? interval} · ${live?.live_candle && !live.stale ? `实时K线快照SHA256 ${live.live_snapshot_sha256?.slice(0, 16) ?? "—"}；结构分析只使用已收盘K线 · ` : ""}本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
-              : `原始周期 ${data?.source_interval ?? "—"} · 排除不完整周期 ${data?.excluded_incomplete_buckets ?? 0} 个`}
-          </span>
+        <div className="chart-footer" data-loaded-interval={data?.interval} data-loaded-asset={showArchive ? archive?.asset_id : data?.asset_id}>
+          <span>{displayCandles.length} 根K线 · 数据截止 {date(showArchive ? archive?.last_close_ms : data?.as_of_ms, timezone)}</span>
+          <span>刷新间隔 5 秒 · 结构判断仅使用收盘K线</span>
         </div>
       </section>
-      <div className="two-col">
-        <section className="panel">
-          <h3>数据可追溯</h3>
-          <p>来源：{showArchive ? archive?.source ?? "暂无归档" : String(data?.source.provider ?? "暂无数据")}</p>
-          <p className="mono break">SHA256：{showArchive ? archive?.segment_sha256 ?? "—" : data?.dataset_sha256 ?? "—"}</p>
-          <p>
-            历史缓存不是实时盘口。新行情只有公开接口实际返回成功后才会进入图表。
-          </p>
-        </section>
-        <section className="panel">
-          <h3>分析能力</h3>
-          {currentStructure ? (
-            <>
-              <p>分析截止：{date(currentStructure.last_closed_at, timezone)} · 只读已收盘K线 · {structure?.algorithm ?? "等待缓存数据"}</p>
-              <p>当前周期：{interval} · 结构趋势 {currentStructure?.trend === 1 ? "上升" : currentStructure?.trend === -1 ? "下降" : currentStructure?.status === "OK" ? "震荡/分歧" : "数据不足"} · 趋势线状态 {currentStructure?.trendline_break_state ?? "待缓存"}</p>
-              <p>各周期缓存状态：{Object.entries(structure?.timeframes ?? {}).map(([tf, value]) => `${tf} ${value.status === "OK" ? value.trendline_break_state === "BROKEN" ? "趋势线破坏" : "可分析" : "数据不足"}`).join(" · ") || "请先采集对应周期"}</p>
-              <p>已确认事件：{currentEvents.length ? currentEvents.slice(-4).map((event) => `${event.kind} ${date(event.confirmed_at, timezone)}`).join("；") : "本周期暂无破位、123或RSI背离确认"}</p>
-              <p>波浪计数：{currentStructure?.wave?.status ?? "样本不足/待缓存"} · 只作为结构候选，不表示获利概率。</p>
-            </>
-          ) : (
-            <p>均线按UTC日收盘值计算并投影到当前周期；MACD、布林带和九转按当前图表周期计算。缓存可用时显示因果趋势、道氏123、波浪候选与背离；未收盘线只显示临时技术指标，不参与结构评分。</p>
-          )}
-        </section>
-      </div>
+      <details className="chart-details">
+        <summary>数据与多周期分析详情</summary>
+        <div className="two-col">
+          <section className="panel">
+            <h3>数据可追溯</h3>
+            <p>来源：{showArchive ? archive?.source ?? "暂无归档" : String(data?.source.provider ?? "暂无数据")}</p>
+            <p className="mono break">SHA256：{showArchive ? archive?.segment_sha256 ?? "—" : data?.dataset_sha256 ?? "—"}</p>
+            <p>长期归档状态：{archive?.status ?? "未载入"} · 基础周期：{archive?.source_interval ?? "15m"} · 当前周期原生数据：{data?.source_interval ?? "—"}</p>
+          </section>
+          <section className="panel">
+            <h3>分析能力</h3>
+            {currentStructure ? (
+              <>
+                <p>分析截止：{date(currentStructure.last_closed_at, timezone)} · 已收盘K线 · {structure?.algorithm ?? "等待缓存数据"}</p>
+                <p>当前周期：{interval} · 结构趋势 {currentStructure.trend === 1 ? "上升" : currentStructure.trend === -1 ? "下降" : currentStructure.status === "OK" ? "震荡/分歧" : "数据不足"} · 趋势线 {currentStructure.trendline_break_state ?? "待缓存"}</p>
+                <p>可用周期：{Object.entries(structure?.timeframes ?? {}).map(([tf, value]) => `${tf} ${value.status === "OK" ? value.trendline_break_state === "BROKEN" ? "破位" : "可分析" : "缺数据"}`).join(" · ") || "请先采集对应周期"}</p>
+                <p>近期确认：{currentEvents.length ? currentEvents.slice(-4).map((event) => `${event.kind} ${date(event.confirmed_at, timezone)}`).join("；") : "暂无破位、123或RSI背离"}</p>
+                <p>波浪候选：{currentStructure.wave?.status ?? "样本不足"} · 仅作结构参考</p>
+              </>
+            ) : (
+              <p>均线按UTC日收盘计算；MACD、布林带和九转按当前周期计算。结构与预测只读取本地已收盘数据，不代表获利概率。</p>
+            )}
+          </section>
+        </div>
+      </details>
     </>
   );
 }

@@ -128,6 +128,30 @@ def test_settings_validation_persistence_and_csrf(logged_in):
     assert logged_in.put('/api/settings/display',json={**payload,'timezone':'invalid'}).status_code==422
     assert logged_in.put('/api/settings/display',json={**payload,'default_asset':'NONEXISTENT'}).status_code==400
 
+def test_chart_indicator_settings_are_persisted_and_validated(logged_in):
+    """验证图表指标默认精简、可持久化并受会话和CSRF边界保护。
+
+    Args:
+        logged_in: 通过测试登录流程创建的认证客户端。
+
+    Returns:
+        无返回值；默认配置、无效输入或未授权写入会使测试失败。
+    """
+    defaults = logged_in.get('/api/settings').json()['chart_indicators']
+    assert defaults['show_ma'] is True
+    assert defaults['ma_periods'] == [5, 10, 20]
+    assert not any(defaults[key] for key in ('show_bollinger','show_macd','show_td','show_trendlines','show_dow123','show_divergence','show_wave'))
+    updated = {**defaults, 'show_macd': True, 'show_wave': True, 'ma_periods': [8, 21, 55]}
+    response = logged_in.put('/api/settings/chart-indicators', json=updated)
+    assert response.status_code == 200
+    assert logged_in.get('/api/settings').json()['chart_indicators'] == updated
+    assert logged_in.put('/api/settings/chart-indicators', json={**updated, 'ma_periods': [8, 8]}).status_code == 422
+    assert logged_in.put('/api/settings/chart-indicators', json={**updated, 'ma_periods': [501]}).status_code == 422
+    assert logged_in.put('/api/settings/chart-indicators', json=updated, headers={'X-CSRF-Token':'invalid'}).status_code == 403
+    unauthenticated = logged_in.__class__(logged_in.app)
+    assert unauthenticated.put('/api/settings/chart-indicators', json=updated).status_code == 401
+    unauthenticated.close()
+
 @pytest.mark.parametrize('case',['ohlc','conflict','nan','wrong_interval'])
 def test_reject_invalid_or_conflicting_data(case):
     """验证非法OHLC、冲突重复和时间不匹配数据被拒绝。
@@ -427,11 +451,65 @@ def test_fresh_clone_uses_public_history_jobs_without_private_data(monkeypatch,t
     import app.bootstrap as bootstrap
     import app.core.config as config
     import app.services.jobs as jobs
+    from types import SimpleNamespace
     created=[]
     monkeypatch.setattr(config,'RESEARCH_ROOT',tmp_path)
-    monkeypatch.setattr(jobs,'enqueue',lambda db,kind,parameters:created.append((kind,parameters)))
+    def capture_enqueue(db,kind,parameters):
+        """Capture startup jobs and return the minimal durable-task contract."""
+        created.append((kind,parameters))
+        return SimpleNamespace(id='startup-test-task',status='QUEUED')
+    monkeypatch.setattr(jobs,'enqueue',capture_enqueue)
     bootstrap.main()
     histories=[params for kind,params in created if kind=='FETCH_HISTORY']
     assert [params['asset_id'] for params in histories]==['binance_usdm:'+symbol for symbol in ['KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT']]
     assert all(params['interval']=='15m' and params['days']==90 for params in histories)
     assert all(kind!='IMPORT_LOCAL' for kind,_ in created)
+    archives=[params for kind,params in created if kind=='FETCH_BINANCE_ARCHIVES']
+    assert len(archives)==1
+    assert archives[0]['interval']=='15m' and archives[0]['startup_reconcile'] is True
+    assert set(archives[0]['asset_ids'])=={'binance_usdm:'+symbol for symbol in ['KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT','SKHYNIXUSDT','SPCXUSDT','SNDKUSDT','XAUUSDT','QQQUSDT','INTCUSDT','TSLAUSDT','ZHIPUUSDT','OPENAIUSDT']}
+
+def test_startup_archive_backfill_skips_assets_already_covered_by_active_task():
+    """Verify service startup does not duplicate an existing all-contract archive task.
+
+    Returns:
+        No value; an unexpected second queue insertion fails the test.
+    """
+    from app.services.startup_market_data import queue_missing_binance_archives
+    with SessionLocal() as db:
+        assets=list(db.scalars(select(Asset).where(Asset.venue=='BINANCE_USDM',Asset.verification.in_(['VERIFIED','VERIFIED_SNAPSHOT']))))
+        ids=[asset.id for asset in assets]
+        db.add(Task(id='startup-active-archive-test',kind='FETCH_BINANCE_ARCHIVES',status='RUNNING',parameters={'asset_ids':ids,'interval':'15m'}))
+        db.commit()
+        def fail_if_enqueued(db_session,kind,parameters):
+            """Fail if the startup reconciler attempts to duplicate active work."""
+            raise AssertionError('active archive task should cover every missing asset')
+        result=queue_missing_binance_archives(db,enqueue_task=fail_if_enqueued,manifest_reader=lambda *_:None)
+    assert result['status']=='ALREADY_QUEUED_OR_RETRY_COOLDOWN'
+    assert result['queued_asset_count']==0
+
+def test_startup_archive_backfill_retries_after_a_fixed_proxy_dependency():
+    """Verify a fixed runtime/configuration error does not suppress the next startup retry.
+
+    Returns:
+        No value; a stale dependency failure must leave missing work eligible to queue.
+    """
+    from types import SimpleNamespace
+    import uuid
+    from app.services.startup_market_data import queue_missing_binance_archives
+    with SessionLocal() as db:
+        assets=list(db.scalars(select(Asset).where(Asset.venue=='BINANCE_USDM',Asset.verification.in_(['VERIFIED','VERIFIED_SNAPSHOT']))))
+        ids=[asset.id for asset in assets]
+        db.add(Task(id=str(uuid.uuid4()),kind='FETCH_BINANCE_ARCHIVES',status='FAILED',
+                    parameters={'asset_ids':ids,'interval':'15m','startup_reconcile':True},
+                    result={'error':'SOCKS proxy client dependency was missing'}))
+        db.commit()
+        queued=[]
+        def capture_enqueue(db_session,kind,parameters):
+            """Capture an eligible retry after a non-network setup failure was repaired."""
+            queued.append((kind,parameters))
+            return SimpleNamespace(id='startup-retry-task',status='QUEUED')
+        result=queue_missing_binance_archives(db,enqueue_task=capture_enqueue,manifest_reader=lambda *_:None)
+    assert len(queued)==1
+    assert result['queued_asset_count']==13
+    assert queued[0][0]=='FETCH_BINANCE_ARCHIVES'
