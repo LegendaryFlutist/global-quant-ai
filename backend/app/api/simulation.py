@@ -51,7 +51,7 @@ class StrategyWeights(BaseModel):
 class SimulationPolicy(BaseModel):
     """一个模拟账号绑定的不可越界周期、模型和风险配置。"""
     model_config = ConfigDict(extra="forbid")
-    asset_ids: list[str] = Field(min_length=1, max_length=10)
+    asset_ids: list[str] = Field(min_length=1, max_length=100)
     intervals: list[str] = Field(min_length=1, max_length=6)
     weights: StrategyWeights
     timeframe_weights: dict[str, Decimal] = Field(default_factory=lambda: {item: Decimal("1") for item in INTERVALS})
@@ -140,6 +140,22 @@ class SimulationAccountPayload(BaseModel):
     initial_equity: Decimal = Field(gt=0, le=Decimal("1000000000000"), max_digits=28, decimal_places=8)
     base_currency: Literal["USDT"] = "USDT"
     configuration: SimulationPolicy
+
+    @field_validator("name")
+    @classmethod
+    def trim_name(cls, value: str) -> str:
+        """保存前去除账号名首尾空格，拒绝只含空白的名称。
+
+        Args:
+            value: 用户输入的显示名称。
+
+        Returns:
+            首尾已清理的非空账号名称。
+        """
+        value = value.strip()
+        if not value:
+            raise ValueError("模拟账号名称不能为空")
+        return value
 
 
 class DatasetRequest(BaseModel):

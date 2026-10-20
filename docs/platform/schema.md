@@ -20,6 +20,8 @@
 
 行情事实文件由本地不可变Parquet保存，`market_data_metadata.path/sha256/row_count/time bounds/source`只作为PostgreSQL清单指针。DuckDB以进程内只读连接查询通过SHA256校验的文件；Redis用于任务队列、认证限流和20秒实时K线TTL缓存，缓存未命中时可读本地`live.json`快照。两种实时快照都不作为历史事实或策略配置的权威来源。当前尚无逐笔成交、历史订单簿、技术指标宽表或实盘账本表。
 
+资产API在现有`asset_type`基础上派生`market_category`（crypto/stocks/etf/other）和`product_type`（spot/perpetual/future/reference/other），不改变持久schema。这样ETF相关Binance永续显示为ETF类别+永续产品，登记股票显示为股票类别+现货产品；供应商核验和`live_tradable`仍各自独立，分类不代表行情已接入。
+
 三年Binance长期历史仍以`DATA_ROOT/long_history/<symbol>/<interval>/`内的不可变Parquet分段及manifest为权威。`FETCH_BINANCE_ARCHIVES`任务参数保存本次确切资产ID列表，任务result保存合约级检查点，不新增数据库表或迁移；仅对已核验USDM合约排队。长期图表目标周期缺少独立归档时，API可从较长覆盖范围的15m真实K线聚合更大周期，并返回`source_interval`和源manifest/分段哈希；向下插值禁止。
 
 `system_settings.chart_indicators`记录图表显示偏好：MA开关和2–500的均线长度列表，以及布林、MACD、TD九转、趋势线、道氏123、背离和波浪候选的可见开关。精简默认只显示MA与量柱。写入要求当前会话和CSRF，并产生审计事件；偏好只影响图表，不参与回测或策略计算。新增该JSON键无需数据库迁移。
@@ -82,4 +84,4 @@
 
 模型版本与策略版本禁止原地改产物；晋升状态与运行账户绑定需显式流程。审批引用建议内容哈希、用户和2FA事件，执行请求引用审批与风控复核。审批修改、参数漂移、过期、撤回、重复提交、未知交易所结果均需独立状态机测试。
 
-The full-research task allowlist now admits up to 13 exchange-verified symbols but only `analysis_dow123` for new runs. Existing archived model names remain readable through the archive path; no database migration is needed. Task parameters continue to pin selected symbol/model/timeframe lists and the output UUID; local source readiness is checked before enqueueing.
+The full-research task allowlist admits up to 13 exchange-verified symbols and four algorithm IDs for new runs: `analysis_dow123`, `patchtst`, `tft_attention`, and `tcn`. Existing archived model names remain readable through the archive path; no database migration is needed. Task parameters continue to pin selected symbol/model/timeframe lists and the output UUID; local source readiness is checked before enqueueing.

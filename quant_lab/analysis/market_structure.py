@@ -276,7 +276,9 @@ def analysis_signals(frame,model=None,confidence=.45,swing_min_range=None,swing_
         p=model.predict_proba(frame[model.feature_names_]);classes=list(model.classes_)
         positive=p[:,classes.index(1)];negative=p[:,classes.index(-1)];flat=p[:,classes.index(0)]
         side=np.where((positive>=confidence)&(positive>negative)&(positive>flat),1,
-            np.where((negative>=confidence)&(negative>positive)&(negative>flat),-1,0));reason='GRU_MULTIPERIOD_STRUCTURE'
+            np.where((negative>=confidence)&(negative>positive)&(negative>flat),-1,0))
+        algorithm=getattr(model,'algorithm','GRU').upper().replace('-','_')
+        reason=f'{algorithm}_MULTIPERIOD_STRUCTURE'
     allowed=(side!=0)&(side==higher)&(frame.analysis_trend.to_numpy()!=-side)
     if swing_min_range is not None or swing_max_range is not None:
         measured=frame.swing_range_pct.to_numpy()

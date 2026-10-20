@@ -28,7 +28,7 @@
 
 只把新的123确认事件作为入场候选，历史持续状态不能当作每根新信号。波浪候选用于分析解释，避免主观计数成为强行开仓的条件。执行与其他模型共用15m响应延迟、24h～21天持仓、费用、资金费和风险退出规则。
 
-## 深度时序模型：torch_gru
+## 历史深度时序模型：torch_gru
 
 - PyTorch双层GRU，隐藏单元32，输入最近24根**连续**、完整、已知的K线特征。
 - 特征包含原12反转家族、价格/量能/ATR/RSI、大周期趋势，以及确认结构、123、支撑压力距离、波浪候选和过去转折周期等上下文。
@@ -44,11 +44,11 @@
 ## 运行
 
 ```bash
-# 全部8模型、四优先标的；生成结构分析和分层回测报告
+# 使用当前默认策略生成本地研究报告
 bash scripts/container.sh run
 
-# 只比较新增两类模型
-bash scripts/container.sh run --models analysis_dow123 torch_gru
+# 显式选择当前注册的四个规则/深度算法
+bash scripts/container.sh run --models analysis_dow123 patchtst tft_attention tcn
 
 # 单独生成多周期分析，不训练
 bash scripts/container.sh lab analyze-multi \
@@ -56,6 +56,12 @@ bash scripts/container.sh lab analyze-multi \
 ```
 
 原研究目录均保留。BTC此前已有实验被查看过，新增策略仍可能存在选择偏差；这些新增分析不能把已看过的历史重新变成独立样本。
+
+## Web系统页：四模型统一研究白名单
+
+“模拟与回测”页中的多模型面板与上述历史CLI批次分开，当前可选多周期道氏123、PatchTST、TFT-Attention和TCN。后三者各输入48根连续已收盘K线，训练折内拟合缩放参数，采用固定8轮和seed 42；PatchTST用重叠patch与双层Transformer encoder，TFT-Attention用特征选择门、LSTM及多头注意力，TCN用膨胀卷积残差块。推理方向还需通过相同的已收盘高周期、确认结构和历史波幅筛选。
+
+四个算法在同一标的/周期/验证折/费用/滑点/退出集合下生成独立权益曲线、模型×标的逐笔报告和训练审计。报告包含每折算法、参数量、序列数、loss、seed、训练标签截止、验证起点，以及研究代码和数据SHA256。训练loss不等于交易收益，且历史验证区间已被检查过；新架构只作为候选比较，不能据此宣称收益率更高，也不自动挑选或启用模型。新任务从Web页面启动：`/simulation` → “开始整套回测”。
 
 ## 参考
 

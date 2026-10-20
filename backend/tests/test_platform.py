@@ -113,6 +113,27 @@ def test_asset_priority_identity_and_truthful_capabilities(logged_in):
     assert all(status=='PLANNED' for key,status in statuses.items() if key not in ('platform','technical','backtests'))
     assert logged_in.post('/api/execution/orders',json={'side':'BUY'}).status_code==403
 
+def test_asset_market_category_and_product_type_are_separate(logged_in):
+    """区分标的所属市场类别与实际现货/永续/期货产品结构。
+
+    Args:
+        logged_in: 通过测试登录流程创建的认证客户端。
+
+    Returns:
+        无返回值；ETF相关永续不得误标为现货，研究登记ETF须保持现货产品身份。
+    """
+    assets = {asset['id']: asset for asset in logged_in.get('/api/assets').json()}
+    assert assets['binance_usdm:BTCUSDT']['market_category'] == 'crypto'
+    assert assets['binance_usdm:BTCUSDT']['product_type'] == 'perpetual'
+    assert assets['binance_usdm:KORUUSDT']['market_category'] == 'etf'
+    assert assets['binance_usdm:KORUUSDT']['product_type'] == 'perpetual'
+    assert assets['us:NVDA']['market_category'] == 'stocks'
+    assert assets['us:NVDA']['product_type'] == 'spot'
+    assert assets['us:QQQ']['market_category'] == 'etf'
+    assert assets['us:QQQ']['product_type'] == 'spot'
+    assert assets['us:SPX']['market_category'] == 'other'
+    assert assets['us:SPX']['product_type'] == 'reference'
+
 def test_settings_validation_persistence_and_csrf(logged_in):
     """验证显示设置校验、持久化及CSRF保护。
 

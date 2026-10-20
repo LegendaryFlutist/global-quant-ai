@@ -24,7 +24,9 @@ from quant_lab.analysis.candlestick_patterns import PATTERN_LABELS,PATTERN_DEFIN
 from quant_lab.strategies.pattern_features import prepare_timeframe,entry_signals,FEATURE_COLUMNS,MINUTES,PATTERN_STRATEGY
 from quant_lab.reports.trend_report import load_bars
 from quant_lab.notifications.paper_mail import record_simulated
-from quant_lab.models.model_registry import MODEL_NAMES
+from quant_lab.models.model_registry import (
+    DEEP_MODEL_NAMES, MODEL_ALGORITHMS, MODEL_LABELS, MODEL_NAMES, MODEL_SEEDS,
+)
 from quant_lab.analysis.market_structure import analysis_signals
 
 EXIT_MODES=('swing_percent','fixed_rr','atr_trailing','three_bar_breakout','three_bar_trailing','time_exit','fixed_three_bar_target')
@@ -53,8 +55,42 @@ def screening_reasons(row):
     return reasons
 
 
+def _research_code_sha256():
+    """Hash the research engine, features and named model implementations.
+
+    Returns:
+        Stable SHA256 over the source paths and bytes that define these model runs.
+    """
+    root = Path(__file__).resolve().parents[1]
+    sources = (
+        Path(__file__).resolve(),
+        root / "models" / "model_registry.py",
+        root / "models" / "sequence_models.py",
+        root / "strategies" / "pattern_features.py",
+        root / "analysis" / "market_structure.py",
+    )
+    digest = hashlib.sha256()
+    for source in sources:
+        digest.update(source.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(source.read_bytes())
+    return digest.hexdigest()
+
+
+def _feature_schema_sha256():
+    """Hash the ordered feature contract used by training and inference.
+
+    Returns:
+        SHA256 over the exact ordered feature names and strategy feature revision.
+    """
+    schema = json.dumps(
+        {"strategy": PATTERN_STRATEGY, "columns": list(FEATURE_COLUMNS)},
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(schema).hexdigest()
+
+
 def estimator(name):
-    """按注册模型名构造规则、传统分类器或GRU估计器。
+    """按注册算法名称构造规则或深度序列分类器。
 
     Args:
         name: 模型/配置的注册名称。
@@ -66,6 +102,16 @@ def estimator(name):
     if name=='torch_gru':
         from quant_lab.models.deep_model import TorchGRUClassifier
         return TorchGRUClassifier()
+    if name in DEEP_MODEL_NAMES:
+        from quant_lab.models.sequence_models import (
+            PatchTSTClassifier, TemporalConvNetClassifier, TemporalFusionAttentionClassifier,
+        )
+        classes = {
+            "patchtst": PatchTSTClassifier,
+            "tft_attention": TemporalFusionAttentionClassifier,
+            "tcn": TemporalConvNetClassifier,
+        }
+        return classes[name](seed=MODEL_SEEDS[name])
     if name=='logistic':return make_pipeline(StandardScaler(),LogisticRegression(C=.1,class_weight='balanced',max_iter=1000))
     if name=='random_forest':return RandomForestClassifier(n_estimators=120,max_depth=5,min_samples_leaf=15,class_weight='balanced_subsample',n_jobs=1,random_state=42)
     if name=='extra_trees':return ExtraTreesClassifier(n_estimators=120,max_depth=5,min_samples_leaf=15,class_weight='balanced',n_jobs=1,random_state=42)
@@ -108,7 +154,7 @@ def model_signals(name,frame,model,confidence,swing_kwargs):
     Returns:
         当前模型的研究入场信号表。
     """
-    if name in ('analysis_dow123','torch_gru'):
+    if name in ('analysis_dow123','torch_gru',*DEEP_MODEL_NAMES):
         return analysis_signals(frame,model,confidence,**swing_kwargs)
     return entry_signals(frame,model,confidence,**swing_kwargs)
 
@@ -238,12 +284,12 @@ def run_pattern_research(data_dir,out,baseline_report,timeframes=tuple(MINUTES),
             for name in model_names:
                 model=None
                 if complete:
-                    if name=='torch_gru':print(f'Training PyTorch GRU: {source["symbol"]} {timeframe} fold {fold}',flush=True)
+                    if name in DEEP_MODEL_NAMES:print(f'Training {MODEL_LABELS[name]}: {source["symbol"]} {timeframe} fold {fold}',flush=True)
                     model,notes=fit_model(name,train)
                     if hasattr(model,'training_audit_'):
-                        checkpoint=out/'deep_checkpoints'/timeframe/f'fold_{fold}.pt'
+                        checkpoint=out/'deep_checkpoints'/name/timeframe/f'fold_{fold}.pt'
                         model.export(checkpoint)
-                        deep_training.append(dict(timeframe=timeframe,fold=fold,checkpoint=str(checkpoint.relative_to(out)),
+                        deep_training.append(dict(model=name,timeframe=timeframe,fold=fold,checkpoint=str(checkpoint.relative_to(out)),
                             train_last_label_end=int(train.label_end_time.max()),validation_start=left,**model.training_audit_))
                     if hasattr(model,'set_context'):
                         model.set_context(frame.loc[frame.close_time<left,list(FEATURE_COLUMNS)])
@@ -301,14 +347,20 @@ def run_pattern_research(data_dir,out,baseline_report,timeframes=tuple(MINUTES),
     results.sort(key=lambda r:(r['eligible'],r['validation_score']),reverse=True)
     selected=next((r for r in results if r['eligible']),None)
     report=dict(source=source,strategy=PATTERN_STRATEGY,feature_columns=list(FEATURE_COLUMNS),model_names=list(model_names),deep_training=deep_training,dataset_sha256=digest,
+        feature_schema_sha256=_feature_schema_sha256(),model_code_sha256=_research_code_sha256(),model_algorithms={name:MODEL_ALGORITHMS[name] for name in model_names},
+        model_seeds={name:MODEL_SEEDS[name] for name in model_names if name in MODEL_SEEDS},
         mark_sha256=hashlib.sha256((data_dir/'mark_bars.csv').read_bytes()).hexdigest(),
         validation_windows=windows,holdout_cut_ms=cut,original_holdout_boundary_preserved=True,holdout_used=bool(selected),risk=risk,
         period_pairs={t:dict(entry_minutes=MINUTES[t],higher_minutes=4*MINUTES[t]) for t in timeframes},
         confidence=confidence,pattern_labels=PATTERN_LABELS,pattern_definitions=PATTERN_DEFINITIONS,
         pattern_sources=PATTERN_SOURCES,exit_modes={m:EXIT_LABELS[m] for m in exit_modes},
         feature_change=f'12 reversals + ATR/RSI + confirmed structure/Dow123/wave/cycle + closed higher context; risk ATR floored by closed {risk_atr_floor_hours:g}h ATR',
-        analysis_models=dict(analysis_dow123='Confirmed lower-period Dow123 event + same-direction closed 4x trend + nonopposing confirmed pivot structure + historical swing filter; Elliott candidates are context, never forced predictions',
-            torch_gru='2-layer 32-unit GRU, 24 consecutive closed-candle inputs, training-only scaler, 20 fixed epochs; probability + higher trend + nonopposing confirmed structure + historical swing filter'),
+        analysis_models={
+            'analysis_dow123':'Confirmed lower-period Dow123 event + same-direction closed 4x trend + nonopposing confirmed pivot structure + historical swing filter; Elliott candidates are context, never forced predictions',
+            'patchtst':'PatchTST-style overlapping patches + two Transformer attention encoder layers; 48 closed-candle sequence, training-only scaling and fixed seed; direction score is filtered by higher trend and confirmed structure',
+            'tft_attention':'Compact TFT-style variable-selection gates + LSTM + temporal multi-head attention + gated residual; 48 closed-candle sequence, training-only scaling and fixed seed; no future covariates',
+            'tcn':'Residual temporal convolution blocks at dilations 1/2/4; 48 closed-candle sequence, training-only scaling and fixed seed; direction score is filtered by higher trend and confirmed structure',
+        },
         holding_policy=dict(execution_delay_minutes=execution_delay_minutes,min_holding_hours=min_holding_hours,max_holding_hours=max_holding_hours,
             scale_out_after_hours=scale_out_after_hours,scale_out_interval_hours=scale_out_interval_hours,scale_out_fraction=scale_out_fraction,
             scale_out_deviation_atr=scale_out_deviation_atr,label_holding_hours=label_holding_hours,risk_atr_floor_hours=risk_atr_floor_hours,
@@ -440,6 +492,7 @@ def export_pattern_report(out,report,curves):
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
     timeframes=list(report['period_pairs']);rank=report['ranking']
+    model_names=report.get('model_names',[])
     if report.get('deep_training'):
         training=report['deep_training']
         fig,axes=plt.subplots(len(timeframes),1,figsize=(11,3*len(timeframes)),squeeze=False,layout='constrained')
@@ -450,8 +503,8 @@ def export_pattern_report(out,report,curves):
             if ax.lines:ax.legend(fontsize=8)
         for ext in ('svg','png'):fig.savefig(out/('deep_training_loss.'+ext),dpi=130)
         plt.close(fig)
-        training_rows=''.join('<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in (r['timeframe'],r['fold'],r['device'],r['gpu_name'],r['sequences'],r['parameters'],f'{r["loss_history"][0]:.4f}',f'{r["loss_history"][-1]:.4f}'))+'</tr>' for r in training)
-        training_page='<meta charset="utf-8"><title>PyTorch GRU真实训练记录</title><style>body{max-width:1150px;margin:25px auto;font:16px sans-serif}img{width:100%}td,th{padding:9px;border-bottom:1px solid #ddd}</style><h1>PyTorch双层GRU训练记录</h1><p><a href="comparison.html">返回研究比较</a></p><p>24根连续已收盘K线输入，双层32单元GRU。标准化只用训练集；过去但未参与标签训练的K线可作为验证输入上下文。固定20轮，不用验证或留出收益选训练轮次。训练损失下降不代表样本外盈利。</p><table><tr><th>周期</th><th>折</th><th>训练设备</th><th>GPU</th><th>训练序列</th><th>参数量</th><th>初始损失</th><th>最终损失</th></tr>'+training_rows+'</table><img src="deep_training_loss.svg"><p><a href="deep_training.json">完整训练审计与检查点路径</a></p>'
+        training_rows=''.join('<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in (r['model'],r['algorithm'],r['timeframe'],r['fold'],r['seed'],r['device'],r['gpu_name'],r['sequences'],r['parameters'],f'{r["loss_history"][0]:.4f}',f'{r["loss_history"][-1]:.4f}'))+'</tr>' for r in training)
+        training_page='<meta charset="utf-8"><title>PyTorch深度模型训练记录</title><style>body{max-width:1350px;margin:25px auto;font:16px sans-serif}img{width:100%}td,th{padding:9px;border-bottom:1px solid #ddd}</style><h1>PyTorch深度时序模型训练记录</h1><p><a href="comparison.html">返回研究比较</a></p><p>每次预测只读取最近48根连续已收盘K线。标准化仅拟合当前训练折，标签结束时间严格早于验证起点；固定随机种子和训练轮数，不用验证或留出收益早停。训练损失下降不代表样本外盈利。</p><table><tr><th>算法</th><th>结构</th><th>周期</th><th>折</th><th>Seed</th><th>设备</th><th>GPU</th><th>训练序列</th><th>参数量</th><th>初始损失</th><th>最终损失</th></tr>'+training_rows+'</table><img src="deep_training_loss.svg"><p><a href="deep_training.json">完整训练审计与检查点路径</a></p>'
         (out/'deep_training.html').write_text(training_page)
     for group in ('models','exits'):
         fig,axes=plt.subplots(len(timeframes),1,figsize=(13,4*len(timeframes)),squeeze=False,layout='constrained')
@@ -476,9 +529,10 @@ def export_pattern_report(out,report,curves):
     rows=''.join('<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in
         (r['timeframe'],r['model'],EXIT_LABELS[r['exit_mode']],f"{r['net_return']:.2%}",f"{r['max_drawdown']:.2%}",r['entries'],r['complete_folds'],r['eligible']))+'</tr>' for r in rank[:60])
     names='、'.join(PATTERN_LABELS.values())
-    text=f'<!doctype html><meta charset="utf-8"><title>多周期结构与深度模型研究</title><style>body{{max-width:1350px;margin:25px auto;font:16px sans-serif}}img{{width:100%}}td,th{{padding:6px;border-bottom:1px solid #ddd}}</style><h1>{html.escape(report["source"]["symbol"])} 多周期结构 / GRU / 道氏123 / 多止盈比较</h1>'
-    if report.get('deep_training'):text+='<p><a href="deep_training.html">查看PyTorch GRU实际GPU训练记录、损失曲线与检查点</a></p>'
-    text+=f'<p>状态：{report["status"]}。逐仓{report["risk"]["leverage"]:g}×，保证金{report["risk"]["margin_fraction"]:.0%}。原6模型以同向反转形态与四倍大周期筛选；新增道氏123以确认反转事件入场，GRU以时序方向概率入场，二者均结合大周期、确认结构及历史波动筛选。无新信号不自动平仓。</p><p>{html.escape(names)}</p>'
+    algorithms=' / '.join(MODEL_LABELS.get(name,name) for name in model_names)
+    text=f'<!doctype html><meta charset="utf-8"><title>多周期结构与深度模型研究</title><style>body{{max-width:1350px;margin:25px auto;font:16px sans-serif}}img{{width:100%}}td,th{{padding:6px;border-bottom:1px solid #ddd}}</style><h1>{html.escape(report["source"]["symbol"])} 多周期结构 / 深度学习 / 道氏123 / 多止盈比较</h1>'
+    if report.get('deep_training'):text+='<p><a href="deep_training.html">查看深度模型实际训练记录、损失曲线与检查点</a></p>'
+    text+=f'<p>状态：{report["status"]}。逐仓{report["risk"]["leverage"]:g}×，保证金{report["risk"]["margin_fraction"]:.0%}。本次算法：{html.escape(algorithms)}。深度模型使用已收盘序列方向分数，结合大周期趋势、确认结构与历史波动筛选；回测收益无保证，未发送委托。</p><p>{html.escape(names)}</p>'
     policy=report.get('holding_policy')
     if policy:
         text+=f'<p>人工响应延迟{policy["execution_delay_minutes"]:g}分钟，使用原始15分钟行情成交；常规持仓{policy["min_holding_hours"]:g}–{policy["max_holding_hours"]:g}小时，硬止损、强平和研究截止可提前退出。满{policy["scale_out_after_hours"]:g}小时且偏离入场价达到{policy["scale_out_deviation_atr"]:g}倍ATR后，每{policy["scale_out_interval_hours"]:g}小时减初始仓位{policy["scale_out_fraction"]:.0%}。风险ATR取信号周期与已收盘{policy.get("risk_atr_floor_hours",4):g}小时ATR的较大值；训练收益标签统一{policy["label_holding_hours"]:g}小时。</p>'

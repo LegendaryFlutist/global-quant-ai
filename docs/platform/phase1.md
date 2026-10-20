@@ -104,11 +104,11 @@ Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存�
 
 验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；Python3.11 ARM64镜像构建成功，隔离PostgreSQL/Redis 44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；498个具名Python函数文档检查、发布扫描和语法检查通过。提交`5d2a028`的GitHub backend、frontend、risk-engine、publish-hygiene CI全success（run 39145561898）。`bash scripts/platform.sh up`后API健康端点/首页HTTP 200且新route已注册。未发起真实Binance请求；随后开发的离线回测/曲线实现详见上一节，本机实际行情收益仍未知。
 
-### 系统页面整套多模型回测（2026-10-19）
+### 系统页面整套多模型回测（2026-10-20更新）
 
-模拟与回测页面新增全模型任务面板：可选四个优先标的、八种已登记模型及15分钟至4小时入场周期，在页面启动同一离线研究引擎。任务保存在现有`scheduled_tasks`表，由独立NVIDIA PyTorch容器处理；引擎在每个模型验证折及周期/退出配置完成时上报实际进度，页面每2秒轮询并显示百分比与当前标的/周期/模型/折。报告保存在`.runtime/research-runs/<UUID>`，页面按登录用户隔离读取总体摘要、模型/标的报告、不同退出模式排名、验证期权益曲线和逐笔模拟操作。已有`runs/`中带`batch_summary.json`的历史报告作为只读归档展示，不修改旧报告。GPU容器无Binance私有密钥，邮件仅模拟，禁止下单。
+模拟与回测页面新增全模型任务面板：可选四个优先标的、道氏123/PatchTST/TFT-Attention/TCN四个算法及15分钟至4小时入场周期，在页面启动同一离线研究引擎。任务保存在现有`scheduled_tasks`表，由独立NVIDIA PyTorch容器处理；引擎在每个模型验证折及周期/退出配置完成时上报实际进度，页面每2秒轮询并显示百分比与当前标的/周期/模型/折。报告保存在`.runtime/research-runs/<UUID>`，页面按登录用户隔离读取总体摘要、模型/标的报告、不同退出模式排名、验证期权益曲线和逐笔模拟操作。深度模型每个训练折单独拟合缩放参数、保存算法/seed/训练审计，并避免模型间检查点互相覆盖。已有`runs/`中带`batch_summary.json`的历史报告作为只读归档展示，不修改旧报告。GPU容器无Binance私有密钥，邮件仅模拟，禁止下单；当前验证窗有历史查看选择偏差，不代表未来收益更高。
 
-验证：新增认证任务输入/所有权、固定UUID报告路径、曲线/逐笔报告读取、历史报告只读及路径穿越拒绝测试；最终`bash scripts/platform.sh test`隔离PostgreSQL/Redis为51 passed，1条既有Starlette TestClient弃用提示。前端`npm test`为2 passed，`npm run build`成功；`python3 scripts/check_docs.py`覆盖559个具名Python函数，语法检查通过。`bash scripts/platform.sh up`完成API/Web/NVIDIA runner构建和启动，API健康、CUDA可用；未从页面触发完整新回测，因此尚未验证一次完整端到端GPU任务耗时/报告。
+资产目录API同时返回派生`market_category`和`product_type`，以分别表示虚拟货币/股票/ETF/其它以及现货/永续/期货/参考数据。模拟账号保存会修剪空白名称，并可选择最多100个已核验资产，覆盖当前13个Binance永续；未修改数据库结构。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
@@ -123,6 +123,8 @@ Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存�
 
 验收产物位于`runs/platform_phase1/`：`browser-check.json`、`runtime-check.json`、测试日志、依赖审计和页面截图。重新验证浏览器需启动隔离Chrome后执行`node scripts/platform_browser_check.mjs 9223`；脚本只在内存中读取本机初始凭据并在结束时退出登录。若已改密码，初始密码文件不能再用于此脚本，需改用独立测试账号。
 
-### Rule backtest coverage update (2026-10-19)
+### Multi-model backtest and market-category update (2026-10-20)
 
-The authenticated research page lists all 13 exact exchange-verified contract IDs. A local coverage check enables only symbols that have real bars, funding, mark-price bars and a matching frozen evaluation plan. New system backtests now select the deterministic multi-timeframe structure/Dow-123 rule model only; old ML reports are preserved for read-only review. The selected report shows how many completed long and short operations it contains. This does not implement model training; causal multi-timeframe training features and bottom-structure watch zones remain planned. Current network access is blocked: direct Binance DNS lookup fails and the configured proxy returns HTTP 451.
+The authenticated research page lists the 13 exact Binance USD-M contract IDs and enables only symbols with matching local bars, funding, mark-price bars and frozen evaluation plans. Its current model whitelist compares the deterministic multi-timeframe Dow-123 rule, PatchTST (Transformer attention), TFT-Attention and TCN under the same folds, features, costs and exit rules. Deep models use train-fold-only normalization and record seed, architecture audit, source/data hashes and per-model curves/operations. The implementation adds no claim of superior or profitable future returns; the previously inspected validation periods remain selection-biased, and no full GPU run was triggered in this change.
+
+The asset API now derives market category (`crypto`, `stocks`, `etf`, `other`) separately from product type (`spot`, `perpetual`, `future`, `reference`, `other`). This is a presentation projection over the existing catalog, not new market verification. Simulation account names are trimmed/validated and the account policy now accepts up to 100 assets, covering all 13 verified contracts; single-account deep-model version loading remains a separate planned integration. Current network access is blocked: direct Binance DNS lookup fails and the configured proxy returns HTTP 451.

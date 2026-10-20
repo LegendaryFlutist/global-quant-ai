@@ -25,7 +25,7 @@ RESEARCH_SYMBOLS = (
     "SNDKUSDT", "XAUUSDT", "QQQUSDT", "INTCUSDT", "TSLAUSDT", "OPENAIUSDT", "ZHIPUUSDT",
 )
 RESEARCH_TIMEFRAMES = ("15m", "30m", "1h", "2h", "4h")
-RESEARCH_MODELS = ("analysis_dow123",)
+RESEARCH_MODELS = ("analysis_dow123", "patchtst", "tft_attention", "tcn")
 ARCHIVE_MODELS = (
     *RESEARCH_MODELS, "torch_gru", "pattern_only", "logistic", "random_forest",
     "extra_trees", "hist_gradient", "mlp",
@@ -38,7 +38,7 @@ class ResearchBacktestRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     symbols: list[str] = Field(min_length=1, max_length=13)
-    models: list[str] = Field(min_length=1, max_length=1)
+    models: list[str] = Field(min_length=1, max_length=4)
     timeframes: list[str] = Field(min_length=1, max_length=5)
 
     @field_validator("symbols")
@@ -54,7 +54,7 @@ class ResearchBacktestRequest(BaseModel):
     def validate_models(cls, values):
         """限制为研究引擎已登记的模型名称，并拒绝重复运行项。"""
         if len(values) != len(set(values)) or any(value not in RESEARCH_MODELS for value in values):
-            raise ValueError("新回测仅支持多周期结构·道氏123规则模型")
+            raise ValueError("模型列表包含未开放或重复算法；仅支持道氏123、PatchTST、TFT-Attention与TCN")
         return values
 
     @field_validator("timeframes")

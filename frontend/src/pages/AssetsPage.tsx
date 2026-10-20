@@ -15,8 +15,16 @@ export default function AssetsPage({
   onChart: (asset: Asset) => void;
   onVerify: () => Promise<void>;
 }) {
+  const [category, setCategory] = useState("all");
+  const [product, setProduct] = useState("all");
   const [theme, setTheme] = useState("全部");
   const [search, setSearch] = useState("");
+  const categoryLabels: Record<string, string> = {
+    crypto: "虚拟货币", stocks: "股票", etf: "ETF", other: "其他",
+  };
+  const productLabels: Record<string, string> = {
+    spot: "现货", perpetual: "永续合约", future: "期货", reference: "指数 / 研究指标", other: "其他",
+  };
   const themes = [
     "全部",
     ...Array.from(new Set(assets.flatMap((a) => a.themes))).sort(),
@@ -27,7 +35,7 @@ export default function AssetsPage({
         <div>
           <span className="eyebrow">ASSET REGISTRY</span>
           <h1>全球资产注册表</h1>
-          <p>同一底层资产可归属多个主题；股票、ETF 与相关永续独立登记</p>
+          <p>按资产类别与产品类型筛选；股票、ETF和相关永续保持独立登记，未接入行情不会显示为可交易</p>
         </div>
         <button onClick={() => void onVerify()}>核验 Binance 合约</button>
       </header>
@@ -38,6 +46,21 @@ export default function AssetsPage({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="资产类别">
+          <option value="all">全部类别</option>
+          <option value="crypto">虚拟货币</option>
+          <option value="stocks">股票</option>
+          <option value="etf">ETF</option>
+          <option value="other">其他</option>
+        </select>
+        <select value={product} onChange={(event) => setProduct(event.target.value)} aria-label="产品类型">
+          <option value="all">全部产品</option>
+          <option value="spot">现货</option>
+          <option value="perpetual">永续合约</option>
+          <option value="future">期货</option>
+          <option value="reference">指数 / 研究指标</option>
+          <option value="other">其他</option>
+        </select>
         <select
           value={theme}
           onChange={(e) => setTheme(e.target.value)}
@@ -63,6 +86,8 @@ export default function AssetsPage({
             {assets
               .filter(
                 (a) =>
+                  (category === "all" || a.market_category === category) &&
+                  (product === "all" || a.product_type === product) &&
                   (theme === "全部" || a.themes.includes(theme)) &&
                   `${a.symbol} ${a.name} ${a.underlying_id}`
                     .toLowerCase()
@@ -76,8 +101,8 @@ export default function AssetsPage({
                     <small className="mono">{a.underlying_id}</small>
                   </td>
                   <td>
-                    {a.venue}
-                    <small>{a.asset_type}</small>
+                    <span className="badge neutral">{categoryLabels[a.market_category] ?? "其他"}</span>
+                    <small>{productLabels[a.product_type] ?? "其他"} · {a.venue}</small>
                   </td>
                   <td>
                     <div className="tags">

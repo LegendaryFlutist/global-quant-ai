@@ -11,6 +11,8 @@ export interface Asset {
   name: string;
   underlying_id: string;
   asset_type: string;
+  market_category: "crypto" | "stocks" | "etf" | "other";
+  product_type: "spot" | "perpetual" | "future" | "reference" | "other";
   venue: string;
   priority: number;
   verification: string;

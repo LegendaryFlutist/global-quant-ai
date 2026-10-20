@@ -8,11 +8,14 @@ import { api, post } from "../services/api";
 echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, CanvasRenderer]);
 
 const SYMBOLS = ["KORUUSDT", "CLUSDT", "NVDAUSDT", "BTCUSDT", "SKHYNIXUSDT", "SPCXUSDT", "SNDKUSDT", "XAUUSDT", "QQQUSDT", "INTCUSDT", "TSLAUSDT", "OPENAIUSDT", "ZHIPUUSDT"];
-const MODELS = ["analysis_dow123"];
+const MODELS = ["analysis_dow123", "patchtst", "tft_attention", "tcn"];
 const TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h"];
 const EXITS = ["swing_percent", "fixed_rr", "atr_trailing", "three_bar_breakout", "three_bar_trailing", "time_exit", "fixed_three_bar_target"];
 const MODEL_LABELS: Record<string, string> = {
   analysis_dow123: "多周期结构 · 道氏 1-2-3",
+  patchtst: "PatchTST · 分段 Transformer",
+  tft_attention: "TFT-Attention · 时序融合注意力",
+  tcn: "TCN · 膨胀时序卷积",
 };
 const EXIT_LABELS: Record<string, string> = {
   swing_percent: "波段百分比", fixed_rr: "固定盈亏比", atr_trailing: "ATR 跟踪",
@@ -126,8 +129,8 @@ export default function FullResearchBacktests() {
   const progress = active?.progress;
   const filteredRankings = report?.rankings.filter((row) => row.timeframe === timeframe) ?? [];
   return <section className="panel full-research-panel">
-    <div className="section-title"><div><span className="eyebrow">RULE-BASED RESEARCH</span><h2>规则回测 · 全标的覆盖</h2></div><button onClick={() => void refreshRuns()} disabled={busy}>刷新任务</button></div>
-    <p>新回测仅运行多周期结构与道氏 1-2-3 规则策略；机器学习模型已从新任务移除。全部 13 个已核验合约会列出，只有具备匹配本地行情与冻结评估计划的标的可选。研究支持多空信号，不发送委托。</p>
+    <div className="section-title"><div><span className="eyebrow">MULTI-MODEL RESEARCH</span><h2>多模型回测 · 全标的覆盖</h2></div><button onClick={() => void refreshRuns()} disabled={busy}>刷新任务</button></div>
+    <p>统一验证窗比较道氏 1-2-3、PatchTST、TFT-Attention 与 TCN，使用相同多周期过滤、成本、风险和退出评估。深度模型只使用当时可见的已收盘K线，并在各自训练折拟合标准化；不能据历史收益保证未来收益。全部13个已核验合约会列出，仅匹配本地行情与冻结计划的标的可选。</p>
     {error && <div role="alert" className="alert error">{error}</div>}
     <div className="filters">
       <fieldset><legend>回测标的（就绪 {coverage?.assets.filter((asset) => asset.ready).length ?? 0}/{SYMBOLS.length}）</legend>{SYMBOLS.map((value) => {

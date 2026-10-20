@@ -187,6 +187,35 @@ def test_simulation_account_dataset_request_queues_only_configured_public_data(l
     ).status_code == 422
 
 
+def test_simulation_account_accepts_all_verified_contracts_and_rejects_blank_name(logged_in):
+    """Accept all 13 verified perpetuals and give blank names a field-level validation error.
+
+    Args:
+        logged_in: Authenticated API client scoped to the isolated quant_test database.
+
+    Returns:
+        No value; the account must persist all requested assets and reject whitespace-only names.
+    """
+    all_assets = [
+        "binance_usdm:" + symbol for symbol in (
+            "KORUUSDT", "CLUSDT", "NVDAUSDT", "BTCUSDT", "SKHYNIXUSDT", "SPCXUSDT",
+            "SNDKUSDT", "XAUUSDT", "QQQUSDT", "INTCUSDT", "TSLAUSDT", "OPENAIUSDT", "ZHIPUUSDT",
+        )
+    ]
+    payload = _payload("   ")
+    payload["name"] = "  all verified  "
+    payload["configuration"]["asset_ids"] = all_assets
+    saved = logged_in.post("/api/simulation/accounts", json=payload)
+    assert saved.status_code == 201
+    assert saved.json()["name"] == "all verified"
+    assert saved.json()["configuration"]["asset_ids"] == all_assets
+
+    payload["name"] = "   "
+    blank = logged_in.post("/api/simulation/accounts", json=payload)
+    assert blank.status_code == 422
+    assert blank.json()["detail"][0]["loc"][-1] == "name"
+
+
 def test_simulation_backtest_binds_account_revision_and_rejects_unavailable_model(logged_in):
     """验证回测任务绑定当前配置版本、队列幂等和模型不可用边界。
 

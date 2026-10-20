@@ -252,3 +252,15 @@ bash scripts/platform.sh status
 - 未解决：需要用户从图表页点击“采集全部 Binance 合约三年15m”，在后台任务页观察实际网络结果；若再次报DNS/HTTP 451，需要在Docker可访问的网络代理上允许`fapi.binance.com:443`，保持TLS校验，然后重试。真实三年覆盖完成前没有新增行情可用于回测。其它67个非Binance目录资产按用户当前选择暂缓。
 - Git：实现提交`1d92274 feat: batch verified Binance archive collection`已推送到`feature/phase2-market-structure`，推送后核对远端ref与之匹配；后续交接文档更新也已提交并推送。GitHub Actions状态未核验；需要当前tip时运行`git log -1 --oneline`并重新核对远端。`.local/`是既存未跟踪目录，没有加入提交。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch`；后端`bash scripts/platform.sh test`；前端`cd frontend && npm test && npm run build`；文档`python3 scripts/check_docs.py`；部署`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。
+
+## 当前开发单元（2026-10-20）：资产分类、模拟账号保存与三种PyTorch模型
+
+- 已完成：资产API在不改数据库schema的情况下返回`market_category`与`product_type`；资产页能分别按虚拟货币/股票/ETF/其它以及现货/永续/期货/研究指标过滤。BINANCE_USDM合约仍被标为永续；底层ETF/股票分类不代表现货行情接入或可交易。
+- 已完成：模拟账号默认名称不再留空，前后端修剪并拒绝纯空白名称；账号可配置标的数上限从10提高到100，可保存当前13个已核验Binance USD-M合约。后端仍只接受精确登记且核验通过的永续资产。
+- 已完成：新研究白名单为`analysis_dow123`、`patchtst`、`tft_attention`、`tcn`。新增PatchTST双层Transformer注意力、TFT风格变量选择/LSTM/多头注意力和膨胀时序卷积TCN；每种使用最近48根连续收盘K线、训练折单独缩放、固定8轮/seed 42。共用相同的时间切分、方向门控、成本和退出方式，逐模型保存训练审计、检查点、权益曲线和标的操作。报告记录算法名、seed、特征schema/模型实现代码/行情数据SHA256；既有历史批次未重写。
+- 实测：`bash scripts/platform.sh test`为71 passed，1条既有Starlette/httpx弃用警告；覆盖市场/产品分类、账号空名称及13标的保存、四算法任务白名单和报告读取。`bash scripts/container.sh test`为159 passed，含三个网络CPU小样本训练、三类归一化概率与预测前缀不变，以及四模型比较HTML输出。训练测试输出含既有sklearn收敛提示和PyTorch Transformer nested-tensor提示，未阻断测试。`cd frontend && npm test && npm run build`为1 passed且生产构建成功；`python3 scripts/check_docs.py`为635个具名Python函数通过；Python compileall及`git diff --check`通过。
+- Docker：`bash scripts/platform.sh up`重建并启动API、Web、worker、GPU研究runner；随后`bash scripts/container.sh start`重建/启动兼容lab容器。API报告`status=ok,database=connected,redis=true`，Web为HTTP 200，核心服务healthy/running。`bash scripts/container.sh run --check --models analysis_dow123 patchtst tft_attention tcn`通过，确认当前四优先标的源数据和四模型命令行白名单可解析。
+- 未解决：当前未从已认证Web页面发起完整全标的GPU任务；所以没有真实资产新回测净值，也未比较哪个模型最好。已有研究时间段此前被看过，结果有选择偏差。新模型只作为候选，不能宣称收益率更高；完整任务仍从`/simulation`多模型面板提交并查看进度/模型×标的报告。Binance实时DNS/代理阻断另行存在。
+- Git：本开发单元检查点提交后，用`git log -1 --oneline`确认最新提交并核验是否推送到`feature/phase2-market-structure`/PR #11；新提交的GitHub Actions结果必须重新查询，不能沿用旧CI状态。`.local/`为既存未跟踪目录，未加入提交。
+- 下一步：登录`http://localhost:8080`，在“模拟与回测”页勾选四算法及有本地数据就绪的标的启动任务；观察进度完成后检查总体报告和每模型/标的曲线、收益、回撤、成交与持仓。独立开发滚动样本外基准，不能用已查看的留出区间择模。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；启动/重建`bash scripts/platform.sh up`；隔离后端测试`bash scripts/platform.sh test`；研究测试`bash scripts/container.sh test`；前端`cd frontend && npm test && npm run build`；文档`python3 scripts/check_docs.py`；健康`curl -fsS http://127.0.0.1:8080/api/health`。

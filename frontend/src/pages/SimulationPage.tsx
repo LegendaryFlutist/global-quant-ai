@@ -17,6 +17,12 @@ const WEIGHTS: { key: WeightKey; label: string }[] = [
   { key: "wave", label: "波浪候选" }, { key: "divergence", label: "RSI 背离" },
   { key: "reversal_patterns", label: "反转形态" }, { key: "deep_model", label: "深度模型" },
 ];
+const VERIFIED_ASSET_GROUPS = [
+  { category: "crypto", label: "虚拟货币永续" },
+  { category: "stocks", label: "股票相关永续" },
+  { category: "etf", label: "ETF相关永续" },
+  { category: "other", label: "其他已核验永续" },
+] as const;
 
 /** 生成默认的最近三年回测起始UTC日期。 */
 function defaultStartDate() {
@@ -57,9 +63,9 @@ function EquityChart({ points }: { points: SimulationEquityPoint[] }) {
 }
 
 /** 创建默认权重和保守研究风险政策，不隐式启用未登记深度模型。 */
-function emptyDraft(): Draft {
+function emptyDraft(name = "模拟策略 1"): Draft {
   return {
-    name: "", initial_equity: "10000", base_currency: "USDT",
+    name, initial_equity: "10000", base_currency: "USDT",
     configuration: {
       asset_ids: ["binance_usdm:KORUUSDT", "binance_usdm:CLUSDT", "binance_usdm:NVDAUSDT", "binance_usdm:BTCUSDT"],
       intervals: ["15m", "1h", "4h"],
@@ -126,15 +132,32 @@ export default function SimulationPage() {
       setError("理论权重总和必须为 1.00");
       return;
     }
+    const name = draft.name.trim();
+    if (!name) {
+      setError("请填写模拟账号名称后再保存");
+      return;
+    }
+    if (draft.configuration.asset_ids.length === 0) {
+      setError("请至少选择一个已核验的永续标的");
+      return;
+    }
+    const payload: Draft = {
+      ...draft,
+      name,
+      configuration: {
+        ...draft.configuration,
+        asset_ids: [...new Set(draft.configuration.asset_ids)],
+      },
+    };
     try {
       if (editingId) {
         await api<SimulationAccount>(`/simulation/accounts/${encodeURIComponent(editingId)}`, {
-          method: "PUT", body: JSON.stringify(draft),
+          method: "PUT", body: JSON.stringify(payload),
         });
       } else {
-        await post<SimulationAccount>("/simulation/accounts", draft);
+        await post<SimulationAccount>("/simulation/accounts", payload);
       }
-      setDraft(emptyDraft());
+      setDraft(emptyDraft(`模拟策略 ${accounts.length + (editingId ? 1 : 2)}`));
       setEditingId(null);
       setSaved("模拟配置已保存；请先准备本地归档数据，再运行只读模拟回测。");
       await refreshAccounts();
@@ -237,23 +260,31 @@ export default function SimulationPage() {
       <div className="two-col">
         <section className="panel">
           <h2>{editingId ? "编辑配置账号" : "创建配置账号"}</h2>
-          <label>账号名称<input value={draft.name} maxLength={80} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+          <label>账号名称<input value={draft.name} maxLength={80} required aria-invalid={!draft.name.trim()} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
           <label>初始资金（USDT）<input inputMode="decimal" value={draft.initial_equity} onChange={(event) => setDraft({ ...draft, initial_equity: event.target.value })} /></label>
           <label>入场评分门槛（0～1）<input inputMode="decimal" value={draft.configuration.entry_threshold} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, entry_threshold: event.target.value } })} /></label>
           <h3>参与理论权重</h3>
           <div className="filters">
             {WEIGHTS.map(({ key, label }) => <label key={key}>{label}<input inputMode="decimal" value={draft.configuration.weights[key]} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, weights: { ...draft.configuration.weights, [key]: event.target.value } } })} /></label>)}
           </div>
-          <p>权重合计：{weightTotal.toFixed(2)}。深度模型权重大于0时需指定版本；实际回测仍待模型注册接入。</p>
+          <p>权重合计：{weightTotal.toFixed(2)}。此配置账号的深度模型版本加载尚未接入；下方独立的多模型研究页可运行已开放算法。</p>
           {Number(draft.configuration.weights.deep_model) > 0 && <label>深度模型版本ID<input value={draft.configuration.deep_model_version ?? ""} onChange={(event) => setDraft({ ...draft, configuration: { ...draft.configuration, deep_model_version: event.target.value || null } })} /></label>}
-          <fieldset><legend>回测标的（仅精确核验永续）</legend>
-            {assets.filter((asset) => asset.venue === "BINANCE_USDM" && ["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset.verification)).map((asset) => <label key={asset.id} className="toggle">
-              <input type="checkbox" checked={draft.configuration.asset_ids.includes(asset.id)} onChange={(event) => {
-                const current = draft.configuration.asset_ids;
-                const asset_ids = event.target.checked ? [...current, asset.id] : current.filter((value) => value !== asset.id);
-                setDraft({ ...draft, configuration: { ...draft.configuration, asset_ids } });
-              }} />{asset.symbol}
-            </label>)}
+          <fieldset><legend>回测标的（已选 {draft.configuration.asset_ids.length} 个；仅精确核验永续）</legend>
+            {VERIFIED_ASSET_GROUPS.map((group) => {
+              const groupedAssets = assets.filter((asset) => asset.venue === "BINANCE_USDM"
+                && ["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset.verification)
+                && asset.market_category === group.category);
+              return groupedAssets.length ? <div key={group.category} className="asset-selection-group">
+                <strong>{group.label}</strong>
+                {groupedAssets.map((asset) => <label key={asset.id} className="toggle">
+                  <input type="checkbox" checked={draft.configuration.asset_ids.includes(asset.id)} onChange={(event) => {
+                    const current = draft.configuration.asset_ids;
+                    const asset_ids = event.target.checked ? [...current, asset.id] : current.filter((value) => value !== asset.id);
+                    setDraft({ ...draft, configuration: { ...draft.configuration, asset_ids } });
+                  }} />{asset.symbol}
+                </label>)}
+              </div> : null;
+            })}
           </fieldset>
           <fieldset><legend>观察周期</legend>
             {INTERVAL_CHOICES.map((interval) => <label key={interval} className="toggle"><input type="checkbox" checked={draft.configuration.intervals.includes(interval)} onChange={(event) => {

@@ -20,7 +20,7 @@ def _queue_task(client, monkeypatch):
     """
     monkeypatch.setattr(research_backtests, "_has_local_source", lambda symbol: True)
     response = client.post("/api/research/backtests", json={
-        "symbols": ["BTCUSDT"], "models": ["analysis_dow123"], "timeframes": ["15m"],
+        "symbols": ["BTCUSDT"], "models": list(research_backtests.RESEARCH_MODELS), "timeframes": ["15m"],
     })
     assert response.status_code == 202
     return response.json()["id"]
@@ -45,14 +45,14 @@ def test_research_task_is_validated_and_owner_scoped(logged_in, monkeypatch):
     assert "output_id" not in task["parameters"]
 
 
-def test_backtest_coverage_lists_all_verified_assets_and_only_rule_model(logged_in, monkeypatch):
-    """Expose all verified contract IDs and report readiness without network or fake data."""
+def test_backtest_coverage_lists_verified_assets_and_registered_algorithms(logged_in, monkeypatch):
+    """Expose verified product coverage and all four registered rule/deep algorithms."""
     monkeypatch.setattr(research_backtests, "_has_local_source", lambda symbol: symbol == "BTCUSDT")
     body = logged_in.get("/api/research/backtests/coverage").json()
     assert len(body["assets"]) == 13
     assert {row["symbol"] for row in body["assets"]} == set(research_backtests.RESEARCH_SYMBOLS)
     assert [row["symbol"] for row in body["assets"] if row["ready"]] == ["BTCUSDT"]
-    assert body["models"] == ["analysis_dow123"]
+    assert body["models"] == ["analysis_dow123", "patchtst", "tft_attention", "tcn"]
 
 
 def test_completed_task_serves_scoped_curve_and_operations(logged_in, monkeypatch, tmp_path):

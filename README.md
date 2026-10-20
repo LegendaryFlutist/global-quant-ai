@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LegendaryFlutist/global-quant-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/LegendaryFlutist/global-quant-ai/actions/workflows/ci.yml)
 
-全球市场量化研究工作台 · React / FastAPI / PostgreSQL / PyTorch · 当前交付 Phase 1。
+全球市场量化研究工作台 · React / FastAPI / PostgreSQL / PyTorch · Phase 1及部分Phase 2研究功能。
 
 ```bash
 git clone https://github.com/LegendaryFlutist/global-quant-ai.git
@@ -30,7 +30,7 @@ bash scripts/platform.sh up
 bash scripts/platform.sh credentials
 ```
 
-浏览器打开 **http://localhost:8080**，使用本机生成的 `admin` 登录信息；登录后可修改密码。不要在聊天中发送密码。当前提供资产注册表、四个优先标的真实历史多周期 K 线、公开行情采集任务、设置与明确的阶段能力状态。实盘执行未实现且服务端禁止下单。
+浏览器打开 **http://localhost:8080**，使用本机生成的 `admin` 登录信息；登录后可修改密码。不要在聊天中发送密码。当前提供资产注册表、四个优先标的真实历史多周期 K 线、公开行情采集任务、设置与明确的阶段能力状态。资产列表可按虚拟货币、股票和ETF底层类别，以及现货、永续、期货或研究指标产品类型筛选；模拟账号最多可选100个已核验标的。系统页“模拟与回测”的多模型面板可统一比较道氏123、PatchTST Transformer、TFT-Attention和TCN。深度架构不会自动部署，历史结果也不能保证未来收益。实盘执行未实现且服务端禁止下单。
 
 - [完整架构](docs/platform/architecture.md) · [核心数据表](docs/platform/schema.md)
 - [Phase 1 使用、验证及限制](docs/platform/phase1.md)
@@ -49,7 +49,7 @@ cd ~/Documents/quant_lab
 bash scripts/container.sh run
 ```
 
-容器：`quant-lab-lab-1`；项目镜像：`quant-lab:ngc25.11`，基于你本机的 `nvcr.io/nvidia/pytorch:25.11-py3`。已验证 GB10 GPU / CUDA / NVIDIA PyTorch 可用。此镜像没有 TensorFlow；现有 sklearn 模型在 CPU 上运行，新增的双层GRU已实际使用GPU训练。环境细节和重建步骤见 [容器说明](docs/container.md)。
+容器：`quant-lab-lab-1`；项目镜像：`quant-lab:ngc25.11`，基于你本机的 `nvcr.io/nvidia/pytorch:25.11-py3`。已验证 GB10 GPU / CUDA / NVIDIA PyTorch 可用。此镜像没有 TensorFlow；旧离线GRU和系统页的PatchTST、TFT-Attention、TCN均基于PyTorch。环境细节和重建步骤见 [容器说明](docs/container.md)。
 
 ## VS Code
 
@@ -74,7 +74,7 @@ bash scripts/container.sh run
 - 时间减仓：持仓满7天且与入场价偏离3ATR后，每48小时减初始数量25%，不补仓；实际没有触发就如实报告0次。
 - 研究资金：5倍逐仓，初始分配账户权益10%，因此标的5%的波动不等于整个账户5%的收益。杠杆、保证金比例、成本和资金费在报告单列。
 
-8种模型/规则（新增PyTorch双层GRU、分析型道氏123，以及原纯形态/5种机器学习）×5个周期×7种退出，共 **280组/标的，1120组/轮**。新增两类模型使用各自的方向/123确认条件，详见 [深度模型与结构分析](docs/deep-structure-models.md)。旧策略规则仍可通过 `lab.py` 子命令访问。这里没有接入真实账户或订单，邮件仅模拟记录。
+此前已生成的八模型报告为冻结历史产物。当前新研究任务的四模型白名单为多周期道氏123、PatchTST、TFT-Attention与TCN，详见 [深度模型与结构分析](docs/deep-structure-models.md)。旧报告仍可只读比较；新回测不连接真实账户或下单，邮件只做本地模拟记录。
 
 ## 统一报告目录
 
@@ -109,7 +109,7 @@ runs/本次运行/
 ```bash
 bash scripts/container.sh run --check
 bash scripts/container.sh run --symbols KORUUSDT CLUSDT NVDAUSDT BTCUSDT
-bash scripts/container.sh run --models analysis_dow123 torch_gru
+bash scripts/container.sh run --models analysis_dow123 patchtst tft_attention tcn
 bash scripts/container.sh run --out runs/swing_custom
 bash scripts/container.sh run --price-target-pct .08 --min-holding-hours 24 --max-holding-hours 504
 bash scripts/container.sh check
