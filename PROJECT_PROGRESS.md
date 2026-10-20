@@ -283,5 +283,5 @@ bash scripts/platform.sh status
 - 已实现：Compose移除从shell `HTTP_PROXY`/`HTTPS_PROXY`隐式继承；只有在项目私有配置中显式设置`PLATFORM_HTTP_PROXY`/`PLATFORM_HTTPS_PROXY`时才给API/worker启用代理。Binance适配器现在沿HTTP异常链识别`socket.gaierror`，DNS故障不再被误报为“代理连接失败”。
 - 验证（2026-10-20）：`python3 scripts/check_docs.py`通过（643个具名Python函数）；`bash scripts/platform.sh up`成功重建并启动服务；API健康端点HTTP 200，PostgreSQL/Redis/API/Web健康，worker运行，原lab服务仍在运行。容器API与worker均无非空代理变量；API/worker的Binance DNS仍以`gaierror`失败，API错误现为“DNS 解析失败”。`bash scripts/platform.sh test`：74 passed，1条既有Starlette TestClient/httpx弃用警告。没有下载或生成新行情，也未修改现有缓存。
 - 未解决：清除了平台误继承的宿主代理，但网络端仍阻止直接解析Binance；宿主机Clash路径返回451。需网络/DNS侧允许`fapi.binance.com`解析并可访问443，或由用户后续显式配置一条Docker可达且确实允许Binance的代理；验证公开GET成功后，再重试实时行情与三年归档。当前历史缓存保持原样且继续标为缓存，不伪装成实时。
-- Git：本单元代码、测试及交接文档已本地检查并提交；未推送，GitHub Actions未核验。`.local/`保持未跟踪。
+- Git：实现提交`c602b23 fix: isolate platform from host proxy and classify DNS failures`已推送到`feature/phase2-market-structure`；远端分支SHA核验与本地一致。GitHub Actions状态未核验。`.local/`保持未跟踪。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；服务`bash scripts/platform.sh status`；测试`bash scripts/platform.sh test`；重新构建`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。
