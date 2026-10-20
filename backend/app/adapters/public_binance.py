@@ -1,10 +1,38 @@
 """Public GET endpoints only; this adapter has no key, signing or order methods."""
 import os
+import socket
 import httpx
 
 INTERVALS = ['1m','3m','5m','15m','30m','1h','2h','4h','6h','12h','1d','1w','1M']
 class PublicDataError(RuntimeError):
     pass
+
+def _is_dns_failure(exc: BaseException) -> bool:
+    """Identify DNS errors in an HTTP client's chained connection exceptions.
+
+    Args:
+        exc: HTTP/client exception raised while reaching Binance's public host.
+
+    Returns:
+        True only when the exception or its cause indicates hostname resolution
+        failed; the chain is bounded to avoid cycles from custom exceptions.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, socket.gaierror):
+            return True
+        message = str(current).lower()
+        if any(marker in message for marker in (
+            'name or service not known',
+            'temporary failure in name resolution',
+            'failed to resolve',
+            'nodename nor servname provided',
+        )):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 class BinancePublic:
     base_url = 'https://fapi.binance.com'
@@ -27,7 +55,7 @@ class BinancePublic:
         except httpx.HTTPError as exc:
             has_proxy = any(os.environ.get(name) for name in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'))
             reason = (
-                'DNS 解析失败' if 'Name or service not known' in str(exc)
+                'DNS 解析失败' if _is_dns_failure(exc)
                 else 'TLS 证书验证失败' if 'CERTIFICATE_VERIFY_FAILED' in str(exc)
                 else '代理连接失败或目标不可达' if isinstance(exc, httpx.ConnectError) and has_proxy
                 else type(exc).__name__

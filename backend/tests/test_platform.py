@@ -273,6 +273,28 @@ def test_public_adapter_451_is_not_fabricated(monkeypatch):
     monkeypatch.setattr(httpx.Client,'get',fake_get)
     with pytest.raises(PublicDataError,match='HTTP 451'):BinancePublic().exchange_info()
 
+def test_public_adapter_reports_dns_cause_without_proxy_misclassification(monkeypatch):
+    """Classify a chained resolver failure as DNS even when proxy env is present.
+
+    Args:
+        monkeypatch: Replaces the HTTP request and adds a harmless proxy marker.
+
+    Returns:
+        No value; an unexpected error classification fails the test.
+    """
+    import httpx
+    import socket
+    request=httpx.Request('GET','https://fapi.binance.com/fapi/v1/time')
+    def fail(*args,**kwargs):
+        """Raise a DNS exception as the root cause of an HTTP connect error."""
+        error=httpx.ConnectError('connection failed',request=request)
+        error.__cause__=socket.gaierror(-3,'Temporary failure in name resolution')
+        raise error
+    monkeypatch.setenv('HTTPS_PROXY','http://127.0.0.1:7897')
+    monkeypatch.setattr(httpx.Client,'get',fail)
+    with pytest.raises(PublicDataError,match='DNS 解析失败'):
+        BinancePublic().exchange_info()
+
 def test_verify_assets_retains_verified_snapshot_when_public_dns_fails(monkeypatch):
     """保留已核验快照，且把在线解析失败报告为降级结果而非伪造实时核验。
 

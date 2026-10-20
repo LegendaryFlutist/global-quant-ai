@@ -275,3 +275,13 @@ bash scripts/platform.sh status
 - GitHub：实现提交`bc0743b fix: explain research data readiness and exit reasons`已推送至`feature/phase2-market-structure`；Actions run `39366183426` 的backend、frontend、risk-engine、publish-hygiene均success（https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39366183426）。
 - 下一步：恢复Docker对Binance公开REST的DNS/代理访问后，重新采集缺失标记价/资金费率，生成数据哈希绑定的新评估版本，再运行13标的比较；Phase4做账号模型绑定，Phase5独立设计持久纸面撮合器并继续保持未实现状态直至该阶段验收。
 - 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；验证`bash scripts/platform.sh test && (cd frontend && npm test && npm run build) && python3 scripts/check_docs.py`；重建`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。`.local/`保持为既有未跟踪用户目录。
+
+
+## 当前开发单元（2026-10-20）：隔离容器代理并定位Binance DNS阻断
+
+- 诊断：当前宿主机shell含HTTP/HTTPS/SOCKS代理变量，指向本机Clash；私有`.runtime/platform.env`未配置`PLATFORM_*_PROXY`。旧Compose默认把宿主机HTTP(S)代理传入API/worker，容器中的回环地址不可达。宿主机经Clash请求Binance公开时间接口返回HTTP 451；宿主机和容器直连均不能解析`fapi.binance.com`，但宿主机可以解析`example.com`。直连公共DNS超时，DNS-over-HTTPS直连被重置。未打印代理凭据，也未关闭桌面Clash。
+- 已实现：Compose移除从shell `HTTP_PROXY`/`HTTPS_PROXY`隐式继承；只有在项目私有配置中显式设置`PLATFORM_HTTP_PROXY`/`PLATFORM_HTTPS_PROXY`时才给API/worker启用代理。Binance适配器现在沿HTTP异常链识别`socket.gaierror`，DNS故障不再被误报为“代理连接失败”。
+- 验证（2026-10-20）：`python3 scripts/check_docs.py`通过（643个具名Python函数）；`bash scripts/platform.sh up`成功重建并启动服务；API健康端点HTTP 200，PostgreSQL/Redis/API/Web健康，worker运行，原lab服务仍在运行。容器API与worker均无非空代理变量；API/worker的Binance DNS仍以`gaierror`失败，API错误现为“DNS 解析失败”。`bash scripts/platform.sh test`：74 passed，1条既有Starlette TestClient/httpx弃用警告。没有下载或生成新行情，也未修改现有缓存。
+- 未解决：清除了平台误继承的宿主代理，但网络端仍阻止直接解析Binance；宿主机Clash路径返回451。需网络/DNS侧允许`fapi.binance.com`解析并可访问443，或由用户后续显式配置一条Docker可达且确实允许Binance的代理；验证公开GET成功后，再重试实时行情与三年归档。当前历史缓存保持原样且继续标为缓存，不伪装成实时。
+- Git：本单元代码、测试及交接文档已本地检查并提交；未推送，GitHub Actions未核验。`.local/`保持未跟踪。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；服务`bash scripts/platform.sh status`；测试`bash scripts/platform.sh test`；重新构建`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。
