@@ -98,14 +98,14 @@ def market_archive(asset_id:str,interval:str='4h',limit:int=Query(2000,ge=1,le=1
 
     Args:
         asset_id: 带市场命名空间的精确USDT永续产品ID。
-        interval: 币安原生K线周期。
+        interval: 币安原生周期；缺少高周期归档时可由本地15m事实K线向上聚合。
         limit: 最近最多返回10000根已收盘归档K线。
         end_ms: 可选UTC毫秒回放截止时间。
         user: 认证依赖已经校验的当前用户。
         db: 本次调用的SQLAlchemy数据库会话。
 
     Returns:
-        本地归档及分段哈希；未缓存时返回`available=false`。
+        本地归档/合法高周期聚合及分段哈希；未缓存时返回`available=false`。
     """
     try:
         validate_archive_identity(db,asset_id,interval)

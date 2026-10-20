@@ -56,7 +56,14 @@ export default function App() {
   /** 使用原任务的已保存参数重新入队；不会把旧失败记录改为成功。 */
   async function retryTask(job: Job) {
     try {
-      await post("/tasks", { kind: job.kind, ...job.parameters });
+      if (job.kind === "FETCH_BINANCE_ARCHIVES") {
+        await post("/tasks/binance-archives", {
+          asset_ids: job.parameters.asset_ids,
+          interval: job.parameters.interval,
+        });
+      } else {
+        await post("/tasks", { kind: job.kind, ...job.parameters });
+      }
       setNotice("已重新入队");
       await data.refresh();
     } catch (error) {

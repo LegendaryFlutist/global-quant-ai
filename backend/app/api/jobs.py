@@ -34,6 +34,12 @@ class TaskRequest(BaseModel):
             raise ValueError('start_ms/end_ms只用于衍生品历史归档')
         return self
 
+class BinanceArchiveBatchRequest(BaseModel):
+    """Validated optional retry scope for the registered Binance USDM archive batch."""
+    model_config = {"extra": "forbid"}
+    asset_ids: list[str] | None = Field(default=None, min_length=1, max_length=100)
+    interval: Literal['15m'] = '15m'
+
 @router.post('/api/tasks',status_code=202)
 def create_task(payload:TaskRequest,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
     """验证任务参数并对相同进行中任务去重后入队。
@@ -65,6 +71,56 @@ def create_task(payload:TaskRequest,user:User=Depends(current_user),db:DBSession
     task=enqueue(db,payload.kind,params)
     db.add(Audit(actor=user.username,action='TASK_CREATED',detail={'task_id':task.id,'kind':task.kind}));db.commit()
     return {'id':task.id,'status':task.status}
+
+@router.post('/api/tasks/binance-archives',status_code=202)
+def create_binance_archive_batch(payload:BinanceArchiveBatchRequest,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """Queue a resumable three-year 15-minute archive for verified Binance USDM assets.
+
+    Args:
+        payload: Optional exact asset IDs for retry; an empty request selects the current verified registry.
+        user: Authenticated session identity; no identity is accepted from request data.
+        db: Current SQLAlchemy session used to validate and persist the task.
+
+    Returns:
+        Task ID, status, and exact public contract scope; no network request runs in the API process.
+
+    Raises:
+        HTTPException: The requested scope is empty, duplicated, or contains an unverified/non-USDM asset.
+    """
+    if payload.asset_ids is None:
+        selected=list(db.scalars(select(Asset).where(
+            Asset.venue=='BINANCE_USDM',
+            Asset.verification.in_(['VERIFIED','VERIFIED_SNAPSHOT']),
+        ).order_by(Asset.priority,Asset.symbol)))
+    else:
+        if len(set(payload.asset_ids)) != len(payload.asset_ids):
+            raise HTTPException(422,'合约ID不能重复')
+        selected=[]
+        for asset_id in payload.asset_ids:
+            asset=db.get(Asset,asset_id)
+            if asset is None:
+                raise HTTPException(422,'批量归档只允许已登记的Binance USDT永续合约')
+            try:
+                validate_archive_identity(db,asset.id,payload.interval)
+            except ValueError as exc:
+                raise HTTPException(422,str(exc)) from None
+            selected.append(asset)
+        selected.sort(key=lambda asset:(asset.priority,asset.symbol))
+    if not selected:
+        raise HTTPException(409,'当前没有已核验的Binance USDT永续合约')
+    asset_ids=[asset.id for asset in selected]
+    for asset_id in asset_ids:
+        try:
+            validate_archive_identity(db,asset_id,payload.interval)
+        except ValueError as exc:
+            raise HTTPException(422,str(exc)) from None
+    params={'asset_ids':asset_ids,'interval':payload.interval}
+    for task in db.scalars(select(Task).where(Task.kind=='FETCH_BINANCE_ARCHIVES',Task.status.in_(['QUEUED','RUNNING','RETRYING']))):
+        if task.parameters==params:
+            return {'id':task.id,'status':task.status,'asset_count':len(asset_ids),'symbols':[asset.symbol for asset in selected],'deduplicated':True}
+    task=enqueue(db,'FETCH_BINANCE_ARCHIVES',params)
+    db.add(Audit(actor=user.username,action='TASK_CREATED',detail={'task_id':task.id,'kind':task.kind,'asset_count':len(asset_ids)}));db.commit()
+    return {'id':task.id,'status':task.status,'asset_count':len(asset_ids),'symbols':[asset.symbol for asset in selected]}
 
 @router.get('/api/tasks')
 def tasks(user:User=Depends(current_user),db:DBSession=Depends(get_db)):

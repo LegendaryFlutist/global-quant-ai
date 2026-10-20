@@ -45,6 +45,7 @@ export interface ArchiveResult {
   asset_id: string;
   symbol?: string;
   interval: string;
+  source_interval?: string;
   candles?: Candle[];
   available_count?: number;
   first_open_ms?: number | null;
@@ -158,7 +159,7 @@ export interface Job {
   id: string;
   kind: string;
   status: string;
-  parameters: Record<string, string>;
+  parameters: Record<string, unknown>;
   result: Record<string, unknown>;
   attempts: number;
   created_at: string;

@@ -31,13 +31,14 @@
 
 # 开发任务与优先级
 
-更新时间：2026-10-19（Asia/Shanghai）。`[x]`已验证完成，`[ ]`未完成；会话中断后先读取AGENTS.md、PROJECT_PROGRESS.md和Git状态。不要因聊天上下文丢失而重复已完成模块。
+更新时间：2026-10-20（Asia/Shanghai）。`[x]`已验证完成，`[ ]`未完成；会话中断后先读取AGENTS.md、PROJECT_PROGRESS.md和Git状态。不要因聊天上下文丢失而重复已完成模块。
 
 ## P1 — 行情数据层重构与资产覆盖
 
 - [x] 第一阶段：近期缓存、三年K线、标记价和资金费率复用统一原子Parquet写入/SHA256校验模块；近期及长期K线读路径接入DuckDB只读查询；未闭合快照采用Redis 20秒TTL并保留本地校验文件降级路径。Python 3.11 ARM64容器重建成功；隔离后端`63 passed, 1 existing Starlette/httpx deprecation warning`；文档检查592个函数通过。
 - [ ] 逐步统一数据入口：Binance及后续各供应商适配器 → ingestion校验/分页 → Parquet不可变规范存储 → DuckDB只读分析 → PostgreSQL元数据/策略配置 → Redis短期快照/队列。保留现有文件、数据库卷、回测报告和API契约。
-- [ ] 接入全部80个目录资产时按准确交易场所与产品类型选择源；当前只有13个Binance USDT永续精确代码可从该适配器采集，剩余资产需明确供应商和行情类型，不推断代码。
+- [x] 按用户本阶段选择只扩展Binance永续：仅对注册表中已核验USDM产品批量创建三年15m归档任务，逐合约保存进度并可续传；更大周期由完整15m真实K线聚合，不做插值。已加入图表入口和后台进度条。
+- [ ] 本阶段暂不接入其余67个股票、ETF、指数/商品/外汇目录资产；未来需要用户另行指定公开数据供应商，不能推断Binance代码或混用底层标的。
 - [ ] 增加数据覆盖页面/报告：按资产、提供方、流类型、周期展示来源核验、时间范围、根数、数据哈希、陈旧状态和不可用原因。
 - [ ] 后续数据种类分批加入并明确为规划，直到采集链路和持久性实测：逐笔成交、增量订单簿、标记价格/资金费率；技术特征含版本和决策/确认时点。实盘账户/订单/成交表保持PLANNED，当前无执行边界。
 
@@ -128,3 +129,12 @@
 
 - [x] 注册`ScatterChart`并添加SSR `setOption`回归测试；移除与CSP冲突的内联启动脚本，改为同源外部脚本。前端1项回归测试、生产构建、文档检查通过，容器重建且服务健康。
 - [ ] 用户重新登录后复验实际K线及叠加指标；Binance live接口503仍需单独解决网络/DNS问题。
+
+## 2026-10-20：Binance永续批量三年行情归档
+
+- [x] 多周期行情页增加“采集全部 Binance 合约三年15m”按钮；后端只把已核验的`BINANCE_USDM`资产ID写入任务，不接受其它市场产品。后台任务按合约分页下载，逐合约把当前标的、已完成数量/ID和归档摘要提交到PostgreSQL任务结果；失败重试后跳过已完成合约，单次任务时限为6小时。历史仍在Parquet长期目录中不可变保存，未新增迁移。
+- [x] 图表读取目标周期时，如缺少覆盖更长的原生归档，会从已校验15m Parquet源用完整UTC桶聚合到30m、1h、2h、4h、6h、12h、1d、1w；响应明确返回`source_interval`和源哈希。低于15m的不从高周期构造。任务页显示当前合约和进度条。
+- [x] 验证：`bash scripts/platform.sh test`：66 passed，1条既有Starlette/httpx弃用提示；`cd frontend && npm test && npm run build`：1 passed，TypeScript与Vite生产构建通过；`python3 scripts/check_docs.py`：598个具名Python函数通过；`python3 -m compileall -q backend/app backend/tests`和`git diff --check`通过。模拟故障测试确认失败续跑时跳过已完成标的。
+- [x] Docker：`bash scripts/platform.sh up`成功重建API、Web与NGC runner；API、Web、PostgreSQL、Redis健康，worker与runner运行；未重置数据库卷或触碰原lab服务。健康接口返回`status=ok,database=connected,redis=true`。只读DB检查仍为13个已核验USDM合约、13份15m近期缓存、112,307根近期K线；长期归档manifest仍为0，因为功能是点击触发，本轮未自动发起请求。
+- [ ] Binance实际采集待用户在图表页点击批量按钮后确认；现有网络状态记录为容器DNS/代理HTTP 451阻断，接口失败会显示在任务页，已有数据不会被覆盖。需要配置可从Docker网段访问并允许`fapi.binance.com:443`的代理后再运行批量任务。
+- [ ] 覆盖仍限已核验13个Binance永续；其它67项需未来单独选择数据供应商。本单元代码尚未推送，提交与远端状态待保存检查点后更新。

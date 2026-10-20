@@ -3,6 +3,7 @@
 import hashlib
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
@@ -128,6 +129,38 @@ def test_archive_pages_are_immutable_and_read_as_decimal_strings(tmp_path, monke
     assert loaded["candles"][0]["open"] == "100.250000000000"
     assert loaded["research_only"] is True
     assert len(loaded["segment_sha256"]) == 2 * 64
+
+
+def test_three_year_15m_archive_supplies_complete_higher_timeframes(tmp_path, monkeypatch):
+    """验证长期15m事实K线可以聚合供1h图表使用且保留来源周期。
+
+    Args:
+        tmp_path: pytest提供的隔离行情目录，不接触用户数据。
+        monkeypatch: pytest提供的依赖替换器，用于固定存储根路径。
+
+    Returns:
+        无返回值；聚合OHLCV、时间边界或源周期不符时测试失败。
+    """
+    now_ms = int(datetime(2020, 1, 2, tzinfo=timezone.utc).timestamp() * 1000)
+    start_ms = long_history.three_year_start(now_ms)
+    candles = _raw_candles(start_ms, 4, 900_000)
+    monkeypatch.setattr(long_history, "DATA_ROOT", tmp_path)
+    with SessionLocal() as db:
+        asset = db.scalar(select(Asset).where(Asset.id == "binance_usdm:BTCUSDT"))
+        asset.verification = "VERIFIED"
+        db.commit()
+        long_history.fetch_three_year_archive(
+            db, asset.id, "15m", now_ms=now_ms,
+            adapter=_PagedAdapter(candles, page_size=4), page_limit=4, pause=0,
+        )
+
+    hourly = long_history.read_archive("binance_usdm:BTCUSDT", "1h", root=tmp_path)
+    assert hourly["available"] is True
+    assert hourly["source_interval"] == "15m"
+    assert hourly["available_count"] == 1
+    assert hourly["candles"][0]["open_time"] == start_ms
+    assert hourly["candles"][0]["close_time"] == start_ms + 3_600_000 - 1
+    assert Decimal(hourly["candles"][0]["volume"]) == Decimal("51")
 
 
 def test_archive_retry_resumes_after_persisted_page(tmp_path, monkeypatch):
@@ -283,6 +316,53 @@ def test_authenticated_archive_task_is_deduplicated_and_cache_is_read_only(logge
     cached = logged_in.get("/api/market/archive?asset_id=binance_usdm:BTCUSDT&interval=4h")
     assert cached.status_code == 200
     assert cached.json()["available"] is False
+
+
+def test_binance_archive_batch_uses_only_verified_registered_contracts(logged_in, monkeypatch):
+    """验证批量采集只覆盖核验USDM永续、支持重试范围并避免重复入队。
+
+    Args:
+        logged_in: 已认证且带CSRF令牌的测试客户端。
+        monkeypatch: pytest提供的路由依赖替换器，不启动真实队列任务。
+
+    Returns:
+        无返回值；超出产品范围、重复入队或CSRF行为错误时测试失败。
+    """
+    from app.domains.models import Task
+
+    with SessionLocal() as db:
+        unverified = db.get(Asset, "binance_usdm:KORUUSDT")
+        unverified.verification = "UNVERIFIED"
+        db.commit()
+        expected_ids = [asset.id for asset in db.scalars(select(Asset).where(
+            Asset.venue == "BINANCE_USDM",
+            Asset.verification.in_(["VERIFIED", "VERIFIED_SNAPSHOT"]),
+        ).order_by(Asset.priority, Asset.symbol))]
+    created = []
+
+    def fake_enqueue(db, kind, parameters):
+        """将测试批次写入隔离任务表供重复请求去重验证。"""
+        task = Task(id="binance-batch-test", kind=kind, parameters=parameters, status="QUEUED")
+        db.add(task)
+        db.commit()
+        created.append((kind, parameters))
+        return task
+
+    monkeypatch.setattr("app.api.jobs.enqueue", fake_enqueue)
+    response = logged_in.post("/api/tasks/binance-archives", json={})
+    assert response.status_code == 202
+    assert response.json()["asset_count"] == len(expected_ids)
+    assert [f"binance_usdm:{symbol}" for symbol in response.json()["symbols"]] == expected_ids
+    repeated = logged_in.post("/api/tasks/binance-archives", json={})
+    assert repeated.json()["deduplicated"] is True
+    assert created == [("FETCH_BINANCE_ARCHIVES", {"asset_ids": expected_ids, "interval": "15m"})]
+    assert logged_in.post(
+        "/api/tasks/binance-archives",
+        json={"asset_ids": ["binance_usdm:KORUUSDT"]},
+    ).status_code == 422
+    assert logged_in.post(
+        "/api/tasks/binance-archives", json={}, headers={"X-CSRF-Token": "invalid"}
+    ).status_code == 403
 
 
 def test_archive_task_rejects_unverified_asset_and_missing_csrf(logged_in):

@@ -38,20 +38,34 @@ export default function JobsPage({
             </tr>
           </thead>
           <tbody>
-            {jobs.map((j) => (
+            {jobs.map((j) => {
+              const rawProgress = j.result.progress;
+              const progress = rawProgress && typeof rawProgress === "object"
+                ? rawProgress as Record<string, unknown>
+                : {};
+              const assetIds = Array.isArray(j.parameters.asset_ids) ? j.parameters.asset_ids : [];
+              const total = typeof progress.total_assets === "number" ? progress.total_assets : assetIds.length;
+              const completed = typeof progress.completed_count === "number" ? progress.completed_count : 0;
+              const current = typeof progress.current_symbol === "string" ? progress.current_symbol : "";
+              const assetLabel = typeof j.parameters.asset_id === "string"
+                ? j.parameters.asset_id
+                : assetIds.length ? `${assetIds.length} 个 Binance 合约` : "资产核验";
+              return (
               <tr key={j.id}>
                 <td>
                   {j.kind}
                   <small className="mono">{j.id.slice(0, 8)}</small>
                 </td>
                 <td>
-                  {j.parameters.asset_id ?? "资产核验"}
-                  <small>{j.parameters.interval ?? ""}</small>
+                  {assetLabel}
+                  <small>{typeof j.parameters.interval === "string" ? j.parameters.interval : ""}</small>
                 </td>
                 <td>{badge(j.status)}</td>
                 <td>{j.attempts} / 3</td>
                 <td className="job-result">
-                  {j.result.error
+                  {j.kind === "FETCH_BINANCE_ARCHIVES"
+                    ? <div><span>{completed} / {total} 个合约完成{current ? ` · 正在采集 ${current}` : ""}</span><progress style={{ width: "100%", height: "8px" }} max={Math.max(total, 1)} value={Math.min(completed, total)} />{typeof j.result.error === "string" && <small className="error" style={{ display: "block" }}>{j.result.error}</small>}</div>
+                    : j.result.error
                     ? String(j.result.error)
                     : j.result.verification_mode === "VERIFIED_LOCAL_SNAPSHOT"
                       ? `沿用已核验交易所快照；实时核验未成功：${String(j.result.warning ?? "Binance公开接口不可用")}`
@@ -68,7 +82,8 @@ export default function JobsPage({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </section>

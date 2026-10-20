@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from app.core.db import SessionLocal
 from app.core.security import digest
-from app.domains.models import Session, MarketData, Asset, utcnow
+from app.domains.models import Session, MarketData, Asset, Task, utcnow
 from app.services.market_data import normalize, aggregate, save_dataset, candles, read_dataset
 from app.adapters.public_binance import BinancePublic, PublicDataError
 
@@ -335,6 +335,60 @@ def test_fetch_history_resumes_from_checkpoint_and_is_idempotent(monkeypatch):
         assert again['rows']==32
         metadata=db.scalar(select(MarketData).where(MarketData.asset_id==AID))
         assert metadata.row_count==32
+
+
+def test_binance_archive_batch_saves_progress_and_resumes_after_failure(monkeypatch):
+    """验证批量三年归档逐合约持久进度，并在重试时跳过已完成合约。
+
+    Args:
+        monkeypatch: pytest提供的依赖替换器，用于注入一次性公开接口故障。
+
+    Returns:
+        无返回值；任务若丢失检查点、重复采集已完成合约或错误标成功则失败。
+    """
+    from app.services import jobs
+    task_id='batch-resume-test-0000000000000001'
+    asset_ids=['binance_usdm:BTCUSDT','binance_usdm:KORUUSDT']
+    with SessionLocal() as db:
+        for asset_id in asset_ids:
+            db.get(Asset,asset_id).verification='VERIFIED'
+        db.add(Task(id=task_id,kind='FETCH_BINANCE_ARCHIVES',parameters={'asset_ids':asset_ids,'interval':'15m'},status='QUEUED'))
+        db.commit()
+    calls=[]
+    injected={'pending':True}
+
+    def fake_fetch(db, asset_id, interval):
+        """记录模拟合约下载并在第二合约首次请求时中断。
+
+        Args:
+            db: 批量任务持有的隔离测试数据库会话。
+            asset_id: 当前精确测试USDM资产ID。
+            interval: 当前公开K线周期。
+
+        Returns:
+            可序列化的最小归档摘要；指定的首次失败返回异常。
+        """
+        calls.append(asset_id)
+        if asset_id.endswith('KORUUSDT') and injected['pending']:
+            injected['pending']=False
+            raise RuntimeError('temporary public API outage')
+        return {'asset_id':asset_id,'interval':interval,'rows':12,'first_open_ms':1,
+                'last_close_ms':2,'status':'THREE_YEARS','dataset_sha256':'a'*64}
+
+    monkeypatch.setattr(jobs,'fetch_three_year_archive',fake_fetch)
+    with pytest.raises(RuntimeError,match='temporary public API outage'):
+        jobs.execute(task_id)
+    with SessionLocal() as db:
+        task=db.get(Task,task_id)
+        assert task.status=='RETRYING'
+        assert task.result['progress']['completed_asset_ids']==[asset_ids[0]]
+        assert task.result['progress']['current_symbol']=='KORUUSDT'
+    result=jobs.execute(task_id)
+    assert calls==[asset_ids[0],asset_ids[1],asset_ids[1]]
+    assert result['progress']['phase']=='COMPLETE'
+    assert result['completed_count']==2
+    with SessionLocal() as db:
+        assert db.get(Task,task_id).status=='SUCCEEDED'
 
 def test_public_adapter_reports_dns_failure(monkeypatch):
     """验证DNS解析错误以明确脱敏原因报告。

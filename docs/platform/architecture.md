@@ -62,10 +62,10 @@ flowchart TB
 
 ### 接入覆盖范围
 
-资产目录80项中，当前13项具有精确核验的Binance USDT永续代码；这13项各有一份约90天、8,639根15分钟真实K线。当前连接器不能把其它67个股票、ETF、指数关联资产或未验证代码映射成Binance合约。后续需要按`venue + asset_type + provider`配置专属公开适配器和交易日历，并在覆盖页区分`VERIFIED_WITH_DATA`、`VERIFIED_NO_DATA`、`UNSUPPORTED_SOURCE`和`FETCH_BLOCKED`；不会把同底层资产映射成虚构行情。当前公开REST DNS/代理受阻，批量补历史数据须在网络恢复后逐个验证来源。
+资产目录80项中，当前13项具有精确核验的Binance USDT永续代码；这13项各有一份约90天、8,639根15分钟真实K线。用户本阶段选择只扩展Binance永续，因此新增的批量入口只扫描注册表中`BINANCE_USDM`且已核验的产品，不触碰其它67个股票、ETF、指数关联资产或未验证代码。点击“采集全部 Binance 合约三年15m”后，单个持久任务按合约顺序回填三年15m不可变Parquet并逐合约保存进度；图表用完整真实15m桶向上聚合30m至1d等更大周期，不做小周期插值。当前公开REST DNS/代理仍受阻，批量功能已可排队但不代表已取得三年行情；页面会显示任务失败原因和实际覆盖范围。
 
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
-- Ingestion：公开 GET、来源核验、上市时间、交易日历、原生周期、清洗与分页恢复。无可信来源的全球资产只登记，行情显示缺失。
+- Ingestion：公开 GET、来源核验、上市时间、交易日历、原生周期、清洗与分页恢复。`FETCH_BINANCE_ARCHIVES`由用户显式启动，仅处理注册表内已核验USDM合约；15m三年归档支持合约级进度、自动重试和已保存合约跳过。图表长期归档优先用覆盖更长的15m源对齐聚合高周期。无可信来源的全球资产只登记，行情显示缺失。
 - Sentiment / Contagion（Phase3）：各源有时间戳与缺失状态；0–100风险分、六类风险状态；无数据为UNKNOWN。联动统计区分相关、领先滞后与因果假设。
 - Technical（Phase2）：统一研究域结构报告与已认证`GET /api/market/structure`：优先读长期归档，否则使用近期Parquet缓存及可合法聚合的大周期闭合K线；返回已确认摆动点、结构趋势线/破坏、Dow 1-2-3、Elliott候选与因果价格-RSI背离。图表另外显示需要至少三个已确认独立摆动点的局部支撑/压力线、TD setup序列、MACD价格背驰、布林带、MACD与可配置日均线；日均线使用UTC日收盘并投影至当前图表周期。事件带发生/确认时间和来源SHA256；缺少周期明确报告缺档；分析请求不主动联网。
 - Live market（Phase2）：普通90天缓存图与三年缓存图均可每5秒尝试刷新所选周期；同源认证且CSRF保护的POST触发Binance公开GET。长期归档追加已闭合K线不可变分段，近期缓存写入新的不可变Parquet并更新DB指针，未收盘K线只作为图表快照，不进入结构评分。失败保留旧行情并显示陈旧状态。当前主机网络仍有DNS/代理451限制，因此部署轮询能力不代表此刻实时源已连通；单API进程锁不跨副本。
@@ -98,7 +98,7 @@ Phase1审计是应用只追加，不声称具备数据库级防篡改。Phase7�
 
 - 四个优先标的通过已验证本地真实15m快照导入；只读挂载原始数据，不改回测划分和历史结果。所有来源路径及原始 provenance 写入元数据。
 - Binance公开REST的常规快照采集使用精确已登记合约代码、原生周期和最近最多90天。每页完成后更新不可变Parquet快照与事务元数据；重试从最新持久K线开始，不重复追加。
-- Phase2普通长期K线归档由用户显式创建`FETCH_ARCHIVE`任务，按精确核验USDT永续和原生周期采集最多三年；分段位于`DATA_ROOT/long_history/<symbol>/<interval>/`，包含SHA256及原子manifest，与90天表和既有报告完全隔离。配置账号页面可以显式请求`FETCH_DERIVATIVE_DATA`，只通过Binance公开GET补充真实mark-price K线与资金结算率；分别存于`DATA_ROOT/derivatives/<symbol>/<interval>/{mark,funding}/`，失败按持久任务重试，读取本地文件不联网。尚未实现从这些数据计算模拟成交或净收益。
+- Phase2普通长期K线归档由用户显式创建`FETCH_ARCHIVE`单资产任务，或`FETCH_BINANCE_ARCHIVES`批量任务；批量流程只采集精确核验的Binance USDM产品三年15m原生K线，逐合约进度保存在`scheduled_tasks.result`，同一合约/周期的已落盘Parquet分页可断点续传。30m、1h、2h、4h、6h、12h、1d和1w可由完整15m桶向上聚合；1m/3m/5m不从15m伪造。分段位于`DATA_ROOT/long_history/<symbol>/<interval>/`，包含SHA256及原子manifest，与90天表和既有报告完全隔离。配置账号页面可以显式请求`FETCH_DERIVATIVE_DATA`，只通过Binance公开GET补充真实mark-price K线与资金结算率；分别存于`DATA_ROOT/derivatives/<symbol>/<interval>/{mark,funding}/`，失败按持久任务重试，读取本地文件不联网。尚未实现从这些数据计算模拟成交或净收益。
 - 每个资产/周期写入通过PostgreSQL事务 advisory lock 串行。新文件原子落盘后更新指针，不覆盖旧文件；异常可留下孤立文件，当前版本不自动清理，后续需要备份/保留策略。
 - 聚合依据UTC边界；周线周一00:00，月线自然月。不完整/缺失桶排除并显示数量。不把大周期插值为小周期。
 - 上游DNS/451/超时明确记录失败、重试次数与供应商状态，不替换域名规避限制，不伪造行情。历史任务状态每10秒轮询；历史归档/标记价与资金费数据均需用户点击后采集。图表五秒刷新只轮询已选择的K线，不提供逐笔盘口或WebSocket。

@@ -230,3 +230,13 @@ bash scripts/platform.sh status
 - Git状态：实现提交`c2557eb refactor: unify market data storage adapters`已推送到`feature/phase2-market-structure`，`git ls-remote`确认远端ref相同；GitHub Actions尚未查询。未查看或输出`.runtime`密钥；`.local/`是已有未跟踪用户目录，保持不动、不提交。
 - 下一步：先为其余67项建立有来源证据的`venue + asset_type + provider + symbol + calendar`映射与覆盖状态报告；然后增加可插拔公开行情adapter并按原生周期/交易日历采集。另为Redis TTL键增加隔离Redis端到端过期测试，再分批把回测Parquet读路径切到DuckDB并对比冻结报告。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；后端隔离测试`bash scripts/platform.sh test`；文档检查`python3 scripts/check_docs.py`；重建并启动`bash scripts/platform.sh up`；健康检查`curl -fsS http://127.0.0.1:8080/api/health`；Git检查`git status --short --branch && git log -5 --oneline`。
+
+## 当前开发单元（2026-10-20）：Binance永续批量三年归档
+
+- 用户确认本阶段只扩展Binance合约。因此批量入口只选择目录中`venue=BINANCE_USDM`且状态为`VERIFIED`或`VERIFIED_SNAPSHOT`的精确产品ID；当前数据库只读核验为13个：KORUUSDT、CLUSDT、NVDAUSDT、BTCUSDT、SKHYNIXUSDT、SPCXUSDT、SNDKUSDT、XAUUSDT、QQQUSDT、INTCUSDT、TSLAUSDT、OPENAIUSDT、ZHIPUUSDT。未把其余67项映射成Binance代码。
+- 已实现：图表页按钮创建一条`FETCH_BINANCE_ARCHIVES`持久任务，批量采集三年15m原生公开K线；任务结果逐合约保存完成ID、完成数量、当前代码和归档摘要，RQ重试会跳过已完成合约，6小时任务上限。页面后台任务显示当前代码和进度条，失败任务可按原资产范围重试。图表归档请求缺少更长目标周期文件时，用SHA256校验后的15m Parquet按完整UTC桶向上聚合30m、1h、2h、4h、6h、12h、1d及1w；不从15m构造更小周期。没有改schema、覆盖90天MarketData、改动既有回测产物或重置数据库卷。
+- 验证（2026-10-20，最终运行）：`bash scripts/platform.sh test`为66 passed，1条既有Starlette/httpx弃用警告；首次运行发现批量恢复分支变量初始化顺序问题，修复后重跑通过。`cd frontend && npm test && npm run build`为1 passed且TypeScript/Vite构建通过；`python3 scripts/check_docs.py`为598个具名Python函数通过；`python3 -m compileall -q backend/app backend/tests`及`git diff --check`通过。mock续跑测试确认第一次第二合约失败后，重试跳过第一合约并成功完成剩余项。测试未连接Binance。
+- Docker已执行`bash scripts/platform.sh up`，API/Web/worker/NGC runner重建运行，PostgreSQL和Redis健康；`curl -fsS http://127.0.0.1:8080/api/health`结果为`status=ok,database=connected,redis=true`，OpenAPI确认批量任务路由已注册。GPU lab与PostgreSQL数据卷保持运行。只读覆盖复核仍为13份15m近期缓存、112,307根K线；长期manifest为0，本轮没有替用户发起真实采集，等待页面点击。现有历史记录指出Binance REST在此环境受DNS/代理451阻断，真实下载未验证。
+- 未解决：需要用户从图表页点击“采集全部 Binance 合约三年15m”，在后台任务页观察实际网络结果；若再次报DNS/HTTP 451，需要在Docker可访问的网络代理上允许`fapi.binance.com:443`，保持TLS校验，然后重试。真实三年覆盖完成前没有新增行情可用于回测。其它67个非Binance目录资产按用户当前选择暂缓。
+- Git：本项尚待使用`bash scripts/checkpoint.sh`创建本地提交，之后推送到`feature/phase2-market-structure`并核验远端HEAD；GitHub Actions尚未核验。`.local/`是既存未跟踪目录，没有加入提交。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch`；后端`bash scripts/platform.sh test`；前端`cd frontend && npm test && npm run build`；文档`python3 scripts/check_docs.py`；部署`bash scripts/platform.sh up`；健康`curl -fsS http://127.0.0.1:8080/api/health`。

@@ -19,7 +19,7 @@ from app.storage.parquet_files import (
     write_content_addressed_parquet,
     write_json_atomic,
 )
-from app.services.market_data import FIELDS, MINUTES, SCHEMA, bucket_bounds
+from app.services.market_data import FIELDS, MINUTES, SCHEMA, aggregate, bucket_bounds
 
 ARCHIVE_SCHEMA_VERSION = 1
 MAX_PAGE_COUNT = 2000
@@ -281,7 +281,7 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
 
     Args:
         asset_id: `binance_usdm:SYMBOL`精确产品ID。
-        interval: 归档的原生K线周期。
+        interval: 归档或由15分钟归档合法聚合得到的目标周期。
         limit: 返回最近最多K线条数，上限由API层控制。
         end_ms: 可选截止UTC毫秒时间，用于历史分页/回放。
         root: 可选本地数据根目录，默认使用持久磁盘。
@@ -293,32 +293,64 @@ def read_archive(asset_id, interval, limit=10000, end_ms=None, root=None):
         raise ValueError("归档读取数量必须在1到200000之间")
     if end_ms is not None and (not isinstance(end_ms, int) or end_ms < 0):
         raise ValueError("归档截止时间必须为UTC毫秒时间戳")
-    manifest = archive_manifest(asset_id, interval, root)
+    source_interval = interval
+    manifest = archive_manifest(asset_id, source_interval, root)
+    can_aggregate_15m = (
+        interval in MINUTES
+        and interval != "15m"
+        and MINUTES[interval] >= MINUTES["15m"]
+        and MINUTES[interval] % MINUTES["15m"] == 0
+    )
+    if can_aggregate_15m:
+        base_manifest = archive_manifest(asset_id, "15m", root)
+        if base_manifest and (
+            manifest is None
+            or base_manifest["last_close_ms"] - base_manifest["first_open_ms"]
+            > manifest["last_close_ms"] - manifest["first_open_ms"]
+        ):
+            source_interval = "15m"
+            manifest = base_manifest
     if manifest is None:
         return None
     base = Path(root) if root is not None else DATA_ROOT
-    directory = _archive_directory(base, manifest["symbol"], interval)
+    directory = _archive_directory(base, manifest["symbol"], source_interval)
     segment_paths = [directory / segment["file"] for segment in manifest["segments"]]
-    available_count, first_open_ms, last_close_ms = parquet_row_stats(
-        segment_paths,
-        first_column="open_time",
-        last_column="close_time",
-        end_column="close_time" if end_ms is not None else None,
-        end_ms=end_ms,
-    )
-    selected = query_parquet_rows(
-        segment_paths,
-        order_column="open_time",
-        end_column="close_time" if end_ms is not None else None,
-        end_ms=end_ms,
-        limit=limit,
-    )
+    if source_interval == interval:
+        available_count, first_open_ms, last_close_ms = parquet_row_stats(
+            segment_paths,
+            first_column="open_time",
+            last_column="close_time",
+            end_column="close_time" if end_ms is not None else None,
+            end_ms=end_ms,
+        )
+        selected = query_parquet_rows(
+            segment_paths,
+            order_column="open_time",
+            end_column="close_time" if end_ms is not None else None,
+            end_ms=end_ms,
+            limit=limit,
+        )
+    else:
+        source_rows = query_parquet_rows(
+            segment_paths,
+            order_column="open_time",
+            end_column="close_time" if end_ms is not None else None,
+            end_ms=end_ms,
+            limit=200000,
+        )
+        aggregated, _excluded = aggregate(source_rows, source_interval, interval)
+        available_count = len(aggregated)
+        first_open_ms = aggregated[0]["open_time"] if aggregated else None
+        last_close_ms = aggregated[-1]["close_time"] if aggregated else None
+        selected = aggregated[-limit:]
     digest_input = "".join(item["sha256"] for item in manifest["segments"])
     manifest_sha256 = sha256_file(directory / "manifest.json")
     return {
         "asset_id": asset_id,
         "symbol": manifest["symbol"],
         "interval": interval,
+        "source_interval": source_interval,
+        "available": True,
         "candles": [
             {**row, **{field: str(row[field]) for field in FIELDS}}
             for row in selected

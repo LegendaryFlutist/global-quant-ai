@@ -33,6 +33,9 @@ export default function ChartPage({
   const [showTD, setShowTD] = useState(true);
   const [reload, setReload] = useState(0);
   const asset = assets.find((a) => a.id === assetId);
+  const verifiedBinanceCount = assets.filter((item) =>
+    item.venue === "BINANCE_USDM" && ["VERIFIED", "VERIFIED_SNAPSHOT"].includes(item.verification),
+  ).length;
   useEffect(() => {
     let active = true;
     api<Interval[]>("/market/intervals?asset_id=" + encodeURIComponent(assetId))
@@ -187,6 +190,20 @@ export default function ChartPage({
       setError((e as Error).message);
     }
   }
+  /** 为注册表中所有精确核验的 Binance USDT 永续创建可续传的三年 15 分钟归档任务。 */
+  async function collectAllBinanceArchives() {
+    try {
+      const result = await post<{ id: string; asset_count: number; symbols: string[]; deduplicated?: boolean }>(
+        "/tasks/binance-archives",
+        {},
+      );
+      onTask(
+        `${result.deduplicated ? "已有" : "已创建"}批量归档任务 ${result.id.slice(0, 8)}：${result.asset_count} 个已核验 Binance 合约，基础周期 15m；高周期按真实K线聚合`,
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   const chartCandles = showArchive ? archive?.candles ?? [] : data?.candles ?? [];
   const displayCandles: Candle[] = live?.live_candle
     ? [...chartCandles.filter((candle) => candle.open_time !== live.live_candle?.open_time), live.live_candle]
@@ -200,7 +217,7 @@ export default function ChartPage({
         <div>
           <span className="eyebrow">MARKET WORKSPACE</span>
           <h1>多周期行情</h1>
-          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示；每5秒尝试刷新当前周期，结构评分只使用闭合K线</p>
+          <p>已收盘真实 K 线 · UTC 聚合边界 · {timezone} 显示；每5秒尝试刷新当前周期，结构评分只使用闭合K线。批量长期缓存以15m为基础周期，再聚合较大周期。</p>
         </div>
         <button onClick={() => setReload((n) => n + 1)}>重新读取缓存</button>
       </header>
@@ -232,7 +249,8 @@ export default function ChartPage({
           <label className="toggle"><input type="checkbox" checked={showMACD} onChange={(event) => setShowMACD(event.target.checked)} />MACD</label>
           <label className="toggle"><input type="checkbox" checked={showTD} onChange={(event) => setShowTD(event.target.checked)} />九转</label>
           <button onClick={collect}>采集最近90天</button>
-          <button onClick={() => void collectArchive()}>采集三年历史</button>
+          <button disabled={asset?.venue !== "BINANCE_USDM" || !["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset?.verification ?? "")} onClick={() => void collectArchive()}>采集所选合约三年</button>
+          {verifiedBinanceCount > 0 && <button onClick={() => void collectAllBinanceArchives()}>采集全部 Binance 合约三年15m（{verifiedBinanceCount}）</button>}
           <button
             aria-pressed={showArchive}
             onClick={() => setShowArchive((value) => !value)}
@@ -295,7 +313,7 @@ export default function ChartPage({
           </span>
           <span>
             {showArchive
-              ? `${live?.live_candle && !live.stale ? `实时K线快照SHA256 ${live.live_snapshot_sha256?.slice(0, 16) ?? "—"}；结构分析只使用已收盘K线 · ` : ""}本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
+              ? `归档来源周期 ${archive?.source_interval ?? interval} · ${live?.live_candle && !live.stale ? `实时K线快照SHA256 ${live.live_snapshot_sha256?.slice(0, 16) ?? "—"}；结构分析只使用已收盘K线 · ` : ""}本地分段SHA256 ${archive?.segment_sha256?.slice(0, 16) ?? "—"}`
               : `原始周期 ${data?.source_interval ?? "—"} · 排除不完整周期 ${data?.excluded_incomplete_buckets ?? 0} 个`}
           </span>
         </div>

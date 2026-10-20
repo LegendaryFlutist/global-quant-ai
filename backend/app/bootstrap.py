@@ -34,7 +34,8 @@ def main():
             if task.kind == 'RUN_FULL_RESEARCH':
                 continue  # The dedicated NVIDIA runner claims this durable task.
             if queue().fetch_job(task.id) is None:
-                queue().enqueue(execute,task.id,job_id=task.id,retry=Retry(max=2,interval=[5,30]));task.status='QUEUED'
+                timeout=21600 if task.kind=='FETCH_BINANCE_ARCHIVES' else 900
+                queue().enqueue(execute,task.id,job_id=task.id,retry=Retry(max=2,interval=[5,30]),job_timeout=timeout);task.status='QUEUED'
         db.commit()
         for symbol,*_ in PRIORITY:
             aid='binance_usdm:'+symbol
