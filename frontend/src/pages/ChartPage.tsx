@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_CHART_INDICATORS, type ArchiveResult, type Asset, type Candle, type CandleResult, type ChartIndicators, type Interval, type LiveMarketResult, type StructureResult } from "../types";
+import { DEFAULT_CHART_INDICATORS, type ArchiveResult, type Asset, type Candle, type CandleResult, type ChartIndicators, type Interval, type LiveMarketResult, type MarketObservationSeries, type StructureResult } from "../types";
 import { api, date, post } from "../services/api";
 import PriceChart from "../components/PriceChart";
+import ReferenceSeriesChart from "../components/ReferenceSeriesChart";
 /** 按标的/周期读取已校验历史；切换后忽略旧请求，采集作为独立后台任务。 */
 export default function ChartPage({
   assets,
@@ -24,6 +25,7 @@ export default function ChartPage({
   const [data, setData] = useState<CandleResult | null>(null);
   const [archive, setArchive] = useState<ArchiveResult | null>(null);
   const [structure, setStructure] = useState<StructureResult | null>(null);
+  const [series, setSeries] = useState<MarketObservationSeries | null>(null);
   const [live, setLive] = useState<LiveMarketResult | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [error, setError] = useState("");
@@ -34,6 +36,11 @@ export default function ChartPage({
   const [indicatorPanelOpen, setIndicatorPanelOpen] = useState(false);
   const [reload, setReload] = useState(0);
   const asset = assets.find((a) => a.id === assetId);
+  const sourceBinding = asset?.specification.market_data_source as {
+    provider_id?: string; kind?: "candles" | "observations"; intervals?: string[];
+  } | undefined;
+  const isObservationSeries = sourceBinding?.kind === "observations";
+  const isUnderlyingCandle = sourceBinding?.kind === "candles";
   useEffect(() => {
     setIndicators(indicatorPreferences);
     setSavedIndicators(indicatorPreferences);
@@ -44,9 +51,18 @@ export default function ChartPage({
   ).length;
   useEffect(() => {
     let active = true;
+    if (isObservationSeries) {
+      setIntervals([{ interval: "1d", available: true, reason: "仅为EIA发布的日度标量参考值" }]);
+      setInterval("1d");
+      return () => { active = false; };
+    }
     api<Interval[]>("/market/intervals?asset_id=" + encodeURIComponent(assetId))
       .then((v) => {
-        if (active) setIntervals(v);
+        if (active) {
+          setIntervals(v);
+          const allowed = sourceBinding?.intervals ?? [];
+          if (allowed.length && !allowed.includes(interval)) setInterval(allowed[0]);
+        }
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -54,7 +70,7 @@ export default function ChartPage({
     return () => {
       active = false;
     };
-  }, [assetId, reload]);
+  }, [assetId, reload, isObservationSeries, sourceBinding?.intervals?.join(","), interval]);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -63,7 +79,15 @@ export default function ChartPage({
     setArchive(null);
     setStructure(null);
     setLive(null);
+    setSeries(null);
     const query = `?asset_id=${encodeURIComponent(assetId)}&interval=${interval}&limit=10000`;
+    if (isObservationSeries) {
+      api<MarketObservationSeries>(`/market/series?asset_id=${encodeURIComponent(assetId)}&limit=5000`)
+        .then((value) => { if (active) setSeries(value); })
+        .catch((e) => { if (active) setError(e.message); })
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
+    }
     if (showArchive) {
       const relatedIntervals = [...new Set([interval, "15m", "1h", "4h", "1d"])]
         .slice(0, 10).join(",");
@@ -103,8 +127,8 @@ export default function ChartPage({
     return () => {
       active = false;
     };
-  }, [assetId, interval, reload, showArchive]);
-  const canRefresh = showArchive ? archive?.available === true : Boolean(data?.candles.length);
+  }, [assetId, interval, reload, showArchive, isObservationSeries]);
+  const canRefresh = !isObservationSeries && (showArchive ? archive?.available === true : Boolean(data?.candles.length));
   useEffect(() => {
     if (!canRefresh) return;
     let active = true;
@@ -164,6 +188,15 @@ export default function ChartPage({
   /** 创建最近90天公开行情任务；不把入队成功当作采集成功。 */
   async function collect() {
     try {
+      if (isUnderlyingCandle || isObservationSeries) {
+        const providerInterval = isObservationSeries ? "1d" : interval;
+        const result = await post<{ id: string }>("/tasks", {
+          kind: "FETCH_UNDERLYING_HISTORY", asset_id: assetId,
+          interval: providerInterval, days: 1095,
+        });
+        onTask(`已创建${asset?.symbol}底层源头三年行情任务 ${result.id.slice(0, 8)}；结果和数据覆盖会显示在后台任务`);
+        return;
+      }
       const result = await post<{ id: string }>("/tasks", {
         kind: "FETCH_HISTORY",
         asset_id: assetId,
@@ -250,7 +283,7 @@ export default function ChartPage({
         <div>
           <span className="eyebrow">MARKET WORKSPACE</span>
           <h1>多周期行情</h1>
-          <p>公开行情 · 15分钟基础数据聚合高周期 · 只显示已收盘结构信号</p>
+          <p>{isObservationSeries ? "供应商发布的日度能源现货参考值 · 保留真实观测频率" : isUnderlyingCandle ? "底层股票 / ETF 原始行情 · 来源与更新频率按交易所及供应商授权显示" : "Binance公开永续行情 · 本地真实K线 · 只显示已收盘结构信号"}</p>
         </div>
         <button onClick={() => setReload((n) => n + 1)}>重新读取缓存</button>
       </header>
@@ -273,19 +306,19 @@ export default function ChartPage({
           <details className="chart-actions">
             <summary>数据管理</summary>
             <div className="chart-actions-menu">
-              <button onClick={collect}>补齐最近90天</button>
-              <button disabled={asset?.venue !== "BINANCE_USDM" || !["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset?.verification ?? "")} onClick={() => void collectArchive()}>补齐所选合约三年</button>
+              <button onClick={collect}>{isUnderlyingCandle || isObservationSeries ? "采集底层三年数据" : "补齐最近90天"}</button>
+              {!isUnderlyingCandle && !isObservationSeries && <button disabled={asset?.venue !== "BINANCE_USDM" || !["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset?.verification ?? "")} onClick={() => void collectArchive()}>补齐所选合约三年</button>}
               {verifiedBinanceCount > 0 && <button onClick={() => void collectAllBinanceArchives()}>补齐全部 Binance 合约三年（{verifiedBinanceCount}）</button>}
             </div>
           </details>
-          <button
+          {!isUnderlyingCandle && !isObservationSeries && <button
             aria-pressed={showArchive}
             onClick={() => setShowArchive((value) => !value)}
           >
             {showArchive ? "查看90天缓存" : "查看三年缓存"}
-          </button>
+          </button>}
         </div>
-        {indicatorPanelOpen && (
+        {indicatorPanelOpen && !isObservationSeries && (
           <section className="indicator-panel" aria-label="图表指标设置">
             <div className="indicator-panel-heading">
               <div><strong>图表指标</strong><small>只控制显示；计算模型不受影响</small></div>
@@ -316,9 +349,8 @@ export default function ChartPage({
           </section>
         )}
         <div className="intervals">
-          {(intervals.length
-            ? intervals.map((i) => i.interval)
-            : ["15m", "30m", "1h", "2h", "4h", "1d"]
+          {(isObservationSeries ? ["1d"] : isUnderlyingCandle ? sourceBinding?.intervals ?? [] :
+            (intervals.length ? intervals.map((i) => i.interval) : ["15m", "30m", "1h", "2h", "4h", "1d"])
           ).map((value) => {
             const capability = intervals.find((i) => i.interval === value);
             return (
@@ -342,13 +374,13 @@ export default function ChartPage({
           <span>{asset?.name}</span>
           <span className="badge neutral">仅研究</span>
         </div>
-        <div className="chart-live-status">
+        {!isObservationSeries && <div className="chart-live-status">
           <span className={`badge ${live?.stale ? "negative" : live ? "positive" : "neutral"}`}>
-            {!canRefresh ? "等待本地K线" : live?.stale ? "实时连接中断" : live ? "实时已连接" : "正在连接行情"}
+            {!canRefresh ? "等待本地K线" : live?.stale ? "数据源连接中断" : live ? isUnderlyingCandle ? "底层源已连接" : "Binance行情已连接" : "正在连接行情"}
           </span>
-          <span>{live?.updated_at_ms ? `最近尝试 ${date(live.updated_at_ms, timezone)}` : "当前周期每5秒自动刷新；页面不显示逐笔盘口"}</span>
+          <span>{live?.updated_at_ms ? `${live.source ?? "Binance"} · 页面5秒刷新；${live.source_freshness ?? "本地公开行情刷新"} · 最近拉取 ${date(live.updated_at_ms, timezone)}` : "当前周期每5秒检查本地更新；数据源按其授权/频率限制请求"}</span>
           {live?.refresh_error && <span className="error">{live.refresh_error}</span>}
-        </div>
+        </div>}
         {loading ? (
           <div className="empty">正在校验并加载历史行情…</div>
         ) : error ? (
@@ -356,6 +388,8 @@ export default function ChartPage({
             {error}
             <small>可选择已有数据的周期，或创建公开行情采集任务。</small>
           </div>
+        ) : isObservationSeries && series?.observations.length ? (
+          <ReferenceSeriesChart observations={series.observations} unit={series.unit} />
         ) : chartCandles.length ? (
           <PriceChart
             candles={displayCandles}
@@ -372,14 +406,15 @@ export default function ChartPage({
             showDivergence={indicators.show_divergence}
             showWave={indicators.show_wave}
           />
+        ) : isObservationSeries ? (
+          <div className="empty">本地还没有该能源现货参考序列；请点击“数据管理 → 采集底层三年数据”排入后台任务。此源只发布日度价格点，不生成15分钟K线。</div>
         ) : showArchive && archive?.available === false ? (
           <div className="empty">本地尚无该标的/周期的长期缓存；点击“采集三年历史”创建后台任务。</div>
         ) : (
           <div className="empty">没有完整周期 K 线；当前不做预测或插值。</div>
         )}
         <div className="chart-footer" data-loaded-interval={data?.interval} data-loaded-asset={showArchive ? archive?.asset_id : data?.asset_id}>
-          <span>{displayCandles.length} 根K线 · 数据截止 {date(showArchive ? archive?.last_close_ms : data?.as_of_ms, timezone)}</span>
-          <span>刷新间隔 5 秒 · 结构判断仅使用收盘K线</span>
+          {isObservationSeries ? <><span>{series?.observations.length ?? 0} 个真实日度观测 · {series?.unit ?? "—"}</span><span>数据截止 {date(series?.last_observed_at_ms, timezone)} · {String(series?.source?.provider ?? "等待供应商")}</span></> : <><span>{displayCandles.length} 根K线 · 数据截止 {date(showArchive ? archive?.last_close_ms : data?.as_of_ms, timezone)}</span><span>刷新间隔 5 秒 · 结构判断仅使用收盘K线</span></>}
         </div>
       </section>
       <details className="chart-details">
@@ -387,13 +422,15 @@ export default function ChartPage({
         <div className="two-col">
           <section className="panel">
             <h3>数据可追溯</h3>
-            <p>来源：{showArchive ? archive?.source ?? "暂无归档" : String(data?.source.provider ?? "暂无数据")}</p>
-            <p className="mono break">SHA256：{showArchive ? archive?.segment_sha256 ?? "—" : data?.dataset_sha256 ?? "—"}</p>
+            <p>来源：{isObservationSeries ? String(series?.source?.provider ?? "等待采集") : showArchive ? archive?.source ?? "暂无归档" : String(data?.source.provider ?? "暂无数据")}</p>
+            <p className="mono break">SHA256：{isObservationSeries ? series?.sha256 ?? "—" : showArchive ? archive?.segment_sha256 ?? "—" : data?.dataset_sha256 ?? "—"}</p>
             <p>长期归档状态：{archive?.status ?? "未载入"} · 基础周期：{archive?.source_interval ?? "15m"} · 当前周期原生数据：{data?.source_interval ?? "—"}</p>
           </section>
           <section className="panel">
             <h3>分析能力</h3>
-            {currentStructure ? (
+            {isObservationSeries ? (
+              <p>该序列为{series?.unit ?? "供应商单位"}的日度标量观测，用折线展示；不会补造OHLC，不提供盘中信号。来源的发布延迟取决于EIA数据更新。</p>
+            ) : currentStructure ? (
               <>
                 <p>分析截止：{date(currentStructure.last_closed_at, timezone)} · 已收盘K线 · {structure?.algorithm ?? "等待缓存数据"}</p>
                 <p>当前周期：{interval} · 结构趋势 {currentStructure.trend === 1 ? "上升" : currentStructure.trend === -1 ? "下降" : currentStructure.status === "OK" ? "震荡/分歧" : "数据不足"} · 趋势线 {currentStructure.trendline_break_state ?? "待缓存"}</p>

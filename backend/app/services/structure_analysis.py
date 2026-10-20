@@ -8,6 +8,8 @@ import pandas as pd
 from app.adapters.public_binance import INTERVALS
 from app.services.long_history import read_archive, validate_archive_identity
 from app.services.market_data import candles
+from app.domains.models import Asset
+from app.services.underlying_market import _source_for_asset
 from quant_lab.analysis.market_structure import multitimeframe_structure
 
 STRUCTURE_INTERVALS = tuple(INTERVALS)
@@ -48,12 +50,12 @@ def _serialize_structure(value, price_key=None):
 
 
 def analyze_archived_structure(db, asset_id, intervals, as_of_ms=None, limit=10000):
-    """为一个已核验永续合约读取本地归档并分析多个已收盘周期。
+    """为一个已登记研究产品读取本地来源数据并分析多个已收盘周期。
 
     Args:
         db: 当前认证API请求使用的SQLAlchemy数据库会话。
-        asset_id: 资产目录中的精确USDT永续资产ID。
-        intervals: 要共同观察的币安原生周期名称序列。
+        asset_id: 资产目录中的精确产品ID；永续与底层证券保留独立身份。
+        intervals: 要共同观察且已归档的原生周期名称序列。
         as_of_ms: 可选的统一UTC毫秒回放截止时间。
         limit: 每周期读取的最近最多K线条数，单位为根数。
 
@@ -64,18 +66,26 @@ def analyze_archived_structure(db, asset_id, intervals, as_of_ms=None, limit=100
         ValueError: 资产身份、周期、截止或读取上限不符合研究边界。
 
     Notes:
-        只读本地长期归档，不触发Binance请求。时间截止之后和未收盘K线不参与结构事件。
+        只读本地长期归档/Parquet，不触发外部请求。时间截止之后和未收盘K线不参与结构事件。
     """
     if not 1 <= len(intervals) <= len(STRUCTURE_INTERVALS) or len(set(intervals)) != len(intervals):
         raise ValueError("请选择不重复的一个或多个原生周期")
     if not 1 <= limit <= 200000:
         raise ValueError("每周期读取条数必须在1到200000之间")
+    asset = db.get(Asset, asset_id)
+    if asset is None:
+        raise ValueError("研究资产未登记")
+    is_binance = asset.venue == "BINANCE_USDM"
+    if not is_binance and _source_for_asset(asset).get("kind") != "candles":
+        raise ValueError("标量能源参考序列不生成K线结构信号")
     frames = {}
     source_hashes = {}
     missing = []
     for interval in intervals:
-        validate_archive_identity(db, asset_id, interval)
-        archive = read_archive(asset_id, interval, limit=limit, end_ms=as_of_ms)
+        archive = None
+        if is_binance:
+            validate_archive_identity(db, asset_id, interval)
+            archive = read_archive(asset_id, interval, limit=limit, end_ms=as_of_ms)
         if archive is None:
             try:
                 cached = candles(db, asset_id, interval, limit=limit, end_ms=as_of_ms)

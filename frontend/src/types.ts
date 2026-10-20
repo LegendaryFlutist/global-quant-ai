@@ -19,8 +19,34 @@ export interface Asset {
   verified_at: string | null;
   themes: string[];
   datasets: Dataset[];
+  series?: { metric: string; rows: number; as_of_ms: number; unit: string; sha256: string }[];
+  market_source?: {
+    provider_id: string; kind: "candles" | "observations"; intervals: string[];
+    provider_status: string; credential_configured: boolean; latest_data_at_ms: number | null;
+  } | null;
   specification: Record<string, unknown>;
   live_tradable: boolean;
+}
+/** A daily or slower published scalar value; it has no fabricated OHLC fields. */
+export interface MarketObservationPoint {
+  observed_at_ms: number;
+  value: string;
+  unit: string;
+}
+/** Authenticated local provider-reference series and Parquet provenance. */
+export interface MarketObservationSeries {
+  asset_id: string;
+  symbol?: string;
+  metric: string;
+  unit: string;
+  available: boolean;
+  observations: MarketObservationPoint[];
+  available_count?: number;
+  first_observed_at_ms?: number;
+  last_observed_at_ms?: number;
+  source?: Record<string, unknown>;
+  sha256?: string;
+  research_only: boolean;
 }
 export interface Candle {
   open_time: number;
@@ -56,6 +82,8 @@ export interface ArchiveResult {
   updated_at_ms?: number;
   status?: string;
   source?: string;
+  source_freshness?: string;
+  source_event_at_ms?: number | null;
   segment_sha256?: string;
   research_only: boolean;
   available?: boolean;
@@ -68,6 +96,7 @@ export interface LiveMarketResult {
   live_candle: Candle | null;
   last_closed_at_ms?: number | null;
   updated_at_ms?: number;
+  source_freshness?: string;
   archive_sha256?: string;
   dataset_sha256?: string;
   live_snapshot_sha256?: string | null;

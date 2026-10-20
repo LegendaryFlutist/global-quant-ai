@@ -1,5 +1,6 @@
 """幂等登记公开资产与供应商状态；不创建用户、不读取API凭据。"""
 import json
+import os
 from datetime import datetime
 from sqlalchemy import select
 from app.core.config import CONFIG_ROOT
@@ -15,9 +16,18 @@ def seed(db):
     Returns:
         无返回值；不覆盖已有用户/策略/行情，不创建真实交易权限。
     """
-    for provider in [('binance_public','Binance USDT 永续公开接口'),('research_snapshot','已验证本地研究快照'),('research_registry','全球资产研究登记（未接行情源）')]:
+    providers = [
+        ('binance_public','Binance USDT 永续公开接口'),
+        ('research_snapshot','已验证本地研究快照'),
+        ('research_registry','全球资产研究登记（未接行情源）'),
+        ('massive_stocks','Massive 美国股票与ETF公开行情'),
+        ('twelve_data','Twelve Data 韩国股票日线'),
+        ('eia','美国能源信息署每日现货参考序列'),
+    ]
+    for provider in providers:
         if db.get(Provider,provider[0]) is None:db.add(Provider(id=provider[0],name=provider[1],status='UNKNOWN',detail={}))
     db.flush()
+    source_registry=json.loads((CONFIG_ROOT/'market_sources.json').read_text())
     snapshot=json.loads((CONFIG_ROOT/'exchange_snapshot.json').read_text())
     specifications={s['symbol']:s for s in snapshot['symbols']}
     entries=PRIORITY+[(s,n,u,'commodity_related_perpetual' if s=='XAUUSDT' else 'equity_related_perpetual',t) for s,n,u,t in OTHER]
@@ -29,11 +39,47 @@ def seed(db):
         db.add(Asset(id=aid,symbol=symbol,name=name,underlying_id=underlying,asset_type=kind,venue='BINANCE_USDM',priority=index,verification='VERIFIED_SNAPSHOT' if spec else 'UNVERIFIED',specification=spec or {},verified_at=datetime.fromisoformat(snapshot['retrieved_at'].replace('Z','+00:00')) if spec else None));db.flush()
         db.add(Alias(asset_id=aid,provider_id='binance_public',alias=symbol))
         for theme in themes:db.add(Membership(asset_id=aid,sector=theme))
-    for symbol,name,underlying,kind,themes,venue in GLOBAL+json.loads((CONFIG_ROOT/'additional_assets.json').read_text()):
+    global_assets=GLOBAL+json.loads((CONFIG_ROOT/'additional_assets.json').read_text())
+    for symbol,name,underlying,kind,themes,venue in global_assets:
         aid=venue.lower()+':'+symbol
         if db.get(Asset,aid):continue
         db.add(Asset(id=aid,symbol=symbol,name=name,underlying_id=underlying,asset_type=kind,venue=venue,priority=100,verification='RESEARCH_ONLY',specification={'currency':{'US':'USD','HK':'HKD','CN':'CNY','KRX':'KRW'}.get(venue,'UNKNOWN'),'trading_calendar':'UNVERIFIED','listing_range':'UNKNOWN','data_source':'NOT_CONNECTED','symbol_is_provider_verified':False}));db.flush()
         for theme in themes:db.add(Membership(asset_id=aid,sector=theme))
+    # Bind exact underlying products to their source. The perpetual aliases remain
+    # separate and are never overwritten by the source's spot/ETF price history.
+    configured_sources=dict(source_registry.get('assets',{}))
+    for symbol,name,underlying,kind,themes,venue in global_assets:
+        asset_id=venue.lower()+':'+symbol
+        if venue=='US' and kind in {'stock','etf','leveraged_etf'}:
+            configured_sources.setdefault(asset_id,{
+                'provider_id':'massive_stocks','alias':symbol,'kind':'candles',
+                'intervals':['15m','1h','1d'],'exchange':'US',
+                'timezone':'America/New_York',
+            })
+    for asset_id,source in configured_sources.items():
+        asset=db.get(Asset,asset_id)
+        if asset is None:
+            continue
+        spec=dict(asset.specification or {})
+        spec['market_data_source']=source
+        asset.specification=spec
+        provider_id=source['provider_id']
+        alias=source['alias']
+        existing_alias=db.scalar(select(Alias).where(Alias.provider_id==provider_id,Alias.alias==alias))
+        if existing_alias is None:
+            db.add(Alias(asset_id=asset_id,provider_id=provider_id,alias=alias))
+    for provider_id,contract in source_registry.get('providers',{}).items():
+        provider=db.get(Provider,provider_id)
+        credential_env=contract['credential_env']
+        configured=bool(os.environ.get(credential_env, '').strip())
+        if provider.status not in {'CONNECTED','DEGRADED'}:
+            provider.status='CONFIGURED_NOT_VALIDATED' if configured else 'NEEDS_CONFIGURATION'
+        provider.detail={**(provider.detail or {}),
+            'credential_env':credential_env,
+            'credential_configured':configured,
+            'freshness_contract':contract['freshness'],
+            'data_kind':contract['data_kind'],
+        }
     if db.get(Setting,'display') is None:db.add(Setting(key='display',value={'timezone':'Asia/Shanghai','default_interval':'4h','default_asset':'binance_usdm:KORUUSDT'}))
     if db.get(Setting,'chart_indicators') is None:
         db.add(Setting(key='chart_indicators',value={
@@ -47,7 +93,7 @@ def seed(db):
         if symbol=='SPCXUSDT':
             membership=db.get(Membership,(asset.id,'未上市相关产品'))
             if membership:db.delete(membership)
-    registry=db.get(Provider,'research_registry');registry.status='REGISTERED_RESEARCH_ONLY';registry.detail={'note':'仅资产登记，尚未接入行情源'}
+    registry=db.get(Provider,'research_registry');registry.status='REGISTERED_RESEARCH_ONLY';registry.detail={'note':'仅资产登记；底层行情需配置供应商后验证'}
     existing=db.scalar(select(MarketData).limit(1))
     if existing:
         provider=db.get(Provider,'research_snapshot');provider.status='CONNECTED';provider.detail={'mode':'historical_snapshot','last_success_at':existing.updated_at.isoformat(),'note':'真实历史缓存；不是实时报价'}

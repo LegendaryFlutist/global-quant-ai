@@ -56,6 +56,10 @@ services:
       RESEARCH_ROOT: /research
       RESEARCH_RUNS_ROOT: /research/research-runs
       RESEARCH_WORKER_TOKEN: ${PLATFORM_RESEARCH_TOKEN:?Use scripts/platform.sh to generate local credentials}
+      # Public-data vendor keys are optional and are never sent to the browser or written to reports.
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
       # This host-specific runtime setting reaches Clash through the restricted bridge.
       HTTP_PROXY: ${PLATFORM_HTTP_PROXY:-}
       HTTPS_PROXY: ${PLATFORM_HTTPS_PROXY:-}
@@ -173,6 +177,7 @@ services:
     volumes:
       - ./backend/app:/app/app:ro
       - ./backend/tests:/app/tests:ro
+      - ./config/platform:/app/config:ro
       - ./quant_lab:/app/quant_lab:ro
     depends_on:
       postgres-test: {condition: service_healthy}

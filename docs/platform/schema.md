@@ -13,18 +13,22 @@
 | assets | id, symbol, name, underlying_id, asset_type, venue, priority, verification, specification JSON, verified_at | id为市场+精确产品代码；相同底层不合并不同产品 |
 | asset_aliases | id, asset_id, provider_id, alias | FK assets/providers；provider+alias唯一 |
 | sector_membership | asset_id, sector | 组合主键；一个资产可有多个行业/主题 |
-| market_data_metadata | id, asset_id, interval, path, row_count, first_open_ms, last_close_ms, sha256, source JSON, updated_at | asset+interval唯一；指向不可变Parquet快照 |
+| market_data_metadata | id, asset_id, interval, path, row_count, first_open_ms, last_close_ms, sha256, source JSON, updated_at | asset+interval唯一；指向不可变Parquet快照或经哈希校验的分段manifest |
 | scheduled_tasks | id UUID, kind, status, parameters JSON, result JSON, attempts, created_at, updated_at | 持久任务记录，对应RQ job_id；批量Binance归档将已完成合约ID、当前合约和计数保存在result供重试/页面恢复；失败原因可见 |
 | system_settings | key, value JSON | `display`和`chart_indicators`保存经过认证的界面偏好；不接受API凭据 |
 | system_events | id, kind, detail JSON, created_at | 预留系统事件记录，目前无监控告警引擎 |
 
-行情事实文件由本地不可变Parquet保存，`market_data_metadata.path/sha256/row_count/time bounds/source`只作为PostgreSQL清单指针。DuckDB以进程内只读连接查询通过SHA256校验的文件；Redis用于任务队列、认证限流和20秒实时K线TTL缓存，缓存未命中时可读本地`live.json`快照。两种实时快照都不作为历史事实或策略配置的权威来源。当前尚无逐笔成交、历史订单簿、技术指标宽表或实盘账本表。
+行情事实文件由本地不可变Parquet保存，`market_data_metadata.path/sha256/row_count/time bounds/source`只作为PostgreSQL清单指针。`underlying_history/`使用内容寻址Parquet段和不可变manifest；普通Binance快照保持原契约。DuckDB以进程内只读连接查询通过SHA256校验的文件；Redis用于任务队列、认证限流和有TTL的公开行情刷新缓存，缓存不能覆盖本地历史事实。
 
-资产API在现有`asset_type`基础上派生`market_category`（crypto/stocks/etf/other）和`product_type`（spot/perpetual/future/reference/other），不改变持久schema。这样ETF相关Binance永续显示为ETF类别+永续产品，登记股票显示为股票类别+现货产品；供应商核验和`live_tradable`仍各自独立，分类不代表行情已接入。
+Alembic 0003增加`market_observation_metadata`，指向单值观察系列的Parquet。其schema是`observed_at_ms / value DECIMAL128 / unit`，用于EIA WTI Cushing和Henry Hub日度现货参考值。标量series API只返回原值和单位，不把它变成OHLC蜡烛。资产原始源绑定保存在`assets.specification.market_data_source`，供应商最近状态和“密钥是否配置”布尔值记在`providers.detail`；密钥值不写数据库。`config/platform/market_sources.json`定义可用提供方、精确符号、源类型、原生周期、单位与交易所时区。
+
+资产API在现有`asset_type`基础上派生`market_category`（crypto/stocks/etf/other）和`product_type`（spot/perpetual/future/reference/other），不改变持久schema。比如`us:NVDA`、`us:KORU`、`krx:000660`、`eia:WTI_CUSHING_SPOT`与`binance_usdm:NVDAUSDT`各自身份独立，底层价格不会替换永续合约成交价。供应商状态与`live_tradable`各自独立，分类不代表有交易能力。
 
 三年Binance长期历史仍以`DATA_ROOT/long_history/<symbol>/<interval>/`内的不可变Parquet分段及manifest为权威。`FETCH_BINANCE_ARCHIVES`任务参数保存本次确切资产ID列表，任务result保存合约级检查点，不新增数据库表或迁移；仅对已核验USDM合约排队。长期图表目标周期缺少独立归档时，API可从较长覆盖范围的15m真实K线聚合更大周期，并返回`source_interval`和源manifest/分段哈希；向下插值禁止。
 
 `system_settings.chart_indicators`记录图表显示偏好：MA开关和2–500的均线长度列表，以及布林、MACD、TD九转、趋势线、道氏123、背离和波浪候选的可见开关。精简默认只显示MA与量柱。写入要求当前会话和CSRF，并产生审计事件；偏好只影响图表，不参与回测或策略计算。新增该JSON键无需数据库迁移。
+
+底层行情使用`FETCH_UNDERLYING_HISTORY`持久任务，默认回溯1095天并记录精确资产/周期。美国股票/ETF按供应商OHLCV读取15m、1h、1d；韩国XKRX与能源参考只支持1d。刷新来源受服务器环境变量配置，不接收浏览器提供的URL或密钥；上游的延迟、额度或地区不可用不会被报告为成功。
 
 ## Phase2 已迁移配置表（Alembic 0002）
 

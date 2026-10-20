@@ -1,6 +1,6 @@
 # Global Quant AI V2.0 — 系统架构
 
-本架构覆盖全部八个阶段；Phase 1 已实现。Phase 2 已落地按需三年行情归档、多周期结构API/图表、本地市场周期摘要、多模拟策略配置和基于本地交易价/标记价/资金费的只读回测报告。回测曲线和逐笔文件绑定策略、算法及数据SHA256；它是离线研究报告，不是持续纸面账户或实盘执行。
+本架构覆盖全部八个阶段。Phase 1 提供认证的公开数据研究平台；Phase 2 已落地按需三年归档、多周期结构API/图表、传统底层公开行情适配和日度能源参考值、多模拟策略配置及只读回测报告。回测曲线和逐笔文件绑定策略、算法及数据SHA256；这些能力不包含实盘执行。
 
 ```mermaid
 flowchart TB
@@ -9,7 +9,11 @@ flowchart TB
     API --> PG[(PostgreSQL 业务与审计)]
     API --> Redis[(Redis / RQ 任务队列)]
     Redis --> Worker[Python 3.11 行情 Worker]
-    Worker --> Public[Binance 公开 GET 数据]
+    Worker --> Binance[Binance USDM 公开 GET]
+    Worker --> Underlying[Massive / Twelve Data / EIA GET]
+    Underlying --> Mapping[精确股票 / ETF / 能源参考身份]
+    Mapping --> PQ
+    Binance --> PQ
     Worker --> PQ[(不可变 Parquet 行情分区)]
     API --> DuckDB[DuckDB 只读分析层]
     DuckDB --> PQ
@@ -28,7 +32,7 @@ flowchart TB
     Ideas[研究思想 / 实验登记] -.-> Registry
 ```
 
-实线是 Phase 1 已实现的数据通路；虚线为后续设计。Phase 1 没有 Broker 订单实现，订单 API 在后端拒绝。
+实线是已实现的数据通路；虚线为后续设计。底层行情与Binance永续使用独立产品ID、来源元数据和缓存；Phase 1 没有Broker订单实现，订单API在后端拒绝。
 
 ## 技术选型
 
@@ -42,7 +46,7 @@ flowchart TB
 | 任务 | Redis 6 + RQ 2 | 承载任务队列、认证限流及20秒实时K线快照缓存；AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
 | 分析查询 | DuckDB 1.5.6（Python 3.11，ARM64/x86_64） | 进程内只读 SQL 查询已校验的 Parquet 文件；每个请求独立内存连接，不引入第二份可变数据库 |
 | 历史数据 | Arrow Decimal128 + Parquet/Zstd | 不可变文件 + SHA256 + PostgreSQL 元数据指针；数据库不存大批重复 OHLC |
-| 实时缓存 | Redis TTL键 | 20秒缓存已闭合/未闭合数据之外的临时forming candle；断网时API先读Redis，缓存未命中再读带SHA256的本地`live.json`。Redis缓存可丢弃，不能作为历史事实来源 |
+| 实时缓存 | Redis TTL键 | Binance短TTL快照与底层供应商请求节流缓存；5秒页面刷新读取源数据状态，但供应商实际更新频率仍由市场时段、订阅延迟与限额决定。Redis可丢弃，不是历史事实来源 |
 | 身份 | Argon2id + 12小时服务端会话 | 随机令牌只存 SHA256，HttpOnly / SameSite，CSRF、来源校验与限流 |
 | GPU | 现有 NGC PyTorch 25.11 容器 | 保留 GB10/CUDA 环境；该镜像没有 TensorFlow；研究 Python3.12 与新 API3.11 隔离 |
 | 部署 | Docker Compose | web/api/worker/postgres/redis，与原 lab 共存；只发布127.0.0.1:8080 |
@@ -54,20 +58,21 @@ flowchart TB
 ### 数据层职责
 
 - `backend/app/adapters/` 只负责特定供应商的公开读取和响应解析；不在适配器中落库或推断不同产品可交易。
-- `backend/app/services/ingestion.py` 与 `long_history.py` 负责清洗、周期校验、分页恢复和写入编排；真实原生周期行情才可持久化，不补造缺失报价、不向下插值。
+- `backend/app/adapters/public_binance.py` 仅读取已核验永续；`underlying_public.py` 提供Massive股票/ETF OHLCV、Twelve Data XKRX日线、EIA每日WTI/Henry Hub标量参考。访问键仅由worker/API环境读取，绝不存入数据库、浏览器或报告。
+- `backend/app/services/ingestion.py`、`long_history.py`与`underlying_market.py`负责清洗、原生周期校验、任务恢复和写入编排；源头证券K线与相关永续不混用。能源现货只存标量观察值，禁止伪造OHLC；不补造缺失报价、不向下插值。
 - `backend/app/storage/` 统一文件读写契约。`storage/parquet_files.py`负责流式SHA256、同目录临时文件、fsync与不可变/内容寻址Parquet发布，并原子更新小型manifest；`storage/duckdb_query.py`只读取调用方已校验且明确列出的Parquet分段，时间字段白名单化、文件名用SQL参数传递、Decimal128通过Arrow往返。
 - Parquet是行情/模型输入的规范事实存储；PostgreSQL保存资产/供应商/任务/策略配置和文件哈希指针；Redis当前承载任务队列、认证限流和20秒实时行情快照。Redis失效时实时刷新仍可回退到本地带哈希快照。DuckDB不是独立服务，也不另建共享可变`.duckdb`文件，避免多个API/worker进程竞争写入。
 - 回测交易、净值和完整模型产物保存在带来源/配置/代码SHA256的不可变本地Parquet文件；PostgreSQL仅保留所有者、任务状态与结果索引。技术指标和结构特征应先按确定版本从输入行情计算，保存时须带定义版本、`as_of`、`known_at`和源哈希。
-- 已切换近期行情、三年K线、标记价、费率与未收盘K线快照的原子写入/SHA256校验到storage模块；实时快照额外写入20秒Redis TTL键。近期缓存与三年K线分析查询通过DuckDB读取。后续按`adapters → ingestion services → storage ports → DuckDB readers / Parquet writers → API`迁移其它读路径；迁移期间保留旧API契约，逐项对比行数、时间边界、Decimal、SHA256和冻结回测结果，不移动/覆盖已有行情与报告。
+- US/KRX底层K线写入`DATA_ROOT/underlying_history/<asset-hash>/<interval>/`不可变分段及内容哈希manifest；新闭合K线只追加新段，已知数据修订时发布新manifest。EIA价格点存独立Parquet和Alembic 0003元数据表。实时刷新缓存按供应商节流：Massive约30秒一次、XKRX日线约6小时一次，页面轮询不会变成无上限上游请求。
 
 ### 接入覆盖范围
 
 资产目录80项中，当前13项具有精确核验的Binance USDT永续代码；这13项各有一份约90天、8,639根15分钟真实K线。此前批量入口及启动补档只扫描注册表中`BINANCE_USDM`且已核验的产品，不触碰其它67个股票、ETF、指数关联资产或未验证代码。服务启动时检查三年15m归档清单，只把缺失/不完整且没有活动任务的资产交给后台队列；检查不在API启动线程内访问网络，已完成归档不会重复采集。图表也保留手动补档入口；图表用完整真实15m桶向上聚合更大周期，不做小周期插值。当前公开REST仍受DNS/代理限制，排队不代表已取得三年行情；页面会显示任务失败原因和实际覆盖范围。
 
-2026-10-20用户扩展了研究范围，要求把传统资产相关合约与原始股票/商品行情分开采集。`docs/platform/underlying-market-data.md`记录了底层代码和供应商候选。该项尚为PLANNED：US权益、KRX权益、商品现货和NYMEX期货有不同实时性、时区、日历和许可；外部行情要用独立产品ID、来源和缓存，不能覆盖合约历史或伪称永续价格。用户确认供应商与授权后再实现具体适配器。
+传统底层产品已经按来源分开登记：美国上市股票/ETF接Massive公开聚合接口、SK海力士和三星接Twelve Data XKRX EOD、WTI Cushing与Henry Hub接EIA日度标量序列。`config/platform/market_sources.json`是映射来源；服务启动只会在本机配置对应密钥后为缺失历史创建`FETCH_UNDERLYING_HISTORY`后台任务。当前仓库内没有这些供应商的密钥或已下载数据。Massive实时性取决于订阅级别；Twelve Data的XKRX为EOD；EIA是日频，因此这些产品不会统一标记成5秒实时报价。NYMEX CL/NG期货不在本次现货接口中，因需独立处理到期和换月。
 
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
-- Ingestion：公开 GET、来源核验、上市时间、交易日历、原生周期、清洗与分页恢复。`FETCH_BINANCE_ARCHIVES`既可由用户显式启动，也会在服务启动时按清单补缺；只处理注册表内已核验USDM合约，15m三年归档支持合约级进度、自动重试和已保存合约跳过。启动检查幂等，活动任务去重，最近公开连接/HTTP失败有15分钟冷却；修复后的代理依赖或配置错误不会被冷却挡住，网络I/O只在后台worker执行。无可信来源的全球资产只登记，行情显示缺失。
+- Ingestion：公开GET、来源与产品代码绑定、原生周期、清洗和恢复。`FETCH_BINANCE_ARCHIVES`只处理已核验USDM永续；`FETCH_UNDERLYING_HISTORY`只处理source registry指定的股票、ETF和能源参考资产。二者启动补缺均幂等且只在worker执行网络请求；没有密钥或未获准数据权限时明确显示待配置/不可用，不生成数据。
 - Sentiment / Contagion（Phase3）：各源有时间戳与缺失状态；0–100风险分、六类风险状态；无数据为UNKNOWN。联动统计区分相关、领先滞后与因果假设。
 - Technical（Phase2）：统一研究域结构报告与已认证`GET /api/market/structure`：优先读长期归档，否则使用近期Parquet缓存及可合法聚合的大周期闭合K线；返回已确认摆动点、结构趋势线/破坏、Dow 1-2-3、Elliott候选与因果价格-RSI背离。图表另外显示需要至少三个已确认独立摆动点的局部支撑/压力线、TD setup序列、MACD价格背驰、布林带、MACD与可配置日均线；日均线使用UTC日收盘并投影至当前图表周期。事件带发生/确认时间和来源SHA256；缺少周期明确报告缺档；分析请求不主动联网。
 - Live market（Phase2）：普通90天缓存图与三年缓存图均可每5秒尝试刷新所选周期；同源认证且CSRF保护的POST触发Binance公开GET。长期归档追加已闭合K线不可变分段，近期缓存写入新的不可变Parquet并更新DB指针，未收盘K线只作为图表快照，不进入结构评分。图表状态条显示连接状态、最后一次尝试和上游错误。失败保留旧行情并显示陈旧状态。宿主机公开请求返回HTTP 451，旧版API容器直连时DNS失败；Compose转发宿主机HTTP(S)代理，SOCKS代理需通过私有`PLATFORM_ALL_PROXY`显式设置，代理地址须Docker可达且策略允许`fapi.binance.com:443`，应用不能解除上游拒绝。单API进程锁不跨副本。

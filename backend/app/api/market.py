@@ -5,13 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 from app.core.db import get_db
 from app.core.security import current_user
-from app.domains.models import User, MarketData
+from app.domains.models import User, MarketData, Asset
 from app.services.market_data import candles, MINUTES
 from app.adapters.public_binance import INTERVALS, PublicDataError
 from app.services.long_history import read_archive, validate_archive_identity
 from app.services.live_market import read_live_snapshot, refresh_latest_candle
 from app.services.structure_analysis import STRUCTURE_INTERVALS, analyze_archived_structure
 from app.services.market_sentiment import PRIORITY_INTERVALS, aggregate_priority_sentiment
+from app.services.underlying_market import refresh_underlying_latest, underlying_series
+from app.adapters.underlying_public import UnderlyingDataError
 
 
 router=APIRouter()
@@ -59,9 +61,21 @@ def market_live(payload:LiveRefreshRequest,user:User=Depends(current_user),db:DB
     """
     asset_id,interval=payload.asset_id,payload.interval
     try:
+        asset=db.get(Asset,asset_id)
+        if asset is not None and asset.venue!='BINANCE_USDM':
+            return refresh_underlying_latest(db,asset_id,interval)
         validate_archive_identity(db,asset_id,interval)
         return refresh_latest_candle(db,asset_id,interval)
-    except PublicDataError as exc:
+    except (PublicDataError,UnderlyingDataError) as exc:
+        if asset is not None and asset.venue!='BINANCE_USDM':
+            try:
+                cached_view=candles(db,asset_id,interval,limit=100)
+                return {'asset_id':asset_id,'interval':interval,'closed_candles':[],'live_candle':None,
+                        'last_closed_at_ms':cached_view.get('as_of_ms'),'updated_at_ms':None,
+                        'dataset_sha256':cached_view.get('dataset_sha256'),'source':cached_view.get('source'),
+                        'research_only':True,'stale':True,'refresh_error':str(exc)}
+            except ValueError:
+                raise HTTPException(503,str(exc)) from None
         snapshot=read_live_snapshot(asset_id,interval)
         if snapshot:
             return {'asset_id':asset_id,'interval':interval,'live_candle':snapshot.get('candle'),'closed_candles':[],'updated_at_ms':snapshot.get('fetched_at_ms'),'source':snapshot.get('source'),'research_only':True,'stale':True,'live_snapshot_sha256':snapshot.get('sha256'),'refresh_error':str(exc)}
@@ -131,6 +145,26 @@ def market_candles(asset_id:str,interval:str='4h',limit:int=Query(800,ge=1,le=10
     """
     try:return candles(db,asset_id,interval,limit,end_ms)
     except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.get('/api/market/series')
+def market_series(asset_id:str,metric:str|None=None,limit:int=Query(5000,ge=1,le=10000),end_ms:int|None=None,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    """Read a source-native scalar series such as an EIA daily spot reference.
+
+    Args:
+        asset_id: Exact registered reference asset ID.
+        metric: Optional allowlisted metric from that asset's server registry.
+        limit: Maximum number of actual observations returned.
+        end_ms: Optional inclusive UTC millisecond as-of cutoff.
+        user: Authenticated user; no provider credential enters the request.
+        db: Current SQLAlchemy session.
+
+    Returns:
+        Provider observations and SHA256 without converting scalar values to candles.
+    """
+    try:
+        return underlying_series(db,asset_id,metric,limit,end_ms)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from None
 
 @router.get('/api/market/intervals')
 def market_intervals(asset_id:str,user:User=Depends(current_user),db:DBSession=Depends(get_db)):

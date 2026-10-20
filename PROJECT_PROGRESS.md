@@ -307,3 +307,16 @@ bash scripts/platform.sh status
 - 未解决：选定具有适当行情授权的供应商，之后实现US证券、KRX证券、EIA日频参考及/或NYMEX期货的只读适配器与WebSocket消费者；把供应商代码/时区/日历/币种映射到独立产品ID并进行后端隔离测试。项目Binance USDⓈ-M REST仍对当前Clash出口返回HTTP 451，相关合约三年历史归档依旧缺失。
 - Git：来源映射文档提交`5eead8b`、交接记录`7e4aa84`及推送状态checkpoint `ccb5db4`均已推送至`feature/phase2-market-structure`；`git ls-remote`确认远端SHA=`ccb5db49f8cc36c084daf58398369dc3b2f336c7`。`gh`未安装，改用GitHub Actions公开API核验 run `39424716255`（run #64）：frontend、publish-hygiene、backend、risk-engine全部success。此处CI结果针对`ccb5db4`；之后只增加本段状态记录的checkpoint不改变源研究文件。`.local/`保持既有未跟踪状态。
 - 恢复：`bash scripts/resume.sh`；查看`docs/platform/underlying-market-data.md`和`TASKS.md`；Git检查`git status --short --branch && git log -5 --oneline`；当前分支`feature/phase2-market-structure`。
+
+
+## 当前开发单元（2026-10-20）：原始证券与能源参考行情数据层
+
+- 用户授权自主设计并完成原始底层行情数据部分，范围为不依赖Binance的传统证券/能源研究行情，并保持原产品与关联永续分离。源映射和交易频率边界见`config/platform/market_sources.json`与`docs/platform/underlying-market-data.md`。
+- 已实现：Massive美国股票/ETF公开REST历史与近端聚合（NVDA、KORU、QID及登记的美国股票/ETF）；Twelve Data对KRX 000660和005930的XKRX日终OHLCV；EIA对WTI Cushing与Henry Hub日频标量值。系统不将能源值伪造成K线，也不混合股票与Binance永续。
+- 已实现：三年底层K线以不可变内容寻址Parquet段和SHA256 manifest增量存储，EIA标量值另存Parquet schema；PostgreSQL migration `0003`新增标量元数据，DuckDB读取数据，Redis限制近端刷新。登录API/图表有底层数据查看和任务入口；启动时只对检测到本机密钥且缺缓存的已登记源排入后台导入任务，采集请求仅由worker执行。密钥值只由后端环境读取，不写页面、数据库或日志。
+- 验证（2026-10-20，最终Docker运行）：`bash scripts/platform.sh up`成功构建并启动API/Web/worker/NVIDIA runner；`bash scripts/platform.sh status`中API、Web、PostgreSQL、Redis、proxy bridge均健康，worker运行；首页HTTP 200；`alembic current`为`0003 (head)`。安全布尔探测显示Massive/Twelve Data/EIA密钥当前均未配置，因此本机没有向供应商拉取真实行情，也没有声称数据已连通。
+- 验证：`bash scripts/platform.sh test`最终为83 passed、1条既有Starlette `TestClient`/httpx弃用警告；覆盖来源注册与永续分离、原生K线Parquet/哈希、EIA标量Schema、密钥边界、启动补档和任务API。`cd frontend && npm ci && npm test && npm run build`为2个测试文件/3 tests passed且Vite/TypeScript构建成功。`python3 scripts/check_docs.py`：696个具名Python函数有docstring；`python3 -m compileall -q backend/app backend/migrations/versions backend/tests`及`git diff --check`通过。两次中间测试发现并修正临时目录隔离和显示/测试断言问题，最终测试通过。
+- 未解决/范围边界：美国行情的实时或延迟由Massive账户许可决定，REST刷新间隔至少30秒；韩国源为日终，EIA为日频现货参考。当前没有用户供应商密钥/套餐，也没有供应商WebSocket实现，因此不能宣称任何来源实时已连通。韩国盘中需要获许可的KRX/KOSCOM或券商源；日内CL/NG期货应另按具体到期合约和换月规则实现，不能冒充现货。Binance当前451/DNS问题未被改写或绕过。
+- Git/发布：本开发单元尚未创建新提交；完成提交后再记录本地提交ID、远端推送与CI状态。`.local/`是既有未跟踪用户目录，保留且不纳入提交；未读取/改动`.runtime`凭据或既有行情/回测产物。
+- 下一步：将本提交推送到现有`feature/phase2-market-structure`；确认远端ref及GitHub Actions后仅按真实状态补记。用户在私有`.runtime/platform.env`自行配置供应商密钥并确认许可后，重启`bash scripts/platform.sh up`，再从全球资产注册表查看待采集/已缓存的原始标的。持续实时需求另实施带许可校验的WebSocket/KRX/期货合约任务。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；本机服务`bash scripts/platform.sh status`；健康`curl -fsS http://127.0.0.1:8080/api/health`；后端测试`bash scripts/platform.sh test`；前端`cd frontend && npm test && npm run build`；重建启动`bash scripts/platform.sh up`。

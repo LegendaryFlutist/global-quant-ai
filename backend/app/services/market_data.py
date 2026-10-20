@@ -17,13 +17,15 @@ FIELDS = ('open', 'high', 'low', 'close', 'volume')
 DECIMAL = pa.decimal128(34, 12)
 SCHEMA = pa.schema([('open_time',pa.int64()), *[(x, DECIMAL) for x in FIELDS], ('close_time',pa.int64())])
 
-def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict]:
+def normalize(rows: list[dict], now_ms: int, interval: str = '15m', *, max_age_days: int = 90, provider_native: bool = False) -> list[dict]:
     """校验OHLC、Decimal数值和时间边界，去重并去掉未来/过期K线。
 
     Args:
         rows: 原始K线/记录列表；字段契约由当前领域函数校验。
         now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
         interval: 精确K线周期名称，月线1M区别于分钟。
+        max_age_days: 保留窗口天数；公开历史采集可大于默认90天。
+        provider_native: 允许有明确交易所来源的原生小时K线采用当地盘中偏移。
 
     Returns:
         按时间排序的已收盘真实记录；冲突或非法数值抛出ValueError。
@@ -45,7 +47,7 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict
             raise ValueError('K线结束时间无效')
         if interval in MINUTES:
             step = MINUTES[interval]*60000
-            if row['close_time'] != row['open_time']+step-1 or (interval != '1w' and row['open_time'] % step):
+            if row['close_time'] != row['open_time']+step-1 or (interval != '1w' and row['open_time'] % step and not provider_native):
                 raise ValueError('K线周期与时间戳不匹配')
         # Never import a currently forming candle. Keep at most the last 90 days of supplied data.
         if row['close_time'] >= now_ms:
@@ -57,10 +59,12 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict
     ordered = sorted(clean.values(), key=lambda x:x['open_time'])
     if not ordered:
         raise ValueError('没有已收盘的真实行情')
-    cutoff = max(now_ms, ordered[-1]['close_time']) - 90*86400000
+    if not isinstance(max_age_days, int) or not 1 <= max_age_days <= 3650:
+        raise ValueError('行情保留范围必须在1到3650天之间')
+    cutoff = max(now_ms, ordered[-1]['close_time']) - max_age_days*86400000
     return [r for r in ordered if r['open_time'] >= cutoff]
 
-def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dict, now_ms: int | None = None):
+def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dict, now_ms: int | None = None, *, max_age_days: int = 90):
     """以资产周期事务锁写不可变Parquet并原子更新元数据指针。
 
     Args:
@@ -70,6 +74,7 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
         rows: 原始K线/记录列表；字段契约由当前领域函数校验。
         source: 已知来源元数据，或对齐函数中的源K线表。
         now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
+        max_age_days: 保留本地行情历史的天数，默认兼容原90日缓存策略。
 
     Returns:
         行数、SHA256和截止时间；拒绝用旧快照覆盖新数据。
@@ -77,7 +82,8 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
     if db.bind.dialect.name == 'postgresql':
         db.execute(text('SELECT pg_advisory_xact_lock(hashtext(:key))'), {'key':asset_id+interval})
-    rows = normalize(rows, now_ms, interval)
+    rows = normalize(rows, now_ms, interval, max_age_days=max_age_days,
+                     provider_native=source.get('timestamp_alignment') == 'exchange_session')
     if not rows:
         raise ValueError('行情已超出最近90天，请更新数据')
     metadata = db.scalar(select(MarketData).where(MarketData.asset_id==asset_id, MarketData.interval==interval))
@@ -107,6 +113,9 @@ def read_dataset(metadata: MarketData):
     Returns:
         记录列表；文件缺失或损坏立即拒绝读取。
     """
+    if metadata.path.endswith('.json'):
+        from app.storage.market_data_segments import read_underlying_segments
+        return read_underlying_segments(metadata)
     path = DATA_ROOT / metadata.path
     if path.parent != DATA_ROOT or not path.is_file():
         raise ValueError('历史数据文件不存在')

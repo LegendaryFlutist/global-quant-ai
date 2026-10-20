@@ -25,6 +25,15 @@ export default function AssetsPage({
   const productLabels: Record<string, string> = {
     spot: "现货", perpetual: "永续合约", future: "期货", reference: "指数 / 研究指标", other: "其他",
   };
+  const providerLabels: Record<string, string> = {
+    massive_stocks: "Massive 美股 / ETF",
+    twelve_data: "Twelve Data 韩国市场",
+    eia: "EIA 能源现货参考",
+  };
+  const providerStatusLabels: Record<string, string> = {
+    CONNECTED: "已验证连接", CONFIGURED_NOT_VALIDATED: "已配置待验证",
+    NEEDS_CONFIGURATION: "需本机配置", UNAVAILABLE: "上游暂不可用",
+  };
   const themes = [
     "全部",
     ...Array.from(new Set(assets.flatMap((a) => a.themes))).sort(),
@@ -116,8 +125,16 @@ export default function AssetsPage({
                     <small>
                       {a.datasets.length
                         ? `${a.datasets[0].rows} 根历史 K 线`
-                        : "未接入行情"}
+                        : a.series?.length
+                          ? `${a.series[0].rows} 个真实参考值`
+                          : "尚无本地行情"}
                     </small>
+                    {a.market_source && <small>
+                      底层源：{providerLabels[a.market_source.provider_id] ?? a.market_source.provider_id} · {providerStatusLabels[a.market_source.provider_status] ?? a.market_source.provider_status}
+                    </small>}
+                    {a.market_source && <small>
+                      {a.market_source.credential_configured ? "本机密钥已配置（值不展示）" : "需在本机私有配置中设置数据源密钥"}
+                    </small>}
                     <small>{date(a.verified_at, timezone)}</small>
                   </td>
                   <td>

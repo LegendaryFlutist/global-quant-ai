@@ -1,0 +1,31 @@
+{
+  "providers": {
+    "massive_stocks": {
+      "name": "Massive US Stocks",
+      "credential_env": "MASSIVE_API_KEY",
+      "data_kind": "candles",
+      "freshness": "plan-dependent: delayed or real-time",
+      "history": "daily and intraday OHLCV"
+    },
+    "twelve_data": {
+      "name": "Twelve Data Korea equities",
+      "credential_env": "TWELVE_DATA_API_KEY",
+      "data_kind": "candles",
+      "freshness": "XKRX end-of-day",
+      "history": "daily OHLCV"
+    },
+    "eia": {
+      "name": "US Energy Information Administration",
+      "credential_env": "EIA_API_KEY",
+      "data_kind": "observations",
+      "freshness": "daily published spot reference series",
+      "history": "daily values; not intraday OHLCV"
+    }
+  },
+  "assets": {
+    "krx:000660": {"provider_id": "twelve_data", "alias": "000660", "kind": "candles", "intervals": ["1d"], "mic_code": "XKRX", "timezone": "Asia/Seoul"},
+    "krx:005930": {"provider_id": "twelve_data", "alias": "005930", "kind": "candles", "intervals": ["1d"], "mic_code": "XKRX", "timezone": "Asia/Seoul"},
+    "eia:WTI_CUSHING_SPOT": {"provider_id": "eia", "alias": "RWTC", "kind": "observations", "metric": "spot_price", "unit": "USD/barrel", "route": "petroleum/pri/spt"},
+    "eia:HENRY_HUB_SPOT": {"provider_id": "eia", "alias": "RNGWHHD", "kind": "observations", "metric": "spot_price", "unit": "USD/MMBtu", "route": "natural-gas/pri/fut"}
+  }
+}

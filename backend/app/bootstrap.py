@@ -39,6 +39,8 @@ def main():
         db.commit()
         from app.services.startup_market_data import queue_missing_binance_archives
         queue_missing_binance_archives(db)
+        from app.services.startup_market_data import queue_missing_underlying_history
+        queue_missing_underlying_history(db)
         for symbol,*_ in PRIORITY:
             aid='binance_usdm:'+symbol
             kinds=['IMPORT_LOCAL','FETCH_HISTORY']

@@ -5,7 +5,7 @@ from typing import Sequence
 
 import duckdb
 
-_TIME_COLUMNS = {"open_time", "close_time", "funding_time", "mark_time"}
+_TIME_COLUMNS = {"open_time", "close_time", "funding_time", "mark_time", "observed_at_ms"}
 
 
 def _validated_files(paths: Sequence[str | Path]) -> list[Path]:

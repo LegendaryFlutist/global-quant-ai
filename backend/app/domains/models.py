@@ -83,6 +83,22 @@ class MarketData(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (UniqueConstraint('asset_id', 'interval'),)
 
+class MarketObservation(Base):
+    """Non-OHLC reference time series such as daily physical-energy spot prices."""
+    __tablename__ = 'market_observation_metadata'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey('assets.id'), index=True)
+    metric: Mapped[str] = mapped_column(String(60))
+    path: Mapped[str] = mapped_column(String(300))
+    row_count: Mapped[int] = mapped_column(Integer)
+    first_observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    last_observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    unit: Mapped[str] = mapped_column(String(40))
+    sha256: Mapped[str] = mapped_column(String(64))
+    source: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint('asset_id', 'metric'),)
+
 class Task(Base):
     __tablename__ = 'scheduled_tasks'
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

@@ -39,6 +39,14 @@ export default function JobsPage({
           </thead>
           <tbody>
             {jobs.map((j) => {
+              const taskLabels: Record<string, string> = {
+                FETCH_UNDERLYING_HISTORY: "采集底层原始行情",
+                FETCH_HISTORY: "采集Binance合约近期行情",
+                FETCH_ARCHIVE: "归档Binance合约三年数据",
+                FETCH_BINANCE_ARCHIVES: "批量归档Binance合约",
+                VERIFY_ASSETS: "核验Binance合约",
+                RUN_SIMULATION_BACKTEST: "模拟回测",
+              };
               const rawProgress = j.result.progress;
               const progress = rawProgress && typeof rawProgress === "object"
                 ? rawProgress as Record<string, unknown>
@@ -53,7 +61,7 @@ export default function JobsPage({
               return (
               <tr key={j.id}>
                 <td>
-                  {j.kind}
+                  {taskLabels[j.kind] ?? j.kind}
                   <small className="mono">{j.id.slice(0, 8)}</small>
                 </td>
                 <td>
@@ -69,6 +77,10 @@ export default function JobsPage({
                     ? String(j.result.error)
                     : j.result.verification_mode === "VERIFIED_LOCAL_SNAPSHOT"
                       ? `沿用已核验交易所快照；实时核验未成功：${String(j.result.warning ?? "Binance公开接口不可用")}`
+                    : j.kind === "FETCH_UNDERLYING_HISTORY" && j.result.kind === "observations"
+                      ? `${String(j.result.rows ?? 0)} 个日度参考值 · ${String(j.result.unit ?? "")}`
+                      : j.kind === "FETCH_UNDERLYING_HISTORY" && j.result.rows_fetched
+                        ? `${String(j.result.rows_fetched)} 根供应商原生K线 · ${String(j.result.source ?? "")}`
                     : j.result.rows
                       ? `${j.result.rows} 根真实 K 线${j.result.status ? ` · ${String(j.result.status)}` : ""}`
                       : j.kind === "FETCH_ARCHIVE"

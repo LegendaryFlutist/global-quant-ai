@@ -130,3 +130,72 @@ def read_cached_live_candle(
     ):
         return None
     return payload
+
+
+def _underlying_refresh_key(asset_id: str, interval: str) -> str:
+    """Return a bounded cache key for one registered underlying asset and interval.
+
+    Args:
+        asset_id: Namespaced source asset ID from the server asset registry.
+        interval: Native interval being refreshed.
+
+    Returns:
+        A Redis key scoped away from Binance perpetual snapshot keys.
+    """
+    if not isinstance(asset_id, str) or not re.fullmatch(r"[a-z0-9_-]+:[A-Z0-9_.-]{1,40}", asset_id):
+        raise ValueError("底层行情缓存资产ID无效")
+    if interval not in INTERVALS:
+        raise ValueError("底层行情缓存周期无效")
+    return f"market:underlying:refresh:{asset_id}:{interval}"
+
+
+def cache_underlying_refresh(asset_id, interval, payload, ttl_seconds, *, client=None):
+    """Store a provider's sanitized recent candle response for rate protection.
+
+    Args:
+        asset_id: Exact research asset ID registered on the server.
+        interval: Native period of the cached response.
+        payload: JSON-safe market data; it must contain matching product identity.
+        ttl_seconds: Provider-appropriate minimum poll interval in seconds.
+        client: Optional Redis-compatible client for tests.
+
+    Returns:
+        True when Redis accepted the cache entry; False during Redis outage.
+    """
+    key = _underlying_refresh_key(asset_id, interval)
+    if not isinstance(payload, dict) or payload.get("asset_id") != asset_id or payload.get("interval") != interval:
+        raise ValueError("底层行情缓存数据身份与键不匹配")
+    if not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= 86400:
+        raise ValueError("底层行情刷新缓存时限无效")
+    encoded = json.dumps(payload, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    try:
+        return bool((client or _redis_client()).set(key, encoded, ex=ttl_seconds))
+    except RedisError:
+        return False
+
+
+def read_cached_underlying_refresh(asset_id, interval, *, client=None):
+    """Read a sanitized recent underlying result while its provider TTL is active.
+
+    Args:
+        asset_id: Exact research asset ID registered on the server.
+        interval: Native interval of the cached response.
+        client: Optional Redis-compatible client for tests.
+
+    Returns:
+        Cached response or None when missing, expired, invalid, or Redis is offline.
+    """
+    key = _underlying_refresh_key(asset_id, interval)
+    try:
+        encoded = (client or _redis_client()).get(key)
+    except RedisError:
+        return None
+    if encoded is None:
+        return None
+    try:
+        payload = json.loads(encoded)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("asset_id") != asset_id or payload.get("interval") != interval:
+        return None
+    return payload

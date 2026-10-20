@@ -1,12 +1,15 @@
 """Idempotent startup reconciliation for missing verified Binance archives."""
 
 from datetime import datetime, timedelta, timezone
+import os
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.domains.models import Asset, Task
 from app.services.long_history import archive_manifest
+from app.domains.models import MarketData, MarketObservation
+from app.services.underlying_market import _source_for_asset, HISTORY_DAYS
 
 COMPLETE_ARCHIVE_STATUSES = {"THREE_YEARS", "LISTING_SHORTER_THAN_THREE_YEARS"}
 ACTIVE_TASK_STATUSES = {"QUEUED", "RUNNING", "RETRYING", "QUEUE_ERROR"}
@@ -93,3 +96,70 @@ def queue_missing_binance_archives(db: Session, *, enqueue_task=None, manifest_r
         "startup_reconcile": True,
     })
     return {"status": task.status, "asset_count": len(assets), "queued_asset_count": len(to_queue), "task_id": task.id}
+
+
+def queue_missing_underlying_history(db: Session, *, enqueue_task=None, now=None) -> dict:
+    """Queue configured source-native history gaps without exposing credentials.
+
+    Args:
+        db: Application SQLAlchemy session after migrations and asset registration.
+        enqueue_task: Optional queue publisher for deterministic startup tests.
+        now: Optional timezone-aware clock used for failure-cooldown decisions.
+
+    Returns:
+        Provider-independent queued counts; no task is created for an unconfigured key.
+
+    Notes:
+        A configured key is evidence that the local operator enabled that provider,
+        but successful upstream access is only recorded after a real job succeeds.
+    """
+    if enqueue_task is None:
+        from app.services.jobs import enqueue as enqueue_task
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    assets = list(db.scalars(select(Asset).where(Asset.venue != "BINANCE_USDM").order_by(Asset.priority, Asset.symbol)))
+    active_or_recent = list(db.scalars(select(Task).where(
+        Task.kind == "FETCH_UNDERLYING_HISTORY",
+        Task.status.in_(["QUEUED", "RUNNING", "RETRYING", "FAILED", "QUEUE_ERROR"]),
+    )))
+    pending = {(task.parameters.get("asset_id"), task.parameters.get("interval")) for task in active_or_recent
+               if task.status in {"QUEUED", "RUNNING", "RETRYING"}}
+    cooldown = now_utc - timedelta(hours=6)
+    recent_failures = {(task.parameters.get("asset_id"), task.parameters.get("interval")) for task in active_or_recent
+                       if task.status in {"FAILED", "QUEUE_ERROR"} and _as_utc(task.updated_at) >= cooldown}
+    candidates = []
+    for asset in assets:
+        try:
+            source = _source_for_asset(asset)
+        except ValueError:
+            continue
+        credential_names = {"massive_stocks":"MASSIVE_API_KEY", "twelve_data":"TWELVE_DATA_API_KEY", "eia":"EIA_API_KEY"}
+        if not os.environ.get(credential_names[source["provider_id"]], "").strip():
+            continue
+        if source["kind"] == "observations":
+            configured_intervals = ["1d"]
+            metric_exists = db.scalar(select(MarketObservation.id).where(
+                MarketObservation.asset_id == asset.id,
+                MarketObservation.metric == source["metric"],
+            )) is not None
+            missing_intervals = [] if metric_exists else configured_intervals
+        else:
+            configured_intervals = source.get("intervals", [])
+            existing = set(db.scalars(select(MarketData.interval).where(MarketData.asset_id == asset.id)))
+            missing_intervals = [interval for interval in configured_intervals if interval not in existing]
+        for interval in missing_intervals:
+            key = (asset.id, interval)
+            if key not in pending and key not in recent_failures:
+                candidates.append(key)
+    created = []
+    for asset_id, interval in candidates:
+        task = enqueue_task(db, "FETCH_UNDERLYING_HISTORY", {
+            "asset_id": asset_id, "interval": interval, "days": HISTORY_DAYS,
+            "startup_reconcile": True,
+        })
+        created.append(task)
+    return {
+        "status": "QUEUED" if created else "NO_CONFIGURED_GAPS",
+        "queued_count": len(created),
+        "task_ids": [task.id for task in created],
+        "provider_key_values_exposed": False,
+    }

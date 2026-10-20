@@ -63,7 +63,8 @@ export default function App() {
           interval: job.parameters.interval,
         });
       } else {
-        await post("/tasks", { kind: job.kind, ...job.parameters });
+        const { startup_reconcile: _startupReconcile, ...parameters } = job.parameters;
+        await post("/tasks", { kind: job.kind, ...parameters });
       }
       setNotice("已重新入队");
       await data.refresh();
