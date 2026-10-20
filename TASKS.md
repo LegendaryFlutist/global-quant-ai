@@ -137,4 +137,4 @@
 - [x] 验证：`bash scripts/platform.sh test`：66 passed，1条既有Starlette/httpx弃用提示；`cd frontend && npm test && npm run build`：1 passed，TypeScript与Vite生产构建通过；`python3 scripts/check_docs.py`：598个具名Python函数通过；`python3 -m compileall -q backend/app backend/tests`和`git diff --check`通过。模拟故障测试确认失败续跑时跳过已完成标的。
 - [x] Docker：`bash scripts/platform.sh up`成功重建API、Web与NGC runner；API、Web、PostgreSQL、Redis健康，worker与runner运行；未重置数据库卷或触碰原lab服务。健康接口返回`status=ok,database=connected,redis=true`。只读DB检查仍为13个已核验USDM合约、13份15m近期缓存、112,307根近期K线；长期归档manifest仍为0，因为功能是点击触发，本轮未自动发起请求。
 - [ ] Binance实际采集待用户在图表页点击批量按钮后确认；现有网络状态记录为容器DNS/代理HTTP 451阻断，接口失败会显示在任务页，已有数据不会被覆盖。需要配置可从Docker网段访问并允许`fapi.binance.com:443`的代理后再运行批量任务。
-- [ ] 覆盖仍限已核验13个Binance永续；其它67项需未来单独选择数据供应商。实现提交`1d92274`已推送，远端分支HEAD与本地匹配；GitHub Actions状态未核验。
+- [ ] 覆盖仍限已核验13个Binance永续；其它67项需未来单独选择数据供应商。实现提交`1d92274`已推送；GitHub Actions状态未核验。
