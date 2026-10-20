@@ -305,4 +305,5 @@ bash scripts/platform.sh status
 - 语义约束：`KORUUSDT`/`SKHYNIXUSDT`/`NVDAUSDT`/`CLUSDT`底层关系仅作为独立研究序列，不替代永续成交价、标记价、保证金或资金费；不跨市场休市前向填充，不绕过地域/供应商限制。
 - 验证（2026-10-20，文档单元）：`git diff --check`通过；`python3 scripts/check_publish.py --staged`通过（扫描247个文件，未发现禁止路径或凭据模式）。本轮仅改文档/任务规划，没有改Python/TypeScript代码，所以未运行应用测试、未重建Docker、未新增行情数据。
 - 未解决：选定具有适当行情授权的供应商，之后实现US证券、KRX证券、EIA日频参考及/或NYMEX期货的只读适配器与WebSocket消费者；把供应商代码/时区/日历/币种映射到独立产品ID并进行后端隔离测试。项目Binance USDⓈ-M REST仍对当前Clash出口返回HTTP 451，相关合约三年历史归档依旧缺失。
-- 恢复：`bash scripts/resume.sh`；查看`docs/platform/underlying-market-data.md`和`TASKS.md`；Git检查`git status --short --branch && git log -5 --oneline`；当前分支`feature/phase2-market-structure`。本轮提交由下方checkpoint建立；`.local/`保持既有未跟踪状态。
+- Git：来源映射文档提交`5eead8b docs: map native underlying market data sources`已在本地功能分支创建；尚未推送到GitHub。本轮更改不含行情数据或供应商密钥。`.local/`保持既有未跟踪状态。
+- 恢复：`bash scripts/resume.sh`；查看`docs/platform/underlying-market-data.md`和`TASKS.md`；Git检查`git status --short --branch && git log -5 --oneline`；当前分支`feature/phase2-market-structure`。
