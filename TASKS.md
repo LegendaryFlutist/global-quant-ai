@@ -146,4 +146,5 @@
 - [x] API启动时对13个已核验Binance永续检查三年15m归档，仅缺失/不完整时排队；跳过完整数据及活动任务，对近期公开连接/HTTP失败有15分钟冷却，代理配置修复可触发新尝试；网络请求由worker执行，不阻塞启动。
 - [x] Compose把宿主机HTTP(S)代理环境转发给API/worker；SOCKS依赖已固定到镜像，系统级`ALL_PROXY`需显式配置才转发。本机测试确认宿主机代理返回HTTP 451，API容器无法访问宿主机loopback代理，因此实时请求仍需Docker可达的代理地址。
 - [x] 验证：`bash scripts/platform.sh test`为69 passed、1条既有Starlette/httpx弃用警告；`cd frontend && npm test && npm run build`为1 passed且构建成功；`python3 scripts/check_docs.py`为608个具名Python函数通过；`py_compile`及`git diff --check`通过。Docker重建后API/数据库/Redis健康，首页HTTP 200；启动自动建立覆盖13个合约的批任务，worker因代理不可达重试三次后失败，没有新增三年数据。
+- [x] GitHub：实现提交`5d3b6a9`已推送到PR #11；Actions run #53的frontend、backend、publish-hygiene、risk-engine均成功。
 - [ ] 网络管理员/用户需配置Docker可达且允许`fapi.binance.com:443`的代理，之后查看任务页的自动归档及实时状态；451拒绝期间数据不会伪造，也不会被缓存误报为实时。

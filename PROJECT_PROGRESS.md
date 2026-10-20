@@ -240,7 +240,7 @@ bash scripts/platform.sh status
 - 已验证（2026-10-20）：`bash scripts/platform.sh test`为69 passed、1条既有Starlette TestClient/httpx弃用警告；覆盖指标设置缺省/持久化/范围检查/认证CSRF、启动归档任务创建/去重及修复代理依赖后可重试。`cd frontend && npm test && npm run build`为1 passed，TypeScript/Vite生产构建成功。`python3 scripts/check_docs.py`为608个Python具名函数通过；相关模块`py_compile`和`git diff --check`通过。
 - Docker：`bash scripts/platform.sh up`成功重建并启动API/Web/worker/NVIDIA runner；API健康端点报告数据库、Redis connected，Web首页HTTP 200，原lab和PostgreSQL数据卷仍运行。启动自动创建一条13合约`FETCH_BINANCE_ARCHIVES`任务，worker三次尝试后状态为`FAILED`，错误为“代理连接失败或目标不可达”；历史15m缓存仍为13份、112,307根，三年manifest仍为0，未覆盖现有数据。宿主机公开请求之前返回HTTP 451；宿主代理绑定loopback，不能被Docker容器直连。
 - 未解决：当前不能取得实时K线或三年历史。需将代理服务绑定到Docker可达的地址并限制Docker网段，配置私有`.runtime/platform.env`中的`PLATFORM_HTTPS_PROXY`（SOCKS时使用显式`PLATFORM_ALL_PROXY`），并由网络侧允许`fapi.binance.com:443`，然后重启服务让启动补档重试。451/连接失败期间系统保留旧缓存并显示错误，不伪造报价。
-- Git状态：本开发单元的代码、验证结果与交接文件随当前检查点提交；`.local/`是既存用户目录，保持未跟踪，不纳入提交。GitHub PR #11分支此前已推送，本单元的新提交需在检查点后推送并核验CI状态。
+- Git状态：实现提交`5d3b6a9 feat: simplify chart indicators and auto-backfill archives`已推送到`origin/feature/phase2-market-structure`及PR #11；GitHub Actions CI run #53通过（frontend、backend、publish-hygiene、risk-engine）。`.local/`是既存用户目录，保持未跟踪，不纳入提交。
 - 下一阶段：打开多周期行情页验收默认布局与指标偏好保存；配置可达Binance的Docker代理后，观察自动补档进度并核验真实最新K线。恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && bash scripts/platform.sh status`；测试`bash scripts/platform.sh test && (cd frontend && npm test && npm run build)`；文档`python3 scripts/check_docs.py`；部署`bash scripts/platform.sh up`；Git`git status --short --branch && git log -5 --oneline`。
 
 ## 当前开发单元（2026-10-20）：Binance永续批量三年归档
