@@ -296,3 +296,13 @@ bash scripts/platform.sh status
 - 未解决：需要在Clash中选择/配置一个实际允许访问`fapi.binance.com:443`的出口节点或由网络侧解决451；确定可用节点前不重试大批历史下载，避免连续失败。通过该节点验证公开时间接口HTTP 200后，重试页面实时行情和三年归档任务。
 - Git：实现提交`d58064a fix: route platform market data through Clash proxy bridge`已推送到`feature/phase2-market-structure`，远端SHA核验与本地匹配；GitHub Actions状态未核验。此前的`c602b23`代理清除变更仍保留在历史中，由本提交恢复实际代理访问，不重写已推送历史。私有`.runtime/platform.env`仅在本机更新，未纳入Git；`.local/`保持未跟踪。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；服务`bash scripts/platform.sh status`；健康`curl -fsS http://127.0.0.1:8080/api/health`；回归`bash scripts/platform.sh test`；部署`bash scripts/platform.sh up`。
+
+
+## 当前开发单元（2026-10-20）：传统资产底层行情源评估
+
+- 用户将传统资产研究扩展到底层证券/商品行情，以降低研究层对 Binance REST 可用性的依赖。已评估 KORU ETF、SK海力士（KRX 000660）、NVDA、WTI 与天然气数据源；映射、供应商候选、实时/日频边界及来源链接见`docs/platform/underlying-market-data.md`，架构总览同步标为PLANNED。
+- 来源结论：美国股票/ETF可选 Massive 实时 WebSocket 或有限额的 Twelve Data；Massive 个人实时股票/NYMEX期货候选各约$199/月，费用和许可须在购买前复核。Twelve Data 交易所目录中 XKRX 当前为EOD；SK海力士实时数据需核实 KRX/KOSCOM 或获许可的韩国券商 feed。EIA 的 WTI Cushing 和 Henry Hub 是日频现货参考，不能提供真实5秒现货K线；日内观察需另用明确标注的 NYMEX CL/NG 期货数据。用户还未选择供应商或天然气枢纽，故本轮没有编写适配器、请求密钥、订阅付费数据或新增行情。
+- 语义约束：`KORUUSDT`/`SKHYNIXUSDT`/`NVDAUSDT`/`CLUSDT`底层关系仅作为独立研究序列，不替代永续成交价、标记价、保证金或资金费；不跨市场休市前向填充，不绕过地域/供应商限制。
+- 验证（2026-10-20，文档单元）：`git diff --check`通过；`python3 scripts/check_publish.py --staged`通过（扫描247个文件，未发现禁止路径或凭据模式）。本轮仅改文档/任务规划，没有改Python/TypeScript代码，所以未运行应用测试、未重建Docker、未新增行情数据。
+- 未解决：选定具有适当行情授权的供应商，之后实现US证券、KRX证券、EIA日频参考及/或NYMEX期货的只读适配器与WebSocket消费者；把供应商代码/时区/日历/币种映射到独立产品ID并进行后端隔离测试。项目Binance USDⓈ-M REST仍对当前Clash出口返回HTTP 451，相关合约三年历史归档依旧缺失。
+- 恢复：`bash scripts/resume.sh`；查看`docs/platform/underlying-market-data.md`和`TASKS.md`；Git检查`git status --short --branch && git log -5 --oneline`；当前分支`feature/phase2-market-structure`。本轮提交由下方checkpoint建立；`.local/`保持既有未跟踪状态。
