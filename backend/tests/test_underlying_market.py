@@ -18,7 +18,8 @@ from app.services.underlying_market import (
     validate_underlying_request,
 )
 from app.adapters.underlying_public import (
-    SinaChinaIndicesPublic, TencentChinaIndicesPublic, UnderlyingDataError,
+    MassiveStocksPublic, ProviderRateLimitError, SinaChinaIndicesPublic,
+    TencentChinaIndicesPublic, UnderlyingDataError,
 )
 
 
@@ -108,6 +109,9 @@ def test_underlying_registry_keeps_source_and_perpetual_products_separate(logged
     """
     assets = {asset["id"]: asset for asset in logged_in.get("/api/assets").json()}
     assert assets["us:NVDA"]["market_source"]["provider_id"] == "massive_stocks"
+    pacing = assets["us:NVDA"]["market_source"]["request_pacing"]
+    assert pacing["max_requests_per_minute"] == 5
+    assert pacing["safe_spacing_seconds"] == 16
     assert assets["us:KORU"]["market_source"]["kind"] == "candles"
     assert assets["krx:000660"]["market_source"]["intervals"] == ["1d"]
     assert assets["eia:WTI_CUSHING_SPOT"]["market_source"]["kind"] == "observations"
@@ -319,12 +323,83 @@ def test_public_index_source_falls_back_after_primary_failure(monkeypatch):
         "alias": "sh000001", "kind": "candles", "intervals": ["1d"],
     }
     now_ms = int(datetime(2026, 10, 20, 12, tzinfo=timezone.utc).timestamp() * 1000)
-    closed, live, selected = _fetch_candle_source(
+    closed, live, selected, wait_seconds = _fetch_candle_source(
         source, "1d", "2026-10-01", "2026-10-20", now_ms, _UnavailableIndexBars(),
     )
     assert selected == "tencent_cn_public"
     assert closed[0]["close"] == Decimal("3830")
     assert live is None
+    assert wait_seconds == 0
+
+
+def test_massive_queue_serializes_account_requests_and_applies_429_cooldown():
+    """Use the isolated Redis test service to check account-wide reservation timing.
+
+    Returns:
+        None; requests are spaced by policy and a 429 cooldown overrides pending slots.
+    """
+    from app.core.config import REDIS_URL
+    from app.storage.provider_rate_limit import defer_provider_after_limit, reserve_provider_slot
+    from redis import Redis
+
+    now_ms = 2_000_000_000_000
+    client = Redis.from_url(REDIS_URL, decode_responses=True)
+    slot_key = "market:provider-quota:massive_stocks:next-slot"
+    blocked_key = "market:provider-quota:massive_stocks:blocked-until"
+    try:
+        assert reserve_provider_slot("massive_stocks", now_ms=now_ms, client=client) == 0
+        assert reserve_provider_slot("massive_stocks", now_ms=now_ms, client=client) == 16_000
+        assert defer_provider_after_limit(
+            "massive_stocks", 5, now_ms=now_ms, client=client,
+        ) == now_ms + 60_000
+        assert reserve_provider_slot("massive_stocks", now_ms=now_ms, client=client) == 60_000
+    finally:
+        client.delete(slot_key, blocked_key)
+        client.close()
+
+
+def test_massive_dispatch_slot_holds_shared_lock_through_request():
+    """Ensure consecutive dispatch contexts cannot overlap or skip the gap.
+
+    Returns:
+        None; the second mocked dispatch waits at least the configured test gap.
+    """
+    from app.core.config import REDIS_URL
+    from app.storage.provider_rate_limit import provider_request_slot
+    from redis import Redis
+
+    client = Redis.from_url(REDIS_URL, decode_responses=True)
+    slot_key = "market:provider-quota:massive_stocks:next-slot"
+    blocked_key = "market:provider-quota:massive_stocks:blocked-until"
+    try:
+        with provider_request_slot("massive_stocks", 1, client=client) as first_wait:
+            assert first_wait < 0.25
+        with provider_request_slot("massive_stocks", 1, client=client) as second_wait:
+            assert second_wait >= 0.9
+    finally:
+        client.delete(slot_key, blocked_key)
+        client.close()
+
+
+def test_massive_429_uses_retry_after_without_exposing_credentials():
+    """Keep 429 backoff metadata while sanitizing errors containing a private key.
+
+    Returns:
+        None; Retry-After remains available internally and secret text stays hidden.
+    """
+    adapter = MassiveStocksPublic(
+        api_key="mock-test-token",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                429, headers={"Retry-After": "75"}, request=request,
+            )
+        ),
+    )
+    with pytest.raises(ProviderRateLimitError) as error:
+        adapter.aggregates("NVDA", "15m", "2026-10-01", "2026-10-02")
+    assert error.value.retry_after_seconds == 75
+    assert "mock-test-token" not in str(error.value)
+    assert "apiKey" not in str(error.value)
 
 
 def test_startup_queues_no_key_china_indices_and_configured_key_sources(monkeypatch):

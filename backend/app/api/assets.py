@@ -78,6 +78,7 @@ def asset_dict(db,asset):
         'provider_status':provider.status if provider else 'UNKNOWN',
         'credential_configured':bool((provider.detail or {}).get('credential_configured')) if provider else False,
         'credential_required':bool((provider.detail or {}).get('credential_required', True)) if provider else True,
+        'request_pacing':(provider.detail or {}).get('request_pacing') if provider else None,
         'freshness':binding.get('freshness') or ((provider.detail or {}).get('freshness_contract') if provider else None),
         'latest_data_at_ms':max((item.last_close_ms for item in data),default=max((item.last_observed_at_ms for item in observations),default=None)),
     } if binding else None

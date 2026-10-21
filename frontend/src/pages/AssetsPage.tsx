@@ -149,6 +149,9 @@ export default function AssetsPage({
                         : "无需配置密钥；公开源可能延迟或受访问限制"}
                     </small>}
                     {a.market_source?.freshness && <small>{a.market_source.freshness}</small>}
+                    {a.market_source?.request_pacing && <small>
+                      {`同一账户的股票类 Key 共用 ${a.market_source.request_pacing.max_requests_per_minute} 次/分钟额度；本系统每 ${a.market_source.request_pacing.safe_spacing_seconds} 秒排队一次，429 后冷却 ${a.market_source.request_pacing.cooldown_on_429_seconds} 秒。`}
+                    </small>}
                     <small>{date(a.verified_at, timezone)}</small>
                   </td>
                   <td>

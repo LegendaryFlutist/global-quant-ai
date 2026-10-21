@@ -43,7 +43,7 @@ flowchart TB
 | API | Python 3.11 / FastAPI / Pydantic | 同源 REST；未来需要时添加 WebSocket，不将轮询声称为 WebSocket |
 | ORM / 迁移 | SQLAlchemy 2.1 / Alembic | 业务与迁移分离，首版迁移冻结表定义 |
 | 数据库 | PostgreSQL 15 | 持久业务、外键、事务；未来账本 NUMERIC(38,18) |
-| 任务 | Redis 6 + RQ 2 | 承载任务队列、认证限流及20秒实时K线快照缓存；AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
+| 任务 | Redis 6 + RQ 2 | 承载任务队列、认证限流、20秒实时K线快照缓存及Massive Stocks账户级共享限流；AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
 | 分析查询 | DuckDB 1.5.6（Python 3.11，ARM64/x86_64） | 进程内只读 SQL 查询已校验的 Parquet 文件；每个请求独立内存连接，不引入第二份可变数据库 |
 | 历史数据 | Arrow Decimal128 + Parquet/Zstd | 不可变文件 + SHA256 + PostgreSQL 元数据指针；数据库不存大批重复 OHLC |
 | 实时缓存 | Redis TTL键 | Binance短TTL快照与底层供应商请求节流缓存；5秒页面刷新读取源数据状态，但供应商实际更新频率仍由市场时段、订阅延迟与限额决定。Redis可丢弃，不是历史事实来源 |
@@ -61,9 +61,9 @@ flowchart TB
 - `backend/app/adapters/public_binance.py` 仅读取已核验永续；`underlying_public.py` 提供Massive美股/ETF、Twelve Data XKRX日线、EIA每日WTI/Henry Hub标量参考，以及中国指数的新浪公开日线与腾讯备用日线。后两者免密钥但属于未经服务承诺的公开页面接口，可能延迟、限流或变更；真实源时间戳和失败状态必须保留。
 - `backend/app/services/ingestion.py`、`long_history.py`与`underlying_market.py`负责清洗、原生周期校验、任务恢复和写入编排；源头证券K线与相关永续不混用。能源现货只存标量观察值，禁止伪造OHLC；不补造缺失报价、不向下插值。
 - `backend/app/storage/` 统一文件读写契约。`storage/parquet_files.py`负责流式SHA256、同目录临时文件、fsync与不可变/内容寻址Parquet发布，并原子更新小型manifest；`storage/duckdb_query.py`只读取调用方已校验且明确列出的Parquet分段，时间字段白名单化、文件名用SQL参数传递、Decimal128通过Arrow往返。
-- Parquet是行情/模型输入的规范事实存储；PostgreSQL保存资产/供应商/任务/策略配置和文件哈希指针；Redis当前承载任务队列、认证限流和20秒实时行情快照。Redis失效时实时刷新仍可回退到本地带哈希快照。DuckDB不是独立服务，也不另建共享可变`.duckdb`文件，避免多个API/worker进程竞争写入。
+- Parquet是行情/模型输入的规范事实存储；PostgreSQL保存资产/供应商/任务/策略配置和文件哈希指针；Redis当前承载任务队列、认证限流、20秒实时行情快照，以及Massive Stocks的API与后台worker共享账户级限流队列。该队列每16秒最多安排一个上游请求，HTTP 429时统一冷却至少60秒并遵从更长的`Retry-After`；同一账户多个API Key仍共享供应商配额。Redis失效时Massive请求安全暂停，其他行情缓存仍按自身策略读取本地带哈希快照。DuckDB不是独立服务，也不另建共享可变`.duckdb`文件，避免多个API/worker进程竞争写入。
 - 回测交易、净值和完整模型产物保存在带来源/配置/代码SHA256的不可变本地Parquet文件；PostgreSQL仅保留所有者、任务状态与结果索引。技术指标和结构特征应先按确定版本从输入行情计算，保存时须带定义版本、`as_of`、`known_at`和源哈希。
-- US/KRX/CN底层K线写入`DATA_ROOT/underlying_history/<asset-hash>/<interval>/`不可变分段及内容哈希manifest；新闭合K线只追加新段，已知数据修订时发布新manifest。EIA价格点存独立Parquet和Alembic 0003元数据表。实时刷新缓存按供应商节流：Massive约30秒、XKRX日线约6小时、中国公开指数源约60秒；页面轮询不会变成无上限上游请求。
+- US/KRX/CN底层K线写入`DATA_ROOT/underlying_history/<asset-hash>/<interval>/`不可变分段及内容哈希manifest；新闭合K线只追加新段，已知数据修订时发布新manifest。EIA价格点存独立Parquet和Alembic 0003元数据表。实时刷新缓存按供应商节流：Massive同一标的约30秒、全局账户/Stocks队列16秒、429后至少60秒；XKRX日线约6小时、中国公开指数源约60秒。页面轮询不会变成无上限上游请求。
 
 ### 接入覆盖范围
 

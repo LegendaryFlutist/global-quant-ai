@@ -4,8 +4,15 @@
       "name": "Massive US Stocks",
       "credential_env": "MASSIVE_API_KEY",
       "data_kind": "candles",
-      "freshness": "plan-dependent: delayed or real-time",
-      "history": "daily and intraday OHLCV"
+      "freshness": "Basic免费档仅EOD；实时行情需对应付费权限及交易所协议",
+      "history": "Basic最多两年EOD聚合；盘中/实时权限取决于Stocks订阅计划",
+      "request_pacing": {
+        "max_requests_per_minute": 5,
+        "safe_spacing_seconds": 16,
+        "cooldown_on_429_seconds": 60,
+        "quota_scope": "account_per_asset_class",
+        "note": "Keys on one account share subscriptions and limits; this service serializes requests with margin."
+      }
     },
     "twelve_data": {
       "name": "Twelve Data Korea equities",

@@ -24,6 +24,7 @@ export interface Asset {
     provider_id: string; kind: "candles" | "observations"; intervals: string[];
     provider_status: string; credential_configured: boolean; credential_required: boolean;
     fallback_provider_ids?: string[]; freshness?: string | null; latest_data_at_ms: number | null;
+    request_pacing?: { max_requests_per_minute: number; safe_spacing_seconds: number; cooldown_on_429_seconds: number; quota_scope: string; note: string } | null;
   } | null;
   specification: Record<string, unknown>;
   live_tradable: boolean;
@@ -102,6 +103,7 @@ export interface LiveMarketResult {
   dataset_sha256?: string;
   live_snapshot_sha256?: string | null;
   source?: string;
+  request_queue_wait_seconds?: number;
   research_only: boolean;
   stale: boolean;
   refresh_error?: string;

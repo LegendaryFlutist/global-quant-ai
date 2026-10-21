@@ -1,13 +1,55 @@
 """GET-only adapters for public, non-Binance underlying market data."""
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import ceil
 
 import httpx
 
 
 class UnderlyingDataError(RuntimeError):
     """A sanitized provider failure that never includes credentials or URLs."""
+
+
+class ProviderRateLimitError(UnderlyingDataError):
+    """Sanitized HTTP 429 with a bounded retry delay for shared backoff."""
+
+    def __init__(self, retry_after_seconds=60):
+        """Create a rate-limit error without retaining provider response content.
+
+        Args:
+            retry_after_seconds: Bounded seconds from the HTTP Retry-After header.
+        """
+        self.retry_after_seconds = max(1, min(int(retry_after_seconds), 3600))
+        super().__init__("Massive公开接口触发速率限制（HTTP 429）")
+
+
+def _retry_after_seconds(value):
+    """Parse a standard Retry-After value into a safe 1–3600 second delay.
+
+    Args:
+        value: Provider response header text; it is never copied to public errors.
+
+    Returns:
+        A bounded integer delay, defaulting to 60 seconds when absent or invalid.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return 60
+    candidate = value.strip()
+    try:
+        seconds = float(candidate)
+        if seconds == seconds and seconds not in (float("inf"), float("-inf")):
+            return max(1, min(ceil(seconds), 3600))
+    except ValueError:
+        pass
+    try:
+        deadline = parsedate_to_datetime(candidate)
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return max(1, min(ceil((deadline - datetime.now(timezone.utc)).total_seconds()), 3600))
+    except (TypeError, ValueError, OverflowError):
+        return 60
 
 
 class MassiveStocksPublic:
@@ -73,6 +115,8 @@ class MassiveStocksPublic:
         try:
             with httpx.Client(timeout=25, follow_redirects=False, transport=self._transport) as client:
                 response = client.get(self.base_url + path, params=params)
+            if response.status_code == 429:
+                raise ProviderRateLimitError(_retry_after_seconds(response.headers.get("Retry-After")))
             if response.status_code != 200:
                 raise UnderlyingDataError(f"{provider}公开接口HTTP {response.status_code}")
             body = response.json()

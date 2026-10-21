@@ -334,3 +334,14 @@ bash scripts/platform.sh status
 - Git/发布：实现提交`61f1177 feat: add original underlying market data pipeline`已推送到`origin/feature/phase2-market-structure`；`git ls-remote`确认远端ref=`61f1177940fbb2664ed50a0ab4fce38b6b08240d`。GitHub Actions CI run #66（SHA `61f1177`）已完成并success。`.local/`是既有未跟踪用户目录，保留且不纳入提交；未读取/改动`.runtime`凭据或既有行情/回测产物。
 - 下一步：用户在私有`.runtime/platform.env`自行配置供应商密钥并确认许可后，重启`bash scripts/platform.sh up`，再从全球资产注册表查看待采集/已缓存的原始标的。持续实时需求另实施带许可校验的WebSocket/KRX/期货合约任务。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；本机服务`bash scripts/platform.sh status`；健康`curl -fsS http://127.0.0.1:8080/api/health`；后端测试`bash scripts/platform.sh test`；前端`cd frontend && npm test && npm run build`；重建启动`bash scripts/platform.sh up`。
+
+## 2026-10-21：Massive 多 Key 共用配额与请求排队
+
+- 官方规则已核对：同一 Massive 账户下的所有 API Key 共用订阅与请求限额；Basic 免费档每个资产类别每分钟5次，并仅提供EOD聚合，最多两年历史，实时数据需对应付费权限和交易所协议。新增 Key 只能分开集成，不能扩容。
+- 已实现：Massive Stocks 的 API 与后台 worker 使用同一个 Redis 分布式分发锁；每次请求至少间隔16秒（留出余量，最多约4次/分钟），同标的图表仍遵守原有30秒缓存。429响应解析数字或HTTP日期格式`Retry-After`，共享队列至少冷却60秒并遵从更长的服务端要求；额度等待时长回传图表，资产页展示限额和冷却。Redis不可用时停止上游请求，不使用多Key轮换。其他集成消耗的账户额度不在本项目队列内，仍可能导致429。
+- 验证（2026-10-21）：`bash scripts/platform.sh test`为90 passed，1条既有Starlette TestClient/httpx弃用警告；`cd frontend && npm test && npm run build`为3 passed、TypeScript及Vite构建成功；`python3 scripts/check_docs.py`为722个具名函数有文档；相关模块`py_compile`、配置JSON解析及`git diff --check`通过。测试未向Massive发请求。
+- 运行验证：`bash scripts/platform.sh up`完成API、Web与研究镜像重建；API health为`status=ok,database=connected,redis=true`，首页HTTP 200；PostgreSQL、Redis、worker、API、Web、研究runner健康/运行，既有`lab`容器保持运行。没有重置数据库卷或研究数据。
+- 当前问题/限制：配额队列只覆盖本项目经Massive Stocks适配器发出的请求；同账户其他应用或其他主机仍共用配额并可能造成429。免费Basic的EOD权限不等于实时行情，排队只能控制请求频率，不能提高数据权限或历史覆盖年限。此轮未做真实上游请求，避免额外消耗免费额度。
+- Git：本轮待checkpoint提交后补记提交、远程推送和GitHub Actions状态。
+- 下一步：确认项目外没有其它程序同时高频使用同一Massive账户；在额度允许时由页面触发一次小窗口请求，检查真实返回频率/计划权限及图表显示的排队等待。若账户仍429，应等待冷却并检查官方Usage/Plan，不新增同账户Key。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；测试`bash scripts/platform.sh test && (cd frontend && npm test && npm run build) && python3 scripts/check_docs.py`；重建`bash scripts/platform.sh up`；健康检查`curl -fsS http://127.0.0.1:8080/api/health`。

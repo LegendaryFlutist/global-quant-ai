@@ -379,6 +379,7 @@ export default function ChartPage({
             {!canRefresh ? "等待本地K线" : live?.stale ? "数据源连接中断" : live ? isUnderlyingCandle ? "底层源已连接" : "Binance行情已连接" : "正在连接行情"}
           </span>
           <span>{live?.updated_at_ms ? `${live.source ?? "Binance"} · 页面5秒刷新；${live.source_freshness ?? "本地公开行情刷新"} · 最近拉取 ${date(live.updated_at_ms, timezone)}` : "当前周期每5秒检查本地更新；数据源按其授权/频率限制请求"}</span>
+          {live?.request_queue_wait_seconds ? <span>{`Massive 配额队列等待 ${Math.ceil(live.request_queue_wait_seconds)} 秒`}</span> : null}
           {live?.refresh_error && <span className="error">{live.refresh_error}</span>}
         </div>}
         {loading ? (

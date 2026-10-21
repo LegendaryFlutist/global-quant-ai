@@ -9,8 +9,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 
 from app.adapters.underlying_public import (
-    EIAOpenDataPublic, MassiveStocksPublic, SinaChinaIndicesPublic,
-    TencentChinaIndicesPublic, TwelveDataPublic, UnderlyingDataError,
+    EIAOpenDataPublic, MassiveStocksPublic, ProviderRateLimitError,
+    SinaChinaIndicesPublic, TencentChinaIndicesPublic, TwelveDataPublic,
+    UnderlyingDataError,
 )
 from app.adapters.public_binance import INTERVALS
 from app.domains.models import Asset, MarketData, MarketObservation, Provider, utcnow
@@ -18,6 +19,9 @@ from app.services.market_data import FIELDS, read_dataset
 from app.storage.market_observations import read_observations, store_observations
 from app.storage.market_data_segments import save_underlying_segments
 from app.storage.redis_cache import cache_underlying_refresh, read_cached_underlying_refresh
+from app.storage.provider_rate_limit import (
+    ProviderQueueUnavailable, defer_provider_after_limit, provider_request_slot,
+)
 
 HISTORY_DAYS = 1095
 MAX_HISTORY_DAYS = 3650
@@ -301,19 +305,32 @@ def _fetch_candle_source(source, interval, start_date, end_date, now_ms, adapter
         adapter: Optional primary-provider fake/client for tests.
 
     Returns:
-        Closed rows, an optional live row, and the provider that supplied them.
+        Closed rows, an optional live row, selected provider, and queue wait seconds.
 
     Raises:
         UnderlyingDataError: Every registered source fails or returns invalid bars.
     """
     provider_ids = [source["provider_id"], *source.get("fallback_provider_ids", [])]
     failures = []
+    queue_wait_seconds = 0.0
     for provider_id in provider_ids:
         try:
             client = adapter if provider_id == source["provider_id"] else None
             if provider_id == "massive_stocks":
-                client = client or MassiveStocksPublic()
-                values = client.aggregates(source["alias"], interval, start_date, end_date)
+                if client is None:
+                    try:
+                        client = MassiveStocksPublic()
+                        with provider_request_slot(provider_id) as waited_seconds:
+                            values = client.aggregates(
+                                source["alias"], interval, start_date, end_date,
+                            )
+                    except ProviderQueueUnavailable as exc:
+                        raise UnderlyingDataError(str(exc)) from None
+                    queue_wait_seconds += waited_seconds
+                else:
+                    values = client.aggregates(
+                        source["alias"], interval, start_date, end_date,
+                    )
                 closed, live = _parse_massive_bars(values, interval, now_ms)
             elif provider_id == "twelve_data":
                 if interval != "1d":
@@ -336,7 +353,14 @@ def _fetch_candle_source(source, interval, start_date, end_date, now_ms, adapter
             else:
                 raise ValueError("底层行情供应商未支持K线读取")
             if closed or live:
-                return closed, live, provider_id
+                return closed, live, provider_id, queue_wait_seconds
+        except ProviderRateLimitError as exc:
+            if provider_id == "massive_stocks":
+                try:
+                    defer_provider_after_limit(provider_id, exc.retry_after_seconds)
+                except ProviderQueueUnavailable:
+                    pass
+            raise
         except UnderlyingDataError as exc:
             failures.append(f"{provider_id}:{exc}")
         except ValueError:
@@ -450,7 +474,7 @@ def fetch_underlying_history(db, asset_id, interval="1d", days=HISTORY_DAYS, now
         supported = source.get("intervals", [])
         if interval not in supported or interval not in BAR_DURATIONS_MS:
             raise ValueError("所选周期不是该原始行情源支持的原生周期")
-        closed, _forming, provider_id = _fetch_candle_source(
+        closed, _forming, provider_id, queue_wait_seconds = _fetch_candle_source(
             source, interval, start_date, end_date, current_ms, adapter,
         )
         if not closed:
@@ -466,7 +490,14 @@ def fetch_underlying_history(db, asset_id, interval="1d", days=HISTORY_DAYS, now
         saved = _merge_save_bars(db, asset, interval, closed, provenance, current_ms, days)
         _set_provider_state(db, provider_id, "CONNECTED", asset_id=asset.id, interval=interval, latest_at_ms=saved["last_close_ms"])
         db.commit()
-        return {**saved, "source": provider_id, "provider_symbol": source["alias"], "kind": "candles", "first_open_ms": min(row["open_time"] for row in closed), "rows_fetched": len(closed), "research_only": True}
+        return {**saved, "source": provider_id, "provider_symbol": source["alias"], "kind": "candles", "first_open_ms": min(row["open_time"] for row in closed), "rows_fetched": len(closed), "request_queue_wait_seconds": queue_wait_seconds, "research_only": True}
+    except ProviderRateLimitError:
+        _set_provider_state(
+            db, provider_id, "DEGRADED", asset_id=asset.id, interval=interval,
+            error_code="RATE_LIMITED",
+        )
+        db.commit()
+        raise
     except UnderlyingDataError:
         attempted = False
         for failed_provider_id in [source["provider_id"], *source.get("fallback_provider_ids", [])]:
@@ -511,9 +542,17 @@ def refresh_underlying_latest(db, asset_id, interval, now_ms=None):
     if cached and current_ms - int(cached.get("updated_at_ms", 0)) < ttl * 1000:
         return cached
     start_date, end_date = _iso_date_range(current_ms, 3, source.get("timezone", "UTC"))
-    closed, live, provider_id = _fetch_candle_source(
-        source, interval, start_date, end_date, current_ms,
-    )
+    try:
+        closed, live, provider_id, queue_wait_seconds = _fetch_candle_source(
+            source, interval, start_date, end_date, current_ms,
+        )
+    except ProviderRateLimitError:
+        _set_provider_state(
+            db, source["provider_id"], "DEGRADED", asset_id=asset.id,
+            interval=interval, error_code="RATE_LIMITED",
+        )
+        db.commit()
+        raise
     provenance = {
         "provider": provider_id, "provider_symbol": source["alias"],
         "provider_chain": [source["provider_id"], *source.get("fallback_provider_ids", [])],
@@ -537,6 +576,7 @@ def refresh_underlying_latest(db, asset_id, interval, now_ms=None):
         )),
         "source_event_at_ms": (live["open_time"] if live else latest_closed["close_time"] if latest_closed else None),
         "dataset_sha256": saved["sha256"] if saved else None,
+        "request_queue_wait_seconds": queue_wait_seconds,
         "research_only": True, "stale": False,
     }
     cache_underlying_refresh(asset_id, interval, result, ttl)

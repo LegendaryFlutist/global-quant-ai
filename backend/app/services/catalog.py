@@ -101,6 +101,7 @@ def seed(db):
             'credential_required':credential_env is not None,
             'freshness_contract':contract['freshness'],
             'data_kind':contract['data_kind'],
+            'request_pacing':contract.get('request_pacing'),
             'terms_note':contract.get('terms_note'),
         }
     if db.get(Setting,'display') is None:db.add(Setting(key='display',value={'timezone':'Asia/Shanghai','default_interval':'4h','default_asset':'binance_usdm:KORUUSDT'}))
