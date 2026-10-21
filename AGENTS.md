@@ -1,7 +1,7 @@
 # Global Quant AI engineering rules
 
 - `quant_lab/` contains the offline research engine; root Python files are stable compatibility shims. Keep historical datasets, evaluation plans and reports immutable. New Web code lives in `backend/` and `frontend/`.
-- Phase 1 implements authenticated public-data research only. `backend/app/domains/contracts.py` contains future contracts, not live or paper execution. Do not enable orders, ingest private exchange keys, or send real mail as part of platform work.
+- The 2026-10-21 staged expansion authorizes authenticated public-data research and later isolated local paper development, in dependency order described in `docs/platform/global-expansion-audit.md`. Paper ledger/execution remain PLANNED until implemented and tested. `backend/app/domains/contracts.py` currently contains future contracts only. Live execution stays disabled: never ingest private exchange keys, enable real orders, open broker accounts, buy subscriptions or send real mail in this work. Preserve independent risk checks and per-trade 2FA in the future live design.
 - Run platform with `bash scripts/platform.sh up`; preserve the existing `lab` service and unrelated Docker projects. Never run `docker compose down -v` or reset the user's database.
 - Python backend must run on 3.11; GPU research currently uses NVIDIA's Python 3.12 runtime. Do not replace NVIDIA Torch/CUDA packages.
 - Never print `.env`, `.runtime/platform.env`, bootstrap passwords, session tokens or broker credentials in tool logs. `.runtime/` must remain excluded from source and build contexts.

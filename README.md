@@ -4,6 +4,8 @@
 
 全球市场量化研究工作台 · React / FastAPI / PostgreSQL / PyTorch · Phase 1及部分Phase 2研究功能。
 
+本轮增量路线：[全球扩展审计、差距矩阵与任务依赖](docs/platform/global-expansion-audit.md)。先交付来源隔离的数据版本小单元，再按依赖推进模型版本、事件回测与隔离本地paper；未实现阶段保留PLANNED，实盘关闭。当前静态资产种子87项，注册数量不代表已有行情覆盖。
+
 ```bash
 git clone https://github.com/LegendaryFlutist/global-quant-ai.git
 cd global-quant-ai

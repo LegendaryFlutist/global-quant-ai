@@ -1,5 +1,7 @@
 # Phase 1：基础 Web 平台
 
+当前新增工作的范围/验收见[2026-10-21 Stage0审计](global-expansion-audit.md)。下文保留历史验收日期；历史测试和覆盖不自动计作当前阶段通过。后续隔离本地paper已获开发授权，但当前仍PLANNED；实盘默认拒绝。
+
 ## 开发清单
 
 - [x] 原工程内新增backend/frontend，保留GPU lab和历史报告。
