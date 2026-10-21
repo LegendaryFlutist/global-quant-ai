@@ -20,7 +20,8 @@ export default function AssetsPage({
   const [theme, setTheme] = useState("全部");
   const [search, setSearch] = useState("");
   const categoryLabels: Record<string, string> = {
-    crypto: "虚拟货币", stocks: "股票", etf: "ETF", other: "其他",
+    crypto: "虚拟货币", stocks: "股票", etf: "ETF", indices: "指数",
+    commodities: "商品", forex: "外汇", macro: "宏观参考", other: "其他",
   };
   const productLabels: Record<string, string> = {
     spot: "现货", perpetual: "永续合约", future: "期货", reference: "指数 / 研究指标", other: "其他",
@@ -29,10 +30,13 @@ export default function AssetsPage({
     massive_stocks: "Massive 美股 / ETF",
     twelve_data: "Twelve Data 韩国市场",
     eia: "EIA 能源现货参考",
+    sina_cn_public: "新浪中国指数（公开）",
+    tencent_cn_public: "腾讯中国指数（备用）",
   };
   const providerStatusLabels: Record<string, string> = {
     CONNECTED: "已验证连接", CONFIGURED_NOT_VALIDATED: "已配置待验证",
     NEEDS_CONFIGURATION: "需本机配置", UNAVAILABLE: "上游暂不可用",
+    PUBLIC_NO_KEY: "免密钥公开源，待验证",
   };
   const themes = [
     "全部",
@@ -60,6 +64,10 @@ export default function AssetsPage({
           <option value="crypto">虚拟货币</option>
           <option value="stocks">股票</option>
           <option value="etf">ETF</option>
+          <option value="indices">指数</option>
+          <option value="commodities">商品</option>
+          <option value="forex">外汇</option>
+          <option value="macro">宏观参考</option>
           <option value="other">其他</option>
         </select>
         <select value={product} onChange={(event) => setProduct(event.target.value)} aria-label="产品类型">
@@ -132,9 +140,15 @@ export default function AssetsPage({
                     {a.market_source && <small>
                       底层源：{providerLabels[a.market_source.provider_id] ?? a.market_source.provider_id} · {providerStatusLabels[a.market_source.provider_status] ?? a.market_source.provider_status}
                     </small>}
+                    {a.market_source?.fallback_provider_ids?.length ? <small>
+                      备用：{a.market_source.fallback_provider_ids.map((id) => providerLabels[id] ?? id).join(" / ")}
+                    </small> : null}
                     {a.market_source && <small>
-                      {a.market_source.credential_configured ? "本机密钥已配置（值不展示）" : "需在本机私有配置中设置数据源密钥"}
+                      {a.market_source.credential_required
+                        ? a.market_source.credential_configured ? "本机密钥已配置（值不展示）" : "需在本机私有配置中设置数据源密钥"
+                        : "无需配置密钥；公开源可能延迟或受访问限制"}
                     </small>}
+                    {a.market_source?.freshness && <small>{a.market_source.freshness}</small>}
                     <small>{date(a.verified_at, timezone)}</small>
                   </td>
                   <td>

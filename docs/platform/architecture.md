@@ -58,18 +58,18 @@ flowchart TB
 ### 数据层职责
 
 - `backend/app/adapters/` 只负责特定供应商的公开读取和响应解析；不在适配器中落库或推断不同产品可交易。
-- `backend/app/adapters/public_binance.py` 仅读取已核验永续；`underlying_public.py` 提供Massive股票/ETF OHLCV、Twelve Data XKRX日线、EIA每日WTI/Henry Hub标量参考。访问键仅由worker/API环境读取，绝不存入数据库、浏览器或报告。
+- `backend/app/adapters/public_binance.py` 仅读取已核验永续；`underlying_public.py` 提供Massive美股/ETF、Twelve Data XKRX日线、EIA每日WTI/Henry Hub标量参考，以及中国指数的新浪公开日线与腾讯备用日线。后两者免密钥但属于未经服务承诺的公开页面接口，可能延迟、限流或变更；真实源时间戳和失败状态必须保留。
 - `backend/app/services/ingestion.py`、`long_history.py`与`underlying_market.py`负责清洗、原生周期校验、任务恢复和写入编排；源头证券K线与相关永续不混用。能源现货只存标量观察值，禁止伪造OHLC；不补造缺失报价、不向下插值。
 - `backend/app/storage/` 统一文件读写契约。`storage/parquet_files.py`负责流式SHA256、同目录临时文件、fsync与不可变/内容寻址Parquet发布，并原子更新小型manifest；`storage/duckdb_query.py`只读取调用方已校验且明确列出的Parquet分段，时间字段白名单化、文件名用SQL参数传递、Decimal128通过Arrow往返。
 - Parquet是行情/模型输入的规范事实存储；PostgreSQL保存资产/供应商/任务/策略配置和文件哈希指针；Redis当前承载任务队列、认证限流和20秒实时行情快照。Redis失效时实时刷新仍可回退到本地带哈希快照。DuckDB不是独立服务，也不另建共享可变`.duckdb`文件，避免多个API/worker进程竞争写入。
 - 回测交易、净值和完整模型产物保存在带来源/配置/代码SHA256的不可变本地Parquet文件；PostgreSQL仅保留所有者、任务状态与结果索引。技术指标和结构特征应先按确定版本从输入行情计算，保存时须带定义版本、`as_of`、`known_at`和源哈希。
-- US/KRX底层K线写入`DATA_ROOT/underlying_history/<asset-hash>/<interval>/`不可变分段及内容哈希manifest；新闭合K线只追加新段，已知数据修订时发布新manifest。EIA价格点存独立Parquet和Alembic 0003元数据表。实时刷新缓存按供应商节流：Massive约30秒一次、XKRX日线约6小时一次，页面轮询不会变成无上限上游请求。
+- US/KRX/CN底层K线写入`DATA_ROOT/underlying_history/<asset-hash>/<interval>/`不可变分段及内容哈希manifest；新闭合K线只追加新段，已知数据修订时发布新manifest。EIA价格点存独立Parquet和Alembic 0003元数据表。实时刷新缓存按供应商节流：Massive约30秒、XKRX日线约6小时、中国公开指数源约60秒；页面轮询不会变成无上限上游请求。
 
 ### 接入覆盖范围
 
 资产目录80项中，当前13项具有精确核验的Binance USDT永续代码；这13项各有一份约90天、8,639根15分钟真实K线。此前批量入口及启动补档只扫描注册表中`BINANCE_USDM`且已核验的产品，不触碰其它67个股票、ETF、指数关联资产或未验证代码。服务启动时检查三年15m归档清单，只把缺失/不完整且没有活动任务的资产交给后台队列；检查不在API启动线程内访问网络，已完成归档不会重复采集。图表也保留手动补档入口；图表用完整真实15m桶向上聚合更大周期，不做小周期插值。当前公开REST仍受DNS/代理限制，排队不代表已取得三年行情；页面会显示任务失败原因和实际覆盖范围。
 
-传统底层产品已经按来源分开登记：美国上市股票/ETF接Massive公开聚合接口、SK海力士和三星接Twelve Data XKRX EOD、WTI Cushing与Henry Hub接EIA日度标量序列。`config/platform/market_sources.json`是映射来源；服务启动只会在本机配置对应密钥后为缺失历史创建`FETCH_UNDERLYING_HISTORY`后台任务。当前仓库内没有这些供应商的密钥或已下载数据。Massive实时性取决于订阅级别；Twelve Data的XKRX为EOD；EIA是日频，因此这些产品不会统一标记成5秒实时报价。NYMEX CL/NG期货不在本次现货接口中，因需独立处理到期和换月。
+传统底层产品已经按来源分开登记：美国上市股票/ETF接Massive公开聚合接口、SK海力士和三星接Twelve Data XKRX EOD、WTI Cushing与Henry Hub接EIA日度标量序列；中国六个指数（上证、深证、创业板、科创50、中证500、沪深300）接新浪公开日线并以腾讯公开日线备用。中国指数免密钥源在服务启动时可自动排队采集；首次实连仍以任务状态为准。`config/platform/market_sources.json`记录主源、备用源和数据频率。Massive免费档仍要求注册key并限于EOD；Twelve Data key不等于市场权限，XKRX具体可用档位须核对账户；EIA key免费注册。新浪/腾讯公开页面接口不是交易所授权API，禁止把其免key等同于数据再分发授权。NYMEX CL/NG期货不在本次现货接口中，因需独立处理到期和换月。
 
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
 - Ingestion：公开GET、来源与产品代码绑定、原生周期、清洗和恢复。`FETCH_BINANCE_ARCHIVES`只处理已核验USDM永续；`FETCH_UNDERLYING_HISTORY`只处理source registry指定的股票、ETF和能源参考资产。二者启动补缺均幂等且只在worker执行网络请求；没有密钥或未获准数据权限时明确显示待配置/不可用，不生成数据。

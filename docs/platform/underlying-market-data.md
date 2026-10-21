@@ -18,13 +18,14 @@
 
 | 覆盖 | 候选来源 | 当前可确认的频率/限制 | 适用判断 |
 |---|---|---|---|
-| 美国股票/ETF（NVDA、KORU） | Massive Stocks；另可试 Twelve Data | Massive Stocks Advanced 页面标示实时数据、WebSocket，个人方案页面显示约 `$199/月`；Twelve Data Basic 标示美国股票/ETF实时数据但请求额度有限。具体订阅权利、个人/商业用途和交易所费用以账户及合同为准。 | Massive 更适合作为 5 秒页面更新的流式候选；Twelve Data 可用于低频接入试验。任何密钥由用户在本地私有环境配置，不进 Git 或日志。 |
-| SK 海力士 | KRX/KOSCOM 官方行情授权；Twelve Data 作为日线候选 | KRX 的实时市场信息属于市场数据产品；Twelve Data 当前交易所目录把 Korea Stock Exchange (`XKRX`) 标为 EOD（日终），不能满足 5 秒实时。 | 若必须实时，需要核实 KRX/KOSCOM 数据使用许可，或使用用户已有且允许此用途的韩国券商行情 API。不能把 EOD 当作实时。 |
+| 美国股票/ETF（NVDA、KORU） | Massive Stocks；另可试 Twelve Data | Massive 有免费 Basic/EOD 层，但必须注册 API key；免费不是免密钥。Twelve Data Basic 免费且有额度，但非美国市场取决于交易所覆盖/计划。 | 个股数据延迟和历史窗口看账户计划；key由用户在本机私有环境配置，不进Git或日志。 |
+| SK 海力士 | KRX/KOSCOM 官方行情授权；Twelve Data 作为日线候选 | Twelve Data 当前将 Korea Stock Exchange (`XKRX`) 标为 EOD，要求 Pro/Venture 级别；免费 Basic key 不代表有该市场权限。 | 当前只支持日线；若必须实时，需核实KRX/KOSCOM许可或授权券商行情API。 |
+| 中国六个指数 | 新浪无key公开日线；腾讯无key公开日线备用 | Sina/Tencent的常见行情/K线接口可免密钥读取，但属于公开页面接口，没有稳定性、频率、延迟或服务级别承诺；本机当前网络未能完成实时连通性实测。 | 已接入Sina主源和Tencent fallback，仅启用日线、60秒请求冷却；标记研究数据，启动时自动排缺档任务。再分发或商业使用前需核对授权。 |
 | NYMEX CL、NG 期货 | Massive Futures；CME/NYMEX 授权数据服务 | Massive Futures Advanced 页面列出 CME/CBOT/COMEX/NYMEX 实时 WebSocket、秒/分钟聚合和历史数据，个人方案约 `$199/月`；更低阶方案提供延迟数据。 | 可用于实时观察期货近月/指定合约；必须保留具体到期月份、交易时段和换月规则。价格与 Binance 永续并非同一产品。 |
-| 原油、天然气现货参考 | 美国 EIA Open Data | EIA 提供 WTI Cushing 与 Henry Hub 现货序列，频率为日；API 需要注册 EIA API key。它不能产出真实的 5 秒 K 线。 | 适合日线结构、宏观背景和历史参考，不适合日内实时触发。 |
+| 原油、天然气现货参考 | 美国 EIA Open Data | EIA API key需免费注册；EIA bulk download无需key。EIA提供WTI Cushing与Henry Hub日频序列，不能产出真实的5秒K线。 | 适合日线结构、宏观背景和历史参考，不适合日内实时触发。 |
 | Binance 加密永续 | 当前 Binance 公开行情适配器/已连接公开行情连接器 | 与传统资产供应商无关；当前本地 REST 经 Clash 对 `fapi.binance.com` 收到 HTTP 451。 | 保留独立状态、缓存和错误；不要用股票/商品行情伪装币安合约行情。 |
 
-来源： [Massive 股票数据与实时 WebSocket](https://www.massive.com/stocks)、[Massive Futures 计划与价格](https://massive.com/pricing?product=futures)、[Twelve Data 计划](https://twelvedata.com/pricing)、[Twelve Data 交易所覆盖表](https://twelvedata.com/exchanges?level=overview)、[KRX 市场数据产品说明](https://data.krx.co.kr/inc/datasale/Market%20Data%20Product%20Brochure.pdf?v=20250732)、[EIA Henry Hub 日频天然气现货](https://www.eia.gov/opendata/browser/natural-gas/pri/fut?data=value&facets=series&frequency=daily&series=RNGWHHD%3B)、[EIA WTI Cushing 现货历史](https://www.eia.gov/dnav/pet/hist/rwtcd.htm)、[EIA API 注册与条款](https://www.eia.gov/opendata/documentation.php)。价格与覆盖信息会变化，应在签订或配置前重新确认。
+来源：[Massive Stocks免费档与API key](https://www.massive.com/stocks)、[Twelve Data免费方案](https://twelvedata.com/pricing)、[Twelve Data XKRX权限](https://twelvedata.com/exchanges?level=pro)、[EIA免费key注册](https://www.eia.gov/opendata/register.php)、[新浪公开行情接口技术说明（社区整理，非官方API文档）](https://alanhere.com/2019/06/11/sina-stock-api/)、[上交所行情服务/许可办理说明](https://www.sse.com.cn/transparency/services/index.shtml)、[上证指数数据使用许可规则](https://www.sse.com.cn/market/sseindex/diclosure/c/c_20150911_3984913.shtml)。接口稳定性、权限和价格可能变化，使用前应重新核验。
 
 ## 项目接入建议
 
@@ -35,8 +36,8 @@
 
 ## 当前实施状态
 
-项目已增加服务端只读适配器与源头行情注册表：Massive 对应美国股票/ETF，Twelve Data 只用于 XKRX 日线，EIA 只用于 WTI Cushing 与 Henry Hub 日度标量参考值。股票/ETF K线按资产与周期写入不可变 Parquet 分段和带 SHA256 的 manifest；EIA 原始日值使用独立标量 Parquet 模式。PostgreSQL 保存来源状态与文件指针，Redis 缓存近期图表刷新，原始底层价格与同名 Binance USDM 永续保持独立资产 ID、文件和数据源。
+项目已增加服务端只读适配器与源头行情注册表：Massive对应美国股票/ETF，Twelve Data只用于XKRX日线，EIA只用于WTI Cushing与Henry Hub日度标量参考，新浪公开行情与腾讯备用公开行情服务于六个中国指数。股票/ETF/指数K线按资产与周期写入不可变Parquet分段和SHA256 manifest；EIA原始日值使用独立标量Parquet。PostgreSQL保存来源状态与文件指针，Redis缓存近期图表刷新。原始底层价格与同名Binance USDM永续保持独立资产ID、文件和数据源。
 
-启动后只有在本机私有环境中检测到对应供应商密钥时，系统才会为尚无三年历史的已登记底层标的排队。登录后的图表可手动创建 1095 天采集任务；页面刷新时读取供应商近端数据并受 Redis 冷却时间约束。当前 Massive 刷新最短缓存间隔为 30 秒，Twelve Data 韩国股票只提供日终周期；EIA 按日发布标量值。当前代码没有实现供应商 WebSocket，也没有实际供应商账户、许可或密钥，因此不声称已经取得实时行情或完成历史下载。若要低延迟显示，Massive 需要有相应实时权限；韩国股票盘中行情需要 KRX/KOSCOM 或用户已有的授权供应商。
+服务启动会为中国指数免key公开源排队补齐已登记的日线；其他需凭据的源仅在本机配置key后排队。图表刷新受Redis冷却约束：Massive至少30秒、Twelve Data至少6小时、Sina/Tencent至少60秒。当前没有实现这些供应商WebSocket；免key也不代表实时、稳定或已获数据再分发授权。新浪/腾讯上游本轮未能从当前主机完成TLS连通性实测，成功状态须以worker实际请求为准。尚不声称已经下载到三年数据；请求窗口和上游最多1023根/返回限制不同，报告需按实际覆盖显示。股票/ETF/指数日线不用于日内实时入场触发。
 
 安全边界：数据源 URL、交易所代码和资产映射由仓库内注册表白名单管理；供应商密钥只从后端环境变量读取，不接受浏览器请求传入。适配器只发公开 GET 请求，响应错误不回显 API key 或原始 URL。该工作不改变 Binance 的地区响应，不对 Binance 合约行情做替代或伪造，也不启用交易执行。

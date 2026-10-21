@@ -8,7 +8,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 
-from app.adapters.underlying_public import EIAOpenDataPublic, MassiveStocksPublic, TwelveDataPublic, UnderlyingDataError
+from app.adapters.underlying_public import (
+    EIAOpenDataPublic, MassiveStocksPublic, SinaChinaIndicesPublic,
+    TencentChinaIndicesPublic, TwelveDataPublic, UnderlyingDataError,
+)
 from app.adapters.public_binance import INTERVALS
 from app.domains.models import Asset, MarketData, MarketObservation, Provider, utcnow
 from app.services.market_data import FIELDS, read_dataset
@@ -18,8 +21,19 @@ from app.storage.redis_cache import cache_underlying_refresh, read_cached_underl
 
 HISTORY_DAYS = 1095
 MAX_HISTORY_DAYS = 3650
-REFRESH_TTLS = {"massive_stocks": 30, "twelve_data": 21600}
+REFRESH_TTLS = {
+    "massive_stocks": 30, "twelve_data": 21600,
+    "sina_cn_public": 60, "tencent_cn_public": 60,
+}
 BAR_DURATIONS_MS = {"15m": 900_000, "1h": 3_600_000, "1d": 86_400_000}
+PROVIDER_CREDENTIAL_ENVS = {
+    "massive_stocks": "MASSIVE_API_KEY",
+    "twelve_data": "TWELVE_DATA_API_KEY",
+    "eia": "EIA_API_KEY",
+    "sina_cn_public": None,
+    "tencent_cn_public": None,
+}
+ALLOWED_MARKET_PROVIDERS = frozenset(PROVIDER_CREDENTIAL_ENVS)
 
 
 def _source_for_asset(asset):
@@ -39,8 +53,11 @@ def _source_for_asset(asset):
     source = (asset.specification or {}).get("market_data_source")
     if not isinstance(source, dict) or source.get("kind") not in {"candles", "observations"}:
         raise ValueError("该原始资产尚未绑定公开行情供应商")
-    if source.get("provider_id") not in {"massive_stocks", "twelve_data", "eia"}:
+    if source.get("provider_id") not in ALLOWED_MARKET_PROVIDERS:
         raise ValueError("资产行情供应商未在服务端白名单中")
+    fallbacks = source.get("fallback_provider_ids", [])
+    if not isinstance(fallbacks, list) or any(item not in ALLOWED_MARKET_PROVIDERS for item in fallbacks):
+        raise ValueError("资产备用行情供应商未在服务端白名单中")
     if not source.get("alias"):
         raise ValueError("供应商产品代码缺失")
     return source
@@ -66,10 +83,13 @@ def validate_underlying_request(asset, interval, *, require_credential=True):
             raise ValueError("能源现货参考源只发布日度数值，不提供盘中OHLC")
     elif interval not in source.get("intervals", []):
         raise ValueError("该原始行情源未提供所选原生周期")
-    env_names = {"massive_stocks": "MASSIVE_API_KEY", "twelve_data": "TWELVE_DATA_API_KEY", "eia": "EIA_API_KEY"}
-    if require_credential and not os.environ.get(env_names[source["provider_id"]], "").strip():
-        raise ValueError(f"缺少本机数据源配置 {env_names[source['provider_id']]}；密钥不要发到聊天或浏览器")
-    return {"provider_id": source["provider_id"], "kind": source["kind"], "source": source}
+    credential_env = PROVIDER_CREDENTIAL_ENVS[source["provider_id"]]
+    if require_credential and credential_env and not os.environ.get(credential_env, "").strip():
+        raise ValueError(f"缺少本机数据源配置 {credential_env}；密钥不要发到聊天或浏览器")
+    return {
+        "provider_id": source["provider_id"], "kind": source["kind"],
+        "credential_required": credential_env is not None, "source": source,
+    }
 
 
 def _set_provider_state(db, provider_id, status, *, asset_id=None, interval=None, error_code=None, latest_at_ms=None):
@@ -235,6 +255,96 @@ def _parse_twelve_data_daily(body, now_ms):
     return closed, live
 
 
+def _parse_public_index_daily(values, now_ms, start_date, end_date):
+    """Validate public Sina/Tencent daily index bars against the requested window.
+
+    Args:
+        values: Provider-native dictionaries with a date label and OHLCV values.
+        now_ms: UTC milliseconds used to keep an unfinished UTC-day candle display-only.
+        start_date: Inclusive exchange-local ISO date requested by the job.
+        end_date: Inclusive exchange-local ISO date requested by the job.
+
+    Returns:
+        `(closed_rows, live_row)` containing only real provider observations in range.
+
+    Raises:
+        ValueError: A returned bar has malformed date or invalid OHLCV values.
+    """
+    lower, upper = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    closed, live = [], None
+    for item in values:
+        try:
+            label = item.get("day", item.get("datetime", item.get("date")))
+            session_day = date.fromisoformat(str(label)[:10])
+            if not lower <= session_day <= upper:
+                continue
+            row = _decimal_bar(item, _daily_date_open_ms(session_day), "1d")
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError("中国指数公开源日线结构或数值无效") from None
+        if row["close_time"] < now_ms:
+            closed.append(row)
+        else:
+            live = {**row, "is_closed": False}
+    closed.sort(key=lambda row: row["open_time"])
+    return closed, live
+
+
+def _fetch_candle_source(source, interval, start_date, end_date, now_ms, adapter=None):
+    """Try only the registered primary and fallback GET sources for one asset.
+
+    Args:
+        source: Validated server-owned market source binding.
+        interval: Native interval accepted by the binding.
+        start_date: Inclusive ISO date in the exchange timezone.
+        end_date: Inclusive ISO date in the exchange timezone.
+        now_ms: UTC cutoff used to classify closed and forming candles.
+        adapter: Optional primary-provider fake/client for tests.
+
+    Returns:
+        Closed rows, an optional live row, and the provider that supplied them.
+
+    Raises:
+        UnderlyingDataError: Every registered source fails or returns invalid bars.
+    """
+    provider_ids = [source["provider_id"], *source.get("fallback_provider_ids", [])]
+    failures = []
+    for provider_id in provider_ids:
+        try:
+            client = adapter if provider_id == source["provider_id"] else None
+            if provider_id == "massive_stocks":
+                client = client or MassiveStocksPublic()
+                values = client.aggregates(source["alias"], interval, start_date, end_date)
+                closed, live = _parse_massive_bars(values, interval, now_ms)
+            elif provider_id == "twelve_data":
+                if interval != "1d":
+                    raise ValueError("XKRX当前仅有可信日终周期")
+                client = client or TwelveDataPublic()
+                body = client.daily_bars(source["alias"], source["mic_code"], start_date, end_date)
+                closed, live = _parse_twelve_data_daily(body, now_ms)
+            elif provider_id == "sina_cn_public":
+                if interval != "1d":
+                    raise ValueError("新浪指数公开源当前仅登记日线")
+                client = client or SinaChinaIndicesPublic()
+                values = client.daily_bars(source["alias"], start_date, end_date)
+                closed, live = _parse_public_index_daily(values, now_ms, start_date, end_date)
+            elif provider_id == "tencent_cn_public":
+                if interval != "1d":
+                    raise ValueError("腾讯指数备用源当前仅登记日线")
+                client = client or TencentChinaIndicesPublic()
+                values = client.daily_bars(source["alias"], start_date, end_date)
+                closed, live = _parse_public_index_daily(values, now_ms, start_date, end_date)
+            else:
+                raise ValueError("底层行情供应商未支持K线读取")
+            if closed or live:
+                return closed, live, provider_id
+        except UnderlyingDataError as exc:
+            failures.append(f"{provider_id}:{exc}")
+        except ValueError:
+            failures.append(f"{provider_id}:公开源返回的K线不符合数据校验")
+            continue
+    raise UnderlyingDataError("公开行情主备源均不可用；" + "；".join(failures))
+
+
 def _merge_save_bars(db, asset, interval, rows, source, now_ms, lookback_days):
     """Merge a source window with local history and publish its immutable dataset.
 
@@ -340,22 +450,14 @@ def fetch_underlying_history(db, asset_id, interval="1d", days=HISTORY_DAYS, now
         supported = source.get("intervals", [])
         if interval not in supported or interval not in BAR_DURATIONS_MS:
             raise ValueError("所选周期不是该原始行情源支持的原生周期")
-        if provider_id == "massive_stocks":
-            client = adapter or MassiveStocksPublic()
-            values = client.aggregates(source["alias"], interval, start_date, end_date)
-            closed, _forming = _parse_massive_bars(values, interval, current_ms)
-        elif provider_id == "twelve_data":
-            if interval != "1d":
-                raise ValueError("XKRX当前数据权限标记为日线，不提供可信盘中K线")
-            client = adapter or TwelveDataPublic()
-            body = client.daily_bars(source["alias"], source["mic_code"], start_date, end_date)
-            closed, _forming = _parse_twelve_data_daily(body, current_ms)
-        else:
-            raise ValueError("标的与K线供应商类型不匹配")
+        closed, _forming, provider_id = _fetch_candle_source(
+            source, interval, start_date, end_date, current_ms, adapter,
+        )
         if not closed:
             raise UnderlyingDataError("供应商没有返回已收盘的真实K线")
         provenance = {
             "provider": provider_id, "provider_symbol": source["alias"],
+            "provider_chain": [source["provider_id"], *source.get("fallback_provider_ids", [])],
             "exchange": source.get("mic_code", source.get("exchange", "US")), "market_timezone": source.get("timezone"),
             "mode": "source_native_underlying_history", "lookback_days": days,
             "retrieved_at_ms": current_ms, "timestamp_alignment": "exchange_session",
@@ -365,10 +467,18 @@ def fetch_underlying_history(db, asset_id, interval="1d", days=HISTORY_DAYS, now
         _set_provider_state(db, provider_id, "CONNECTED", asset_id=asset.id, interval=interval, latest_at_ms=saved["last_close_ms"])
         db.commit()
         return {**saved, "source": provider_id, "provider_symbol": source["alias"], "kind": "candles", "first_open_ms": min(row["open_time"] for row in closed), "rows_fetched": len(closed), "research_only": True}
-    except (UnderlyingDataError, ValueError):
-        provider = db.get(Provider, provider_id)
-        if provider and os.environ.get({"massive_stocks":"MASSIVE_API_KEY", "twelve_data":"TWELVE_DATA_API_KEY", "eia":"EIA_API_KEY"}[provider_id], "").strip():
-            _set_provider_state(db, provider_id, "UNAVAILABLE", asset_id=asset.id, interval=interval, error_code="UPSTREAM_OR_DATA_VALIDATION_ERROR")
+    except UnderlyingDataError:
+        attempted = False
+        for failed_provider_id in [source["provider_id"], *source.get("fallback_provider_ids", [])]:
+            provider = db.get(Provider, failed_provider_id)
+            credential_env = PROVIDER_CREDENTIAL_ENVS[failed_provider_id]
+            if provider and (credential_env is None or os.environ.get(credential_env, "").strip()):
+                _set_provider_state(
+                    db, failed_provider_id, "UNAVAILABLE", asset_id=asset.id,
+                    interval=interval, error_code="UPSTREAM_OR_DATA_VALIDATION_ERROR",
+                )
+                attempted = True
+        if attempted:
             db.commit()
         raise
 
@@ -401,16 +511,12 @@ def refresh_underlying_latest(db, asset_id, interval, now_ms=None):
     if cached and current_ms - int(cached.get("updated_at_ms", 0)) < ttl * 1000:
         return cached
     start_date, end_date = _iso_date_range(current_ms, 3, source.get("timezone", "UTC"))
-    if source["provider_id"] == "massive_stocks":
-        values = MassiveStocksPublic().aggregates(source["alias"], interval, start_date, end_date)
-        closed, live = _parse_massive_bars(values, interval, current_ms)
-    elif source["provider_id"] == "twelve_data":
-        body = TwelveDataPublic().daily_bars(source["alias"], source["mic_code"], start_date, end_date)
-        closed, live = _parse_twelve_data_daily(body, current_ms)
-    else:
-        raise ValueError("底层行情供应商未支持实时刷新")
+    closed, live, provider_id = _fetch_candle_source(
+        source, interval, start_date, end_date, current_ms,
+    )
     provenance = {
-        "provider": source["provider_id"], "provider_symbol": source["alias"],
+        "provider": provider_id, "provider_symbol": source["alias"],
+        "provider_chain": [source["provider_id"], *source.get("fallback_provider_ids", [])],
         "exchange": source.get("mic_code", source.get("exchange", "US")), "market_timezone": source.get("timezone"),
         "mode": "source_native_live_poll", "retrieved_at_ms": current_ms,
         "timestamp_alignment": "exchange_session", "instrument_identity": asset.id,
@@ -423,14 +529,18 @@ def refresh_underlying_latest(db, asset_id, interval, now_ms=None):
         "closed_candles": [{**row, **{field: str(row[field]) for field in FIELDS}} for row in closed[-100:]],
         "live_candle": ({**live, **{field: str(live[field]) for field in FIELDS}} if live else None),
         "last_closed_at_ms": saved["last_close_ms"] if saved else (latest_closed["close_time"] if latest_closed else None),
-        "updated_at_ms": current_ms, "source": source["provider_id"],
-        "source_freshness": ("供应商套餐可能为实时或延迟" if source["provider_id"] == "massive_stocks" else "交易所日终行情"),
+        "updated_at_ms": current_ms, "source": provider_id,
+        "source_freshness": source.get("freshness", (
+            "供应商套餐可能为实时或延迟" if provider_id == "massive_stocks"
+            else "交易所日终行情" if provider_id == "twelve_data"
+            else "公开页面行情；可能延迟，以源时间戳为准"
+        )),
         "source_event_at_ms": (live["open_time"] if live else latest_closed["close_time"] if latest_closed else None),
         "dataset_sha256": saved["sha256"] if saved else None,
         "research_only": True, "stale": False,
     }
     cache_underlying_refresh(asset_id, interval, result, ttl)
-    _set_provider_state(db, source["provider_id"], "CONNECTED", asset_id=asset_id, interval=interval,
+    _set_provider_state(db, provider_id, "CONNECTED", asset_id=asset_id, interval=interval,
                         latest_at_ms=result["last_closed_at_ms"])
     db.commit()
     return result

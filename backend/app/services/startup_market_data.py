@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.domains.models import Asset, Task
 from app.services.long_history import archive_manifest
 from app.domains.models import MarketData, MarketObservation
-from app.services.underlying_market import _source_for_asset, HISTORY_DAYS
+from app.services.underlying_market import _source_for_asset, HISTORY_DAYS, PROVIDER_CREDENTIAL_ENVS
 
 COMPLETE_ARCHIVE_STATUSES = {"THREE_YEARS", "LISTING_SHORTER_THAN_THREE_YEARS"}
 ACTIVE_TASK_STATUSES = {"QUEUED", "RUNNING", "RETRYING", "QUEUE_ERROR"}
@@ -107,7 +107,7 @@ def queue_missing_underlying_history(db: Session, *, enqueue_task=None, now=None
         now: Optional timezone-aware clock used for failure-cooldown decisions.
 
     Returns:
-        Provider-independent queued counts; no task is created for an unconfigured key.
+        Provider-independent queued counts; no-key public providers are eligible.
 
     Notes:
         A configured key is evidence that the local operator enabled that provider,
@@ -132,8 +132,8 @@ def queue_missing_underlying_history(db: Session, *, enqueue_task=None, now=None
             source = _source_for_asset(asset)
         except ValueError:
             continue
-        credential_names = {"massive_stocks":"MASSIVE_API_KEY", "twelve_data":"TWELVE_DATA_API_KEY", "eia":"EIA_API_KEY"}
-        if not os.environ.get(credential_names[source["provider_id"]], "").strip():
+        credential_env = PROVIDER_CREDENTIAL_ENVS[source["provider_id"]]
+        if credential_env and not os.environ.get(credential_env, "").strip():
             continue
         if source["kind"] == "observations":
             configured_intervals = ["1d"]

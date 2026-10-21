@@ -1,10 +1,10 @@
 # 项目进度与会话交接
 
-更新时间：2026-10-20（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
+更新时间：2026-10-21（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
 
 ## 当前阶段
 
-**截至2026-10-20，Phase2已实现本地市场结构、多模拟策略回测、整套离线模型任务及分模型/标的报告。本轮后端隔离测试69 passed，前端测试1 passed且生产构建成功，608个Python函数文档检查通过；API/Web/worker/NVIDIA runner已重建，API数据库与Redis健康。服务启动已自动排入13个已核验合约的三年归档补档任务，但当前Docker容器无法连接宿主机loopback代理，任务重试耗尽后FAILED，长期归档manifest为0，实时行情未连通。待设置Docker可达且获准访问Binance的代理后手工重试或重启等待冷却结束。尚未通过已登录浏览器提交一次完整GPU任务；真实三年数据收益尚无结论，未实现模型注册/自动择优或持续纸面执行。**
+**截至2026-10-21，Phase2已实现本地市场结构、多模拟策略回测、整套离线模型任务及分模型/标的报告。本轮新增中国六个指数、指数/商品/外汇等资产分类，以及新浪主源/腾讯备用源的免key日线适配；87项隔离后端测试、3项前端测试/构建和711个Python函数文档检查通过，Docker镜像已重建，API数据库与Redis健康。实测新浪和腾讯端点均返回ConnectError，六个指数的启动补档任务各重试3次后FAILED；没有写入行情数据，两个来源在系统内标为UNAVAILABLE。Binance REST也仍受先前网络限制；真实三年数据收益尚无结论，未实现模型注册/自动择优或持续纸面执行。**
 
 目标仓库：https://github.com/LegendaryFlutist/global-quant-ai
 
@@ -307,6 +307,20 @@ bash scripts/platform.sh status
 - 未解决：选定具有适当行情授权的供应商，之后实现US证券、KRX证券、EIA日频参考及/或NYMEX期货的只读适配器与WebSocket消费者；把供应商代码/时区/日历/币种映射到独立产品ID并进行后端隔离测试。项目Binance USDⓈ-M REST仍对当前Clash出口返回HTTP 451，相关合约三年历史归档依旧缺失。
 - Git：来源映射文档提交`5eead8b`、交接记录`7e4aa84`及推送状态checkpoint `ccb5db4`均已推送至`feature/phase2-market-structure`；`git ls-remote`确认远端SHA=`ccb5db49f8cc36c084daf58398369dc3b2f336c7`。`gh`未安装，改用GitHub Actions公开API核验 run `39424716255`（run #64）：frontend、publish-hygiene、backend、risk-engine全部success。此处CI结果针对`ccb5db4`；之后只增加本段状态记录的checkpoint不改变源研究文件。`.local/`保持既有未跟踪状态。
 - 恢复：`bash scripts/resume.sh`；查看`docs/platform/underlying-market-data.md`和`TASKS.md`；Git检查`git status --short --branch && git log -5 --oneline`；当前分支`feature/phase2-market-structure`。
+
+## 当前开发单元（2026-10-21）：中国指数、资产分类与免key行情主备
+
+- 新增六个A股指数研究资产：上证指数`cn_index:000001`、深证成指`cn_index:399001`、创业板指`cn_index:399006`、科创50`cn_index:000688`、中证500`cn_index:000905`、沪深300`cn:000300`。沪深300既有主键保持不变；新指数使用独立命名空间，避免与未来同代码个股冲突。六项均标注为指数/参考数据和研究用途，不是可交易证券。
+- 免key行情：新浪作为主日线源、腾讯作为备用日线源；固定provider/代码映射，严格验证原生OHLCV、日期窗口和Decimal精度。切换备用源时在Parquet来源元数据记录真实提供方；不合并不同源蜡烛、不合成缺失价。数据限日线，刷新冷却至少60秒；当前接口未获官方稳定性/SLA承诺，授权边界见`docs/platform/underlying-market-data.md`。
+- 资产页分类拆分为虚拟货币、股票、ETF、指数、商品、外汇、宏观参考等底层类别，并独立标出现货/永续/期货/参考产品类型。展示主源、备用源、密钥需求、计划频率和状态；无需密钥只表示免API key，不表示已连通、实时或可再分发。
+- 服务启动已为六项指数创建三年日线后台补档。当前实际尝试：新浪和腾讯HTTPS均为`ConnectError`；六项任务各自动尝试3次后FAILED。没有为这些资产写入K线/伪造数据；两个Provider标记UNAVAILABLE。确认网络恢复后，可在图表页点击“采集底层三年数据”重新发起任务。无需提供API key。
+- 其他现有源状态：Massive免费档需注册key且只保证EOD；Twelve Data免费key不包含XKRX权限（当前交易所表列在Pro/Venture）；EIA key免费注册。详细来源链接和市场使用许可约束见底层数据文档。
+- 验证（2026-10-21）：`bash scripts/platform.sh test`为87 passed，1条既有Starlette TestClient/httpx弃用提示；`cd frontend && npm ci && npm test && npm run build`为3 passed、0 npm audit vulnerability、TS检查和Vite生产构建成功；`python3 scripts/check_docs.py`为711个具名函数均有docstring；涉及Python模块`py_compile`、市场源JSON解析和`git diff --check`通过。
+- 运行：`bash scripts/platform.sh up`完成API、Web、NVIDIA runner重建并保留原`lab`服务和数据卷；健康API返回database/Redis connected，主页HTTP 200。确认资产目录六项已创建、全部没有K线记录；后台任务状态六项FAILED（attempts=3）。没有迁移或重置数据库，没有读取/改动私人凭据。
+- 未解决：主机/Docker网络尚不能与`quotes.sina.cn`及`web.ifzq.gtimg.cn`建立HTTPS连接。用户无需申请密钥；需恢复到这两个公开域名443端口的出站网络后再从网页重新采集。网络恢复前页面会如实显示无行情/不可用，不能用于日内触发或实时决策。
+- Git：本单元检查点提交即将创建；远程推送与CI状态待确认后填写。`.local/`为既有未跟踪用户目录，不纳入提交。
+- 下一步：确认公共行情域名在Docker网络中可达；手动重试六个指数三年日线，再核验六项的首末时间、行数与SHA256；随后逐类为仍未绑定行情源的研究资产选择数据源，不把股票、指数、ETF、现货和相关永续合并。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；状态`bash scripts/platform.sh status`；API健康`curl -fsS http://127.0.0.1:8080/api/health`；后端回归`bash scripts/platform.sh test`；前端`cd frontend && npm ci && npm test && npm run build`；重建`bash scripts/platform.sh up`。
 
 
 ## 当前开发单元（2026-10-20）：原始证券与能源参考行情数据层

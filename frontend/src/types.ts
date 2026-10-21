@@ -11,7 +11,7 @@ export interface Asset {
   name: string;
   underlying_id: string;
   asset_type: string;
-  market_category: "crypto" | "stocks" | "etf" | "other";
+  market_category: "crypto" | "stocks" | "etf" | "indices" | "commodities" | "forex" | "macro" | "other";
   product_type: "spot" | "perpetual" | "future" | "reference" | "other";
   venue: string;
   priority: number;
@@ -22,7 +22,8 @@ export interface Asset {
   series?: { metric: string; rows: number; as_of_ms: number; unit: string; sha256: string }[];
   market_source?: {
     provider_id: string; kind: "candles" | "observations"; intervals: string[];
-    provider_status: string; credential_configured: boolean; latest_data_at_ms: number | null;
+    provider_status: string; credential_configured: boolean; credential_required: boolean;
+    fallback_provider_ids?: string[]; freshness?: string | null; latest_data_at_ms: number | null;
   } | null;
   specification: Record<string, unknown>;
   live_tradable: boolean;

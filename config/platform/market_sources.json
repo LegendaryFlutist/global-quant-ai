@@ -20,11 +20,33 @@
       "data_kind": "observations",
       "freshness": "daily published spot reference series",
       "history": "daily values; not intraday OHLCV"
+    },
+    "sina_cn_public": {
+      "name": "新浪中国指数公开行情（研究用途）",
+      "credential_env": null,
+      "data_kind": "candles",
+      "freshness": "unofficial public endpoint; provider timestamp; may be delayed",
+      "history": "daily OHLCV; request capped at 1023 bars",
+      "terms_note": "Unofficial endpoint; verify source terms and market-data licensing before redistribution or commercial use."
+    },
+    "tencent_cn_public": {
+      "name": "腾讯中国指数公开行情备用源（研究用途）",
+      "credential_env": null,
+      "data_kind": "candles",
+      "freshness": "unofficial public endpoint; provider timestamp; may be delayed",
+      "history": "daily OHLCV; provider output window is limited",
+      "terms_note": "Unofficial endpoint; verify source terms and market-data licensing before redistribution or commercial use."
     }
   },
   "assets": {
     "krx:000660": {"provider_id": "twelve_data", "alias": "000660", "kind": "candles", "intervals": ["1d"], "mic_code": "XKRX", "timezone": "Asia/Seoul"},
     "krx:005930": {"provider_id": "twelve_data", "alias": "005930", "kind": "candles", "intervals": ["1d"], "mic_code": "XKRX", "timezone": "Asia/Seoul"},
+    "cn_index:000001": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000001", "kind": "candles", "intervals": ["1d"], "exchange": "SSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:399001": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sz399001", "kind": "candles", "intervals": ["1d"], "exchange": "SZSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:399006": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sz399006", "kind": "candles", "intervals": ["1d"], "exchange": "SZSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:000688": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000688", "kind": "candles", "intervals": ["1d"], "exchange": "SSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:000905": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000905", "kind": "candles", "intervals": ["1d"], "exchange": "CSI", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn:000300": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000300", "kind": "candles", "intervals": ["1d"], "exchange": "CSI", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
     "eia:WTI_CUSHING_SPOT": {"provider_id": "eia", "alias": "RWTC", "kind": "observations", "metric": "spot_price", "unit": "USD/barrel", "route": "petroleum/pri/spt"},
     "eia:HENRY_HUB_SPOT": {"provider_id": "eia", "alias": "RNGWHHD", "kind": "observations", "metric": "spot_price", "unit": "USD/MMBtu", "route": "natural-gas/pri/fut"}
   }

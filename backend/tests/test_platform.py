@@ -131,8 +131,12 @@ def test_asset_market_category_and_product_type_are_separate(logged_in):
     assert assets['us:NVDA']['product_type'] == 'spot'
     assert assets['us:QQQ']['market_category'] == 'etf'
     assert assets['us:QQQ']['product_type'] == 'spot'
-    assert assets['us:SPX']['market_category'] == 'other'
+    assert assets['us:SPX']['market_category'] == 'indices'
     assert assets['us:SPX']['product_type'] == 'reference'
+    assert assets['cn_index:000001']['market_category'] == 'indices'
+    assert assets['cn_index:000001']['market_source']['credential_required'] is False
+    assert assets['cn_index:000001']['market_source']['fallback_provider_ids'] == ['tencent_cn_public']
+    assert assets['cn:000300']['name'] == '沪深300指数'
 
 def test_settings_validation_persistence_and_csrf(logged_in):
     """验证显示设置校验、持久化及CSRF保护。

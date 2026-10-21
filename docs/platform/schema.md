@@ -22,7 +22,9 @@
 
 Alembic 0003增加`market_observation_metadata`，指向单值观察系列的Parquet。其schema是`observed_at_ms / value DECIMAL128 / unit`，用于EIA WTI Cushing和Henry Hub日度现货参考值。标量series API只返回原值和单位，不把它变成OHLC蜡烛。资产原始源绑定保存在`assets.specification.market_data_source`，供应商最近状态和“密钥是否配置”布尔值记在`providers.detail`；密钥值不写数据库。`config/platform/market_sources.json`定义可用提供方、精确符号、源类型、原生周期、单位与交易所时区。
 
-资产API在现有`asset_type`基础上派生`market_category`（crypto/stocks/etf/other）和`product_type`（spot/perpetual/future/reference/other），不改变持久schema。比如`us:NVDA`、`us:KORU`、`krx:000660`、`eia:WTI_CUSHING_SPOT`与`binance_usdm:NVDAUSDT`各自身份独立，底层价格不会替换永续合约成交价。供应商状态与`live_tradable`各自独立，分类不代表有交易能力。
+资产API在现有`asset_type`基础上派生`market_category`（crypto/stocks/etf/indices/commodities/forex/macro/other）和`product_type`（spot/perpetual/future/reference/other），不改变持久schema。比如`us:NVDA`、`us:KORU`、`krx:000660`、`cn:000001`、`eia:WTI_CUSHING_SPOT`与`binance_usdm:NVDAUSDT`各自身份独立，底层价格不会替换永续合约成交价。供应商状态与`live_tradable`各自独立，分类不代表有交易能力。中国研究指数ID使用`cn:<交易所/指数代码>`，六个指数均为`index/reference`，不是股票或ETF。
+
+`assets.specification.market_data_source`可以绑定一个主provider和有序的`fallback_provider_ids`；provider注册信息用`credential_env: null`表达免密钥公开源，并在API返回`credential_required=false`。`providers.detail`只保存是否配置、授权状态、最近成功/失败与新鲜度，不存密钥值。新增中国指数使用`cn_index:<代码>`以免与相同数字的个股代码冲突；已有沪深300的历史主键`cn:000300`保持兼容。新浪/腾讯指数接口属于免密钥公开页面源，不能据此推导数据许可或实时SLA；当前只映射原生日线且保持研究用途。
 
 三年Binance长期历史仍以`DATA_ROOT/long_history/<symbol>/<interval>/`内的不可变Parquet分段及manifest为权威。`FETCH_BINANCE_ARCHIVES`任务参数保存本次确切资产ID列表，任务result保存合约级检查点，不新增数据库表或迁移；仅对已核验USDM合约排队。长期图表目标周期缺少独立归档时，API可从较长覆盖范围的15m真实K线聚合更大周期，并返回`source_interval`和源manifest/分段哈希；向下插值禁止。
 
