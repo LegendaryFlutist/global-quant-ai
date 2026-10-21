@@ -318,7 +318,7 @@ bash scripts/platform.sh status
 - 验证（2026-10-21）：`bash scripts/platform.sh test`为87 passed，1条既有Starlette TestClient/httpx弃用提示；`cd frontend && npm ci && npm test && npm run build`为3 passed、0 npm audit vulnerability、TS检查和Vite生产构建成功；`python3 scripts/check_docs.py`为711个具名函数均有docstring；涉及Python模块`py_compile`、市场源JSON解析和`git diff --check`通过。
 - 运行：`bash scripts/platform.sh up`完成API、Web、NVIDIA runner重建并保留原`lab`服务和数据卷；健康API返回database/Redis connected，主页HTTP 200。确认资产目录六项已创建、全部没有K线记录；后台任务状态六项FAILED（attempts=3）。没有迁移或重置数据库，没有读取/改动私人凭据。
 - 未解决：主机/Docker网络尚不能与`quotes.sina.cn`及`web.ifzq.gtimg.cn`建立HTTPS连接。用户无需申请密钥；需恢复到这两个公开域名443端口的出站网络后再从网页重新采集。网络恢复前页面会如实显示无行情/不可用，不能用于日内触发或实时决策。
-- Git：本单元检查点提交即将创建；远程推送与CI状态待确认后填写。`.local/`为既有未跟踪用户目录，不纳入提交。
+- Git：实现提交`34ce6d9 feat: add China index public data sources`已推送到`origin/feature/phase2-market-structure`及Draft PR #11；`git ls-remote`确认远端SHA=`34ce6d9f0a1d4913f5e8e273228a81b3b2e8ec83`。GitHub Actions run `39530962337`（run #68）在2026-10-21核查时为`queued`，不是通过；后续文档checkpoint会再触发CI并单独记录。`.local/`为既有未跟踪用户目录，不纳入提交。
 - 下一步：确认公共行情域名在Docker网络中可达；手动重试六个指数三年日线，再核验六项的首末时间、行数与SHA256；随后逐类为仍未绑定行情源的研究资产选择数据源，不把股票、指数、ETF、现货和相关永续合并。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；状态`bash scripts/platform.sh status`；API健康`curl -fsS http://127.0.0.1:8080/api/health`；后端回归`bash scripts/platform.sh test`；前端`cd frontend && npm ci && npm test && npm run build`；重建`bash scripts/platform.sh up`。
 
