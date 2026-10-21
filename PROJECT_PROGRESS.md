@@ -342,6 +342,6 @@ bash scripts/platform.sh status
 - 验证（2026-10-21）：`bash scripts/platform.sh test`为90 passed，1条既有Starlette TestClient/httpx弃用警告；`cd frontend && npm test && npm run build`为3 passed、TypeScript及Vite构建成功；`python3 scripts/check_docs.py`为722个具名函数有文档；相关模块`py_compile`、配置JSON解析及`git diff --check`通过。测试未向Massive发请求。
 - 运行验证：`bash scripts/platform.sh up`完成API、Web与研究镜像重建；API health为`status=ok,database=connected,redis=true`，首页HTTP 200；PostgreSQL、Redis、worker、API、Web、研究runner健康/运行，既有`lab`容器保持运行。没有重置数据库卷或研究数据。
 - 当前问题/限制：配额队列只覆盖本项目经Massive Stocks适配器发出的请求；同账户其他应用或其他主机仍共用配额并可能造成429。免费Basic的EOD权限不等于实时行情，排队只能控制请求频率，不能提高数据权限或历史覆盖年限。此轮未做真实上游请求，避免额外消耗免费额度。
-- Git：本轮待checkpoint提交后补记提交、远程推送和GitHub Actions状态。
+- Git：实现提交`91e0306 fix: queue Massive requests across API workers`已推送至`origin/feature/phase2-market-structure`。GitHub Actions run `39534173714` 的backend、frontend、risk-engine、publish-hygiene全部success：[CI run 39534173714](https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39534173714)。
 - 下一步：确认项目外没有其它程序同时高频使用同一Massive账户；在额度允许时由页面触发一次小窗口请求，检查真实返回频率/计划权限及图表显示的排队等待。若账户仍429，应等待冷却并检查官方Usage/Plan，不新增同账户Key。
 - 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh && git status --short --branch && git log -5 --oneline`；测试`bash scripts/platform.sh test && (cd frontend && npm test && npm run build) && python3 scripts/check_docs.py`；重建`bash scripts/platform.sh up`；健康检查`curl -fsS http://127.0.0.1:8080/api/health`。
