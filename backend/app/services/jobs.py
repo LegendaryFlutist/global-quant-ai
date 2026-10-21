@@ -13,6 +13,8 @@ from app.services.long_history import fetch_three_year_archive, validate_archive
 from app.services.derivative_history import fetch_derivative_history
 from app.services.simulation_backtest import run_simulation_backtest
 from app.services.underlying_market import fetch_underlying_history
+from app.services.research_data import ingest_dataset
+from app.adapters.research_public import ResearchPublicError
 
 def queue():
     """构造具有统一超时的market-data持久RQ队列连接。
@@ -22,7 +24,7 @@ def queue():
     """
     return Queue('market-data', connection=Redis.from_url(REDIS_URL), default_timeout=900)
 
-def enqueue(db,kind: str,parameters: dict, task_id: str | None = None):
+def enqueue(db,kind: str,parameters: dict, task_id: str | None = None, initial_result: dict | None = None):
     """先持久化任务，再用同一ID发布RQ并配置有限重试。
 
     Args:
@@ -35,11 +37,11 @@ def enqueue(db,kind: str,parameters: dict, task_id: str | None = None):
         Task对象；Redis失败记录QUEUE_ERROR，便于之后补发。
     """
     task_id=task_id or str(uuid.uuid4())
-    task=Task(id=task_id,kind=kind,parameters=parameters,status='QUEUED')
+    task=Task(id=task_id,kind=kind,parameters=parameters,status='QUEUED',result=initial_result or {})
     db.add(task); db.commit()
     try:
         timeout=21600 if kind=='FETCH_BINANCE_ARCHIVES' else 900
-        queue().enqueue(execute,task_id,job_id=task_id,retry=Retry(max=2,interval=[5,30]),job_timeout=timeout,result_ttl=86400)
+        queue().enqueue(execute,task_id,job_id=task_id,retry=None if kind=='INGEST_DATASET' else Retry(max=2,interval=[5,30]),job_timeout=timeout,result_ttl=86400)
     except Exception:
         task.status='QUEUE_ERROR'; task.result={'error':'Redis 队列暂不可用，请重试'};db.commit()
     return task
@@ -59,7 +61,8 @@ def execute(task_id: str):
         if task.status=='SUCCEEDED': return task.result
         task.status='RUNNING';task.attempts+=1;task.updated_at=utcnow();db.commit()
         try:
-            if task.kind=='IMPORT_LOCAL': result=import_local(db,task.parameters['asset_id'])
+            if task.kind=='INGEST_DATASET': result=ingest_dataset(db,task)
+            elif task.kind=='IMPORT_LOCAL': result=import_local(db,task.parameters['asset_id'])
             elif task.kind=='VERIFY_ASSETS': result=verify_assets(db)
             elif task.kind=='FETCH_HISTORY': result=fetch_history(db,task.parameters)
             elif task.kind=='FETCH_UNDERLYING_HISTORY': result=fetch_underlying_history(db,task.parameters['asset_id'],task.parameters['interval'],task.parameters.get('days',1095))
@@ -102,8 +105,16 @@ def execute(task_id: str):
             return result
         except Exception as exc:
             db.rollback();task=db.get(Task,task_id)
-            task.status='RETRYING' if task.attempts<3 else 'FAILED'
-            task.result={**(task.result if isinstance(task.result,dict) else {}),'error':str(exc)[:300]};task.updated_at=utcnow();db.commit()
+            task.status='RETRYING' if task.attempts<3 and task.kind!='INGEST_DATASET' else 'FAILED'
+            message = str(exc)[:300]
+            if task.kind=='INGEST_DATASET':
+                message = str(exc)[:300] if isinstance(exc,(ValueError,ResearchPublicError)) else '数据版本采集失败，请检查服务状态；已保存版本保留'
+                from app.domains.models import Provider
+                provider=db.get(Provider,task.parameters.get('provider_id'))
+                if provider:
+                    provider.status='INTEGRATION_UNVERIFIED'
+                    provider.detail={**(provider.detail or {}),'last_error':message,'last_attempt_at':utcnow().isoformat()}
+            task.result={**(task.result if isinstance(task.result,dict) else {}),'error':message};task.updated_at=utcnow();db.commit()
             raise
 
 

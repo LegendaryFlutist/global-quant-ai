@@ -10,7 +10,7 @@ from redis.exceptions import RedisError
 
 from app.core.config import CONFIG_ROOT, REDIS_URL
 
-_ALLOWED_BUCKETS = frozenset({"massive_stocks"})
+_ALLOWED_BUCKETS = frozenset({"massive_stocks", "yahoo_chart", "coinbase_exchange"})
 _STATE_TTL_MS = 86_400_000
 _RESERVE_SLOT_LUA = """
 local now_ms = tonumber(ARGV[1])
@@ -258,7 +258,7 @@ def defer_provider_after_limit(
 
     Args:
         provider_id: Fixed provider ID whose account/asset-class quota was hit.
-        cooldown_seconds: Sanitized Retry-After value, bounded to one hour.
+        cooldown_seconds: Sanitized Retry-After seconds; longer than one hour is honored.
         now_ms: Optional UTC epoch milliseconds for deterministic tests.
         client: Optional isolated Redis client; production uses the service cache.
 
@@ -269,7 +269,7 @@ def defer_provider_after_limit(
         ValueError: Provider or cooldown configuration is invalid.
         ProviderQueueUnavailable: Redis could not persist the shared cooldown.
     """
-    if not isinstance(cooldown_seconds, int) or not 1 <= cooldown_seconds <= 3600:
+    if not isinstance(cooldown_seconds, int) or not 1 <= cooldown_seconds <= 31_536_000:
         raise ValueError("行情供应商冷却时长配置无效")
     policy = _provider_pacing_policies().get(provider_id, {})
     policy_cooldown = policy.get("cooldown_on_429_seconds", 60)

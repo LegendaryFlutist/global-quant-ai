@@ -1,5 +1,15 @@
 # 核心数据表与演进计划
 
+## Stage1–2 首个数据版本单元（0004）
+
+`dataset_versions`为追加式版本表：SHA256主键、asset/provider外键、原生interval、price_type、adjustment、schema/calendar版本、规范数据SHA256、manifest SHA256及相对路径、真实首末时间/行数、observed_at、provenance/quality。ORM和PostgreSQL触发器都拒绝UPDATE/DELETE；修订发布新版本，旧`market_data_metadata`保持原约束和文件指针。
+
+`DATA_ROOT/dataset_versions/<provider>/<asset-hash>/<version>/manifest.json`连接原始响应与规范Parquet。按UTC月份分区的规范文件和raw字节在同产品/来源的`blobs/`内容寻址存储，各版本用硬链接引用；未变月份不重写，不以日历连续性补造bar。文件先持久化，DB后提交；崩溃留下的完整manifest可校验恢复，异常不移动成功状态、不自动删除文件。
+
+行情列用Decimal128(38,18)，volume未知保留null与volume_missing；session_date和真实session开收盘与观测时间分开。`source_published_at_ms`未知为null；历史下载使用实际observed_at/available_at，固定版本的as-of过滤只返回已观测行，不能当作完整历史vintage重建。旧永续桥接保留原source SHA并声明历史接收时间未知。
+
+首批新源只支持NVDA Yahoo日线与Coinbase BTC-USD日线；旧BTCUSDT只读15m快照独立。三产品不接入证券撮合/新模型训练，actions和执行规格尚未完整。`scheduled_tasks.INGEST_DATASET`记录分页日期检查点/行数/版本ID，供应商拒绝后停止，手动重试可续已保存分页。新来源不会被启动全量采集扫描自动调用。
+
 所有时刻为UTC TIMESTAMPTZ，K线时间为交易所epoch毫秒；界面按设置显示时区。金额/价格/数量用NUMERIC(38,18)/Decimal，Arrow行情为Decimal128(34,12)；浮点仅用于图表显示和研究统计。模型计算类型不替代账本精度。
 
 ## Phase1 已创建表（Alembic 0001）

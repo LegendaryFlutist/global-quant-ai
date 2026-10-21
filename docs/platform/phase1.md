@@ -2,6 +2,14 @@
 
 当前新增工作的范围/验收见[2026-10-21 Stage0审计](global-expansion-audit.md)。下文保留历史验收日期；历史测试和覆盖不自动计作当前阶段通过。后续隔离本地paper已获开发授权，但当前仍PLANNED；实盘默认拒绝。
 
+### D1 数据版本页
+
+登录后左侧选择“数据版本”：选择NVDA Yahoo研究日线、Coinbase BTC-USD现货日线或已有BTCUSDT永续快照，指定交易日范围并提交。后台任务显示真实分页进度；失败保留已保存版本，点击重试续未完成页。来源拒绝不会自动循环重试。选择历史版本后不会因新增版本自动切换；曲线仅绘制该版本原生收盘价，质量与来源展开查看。日线日期按市场session解释，永续日期按UTC；范围最多3650天，数据返回少于请求区间时只显示真实覆盖。
+
+API：`GET /api/datasets/catalog`、`POST /api/datasets/ingest`、`GET /api/datasets?asset_id=...`、`GET /api/datasets/{version_id}/bars?as_of_ms=...`。全部要求会话；写请求继续验证CSRF和Origin，不接收URL/key/interval覆盖。as-of仅表示该固定版本在观测时点可见的行，不伪造历史当时接收时间。
+
+已有MarketData图表与数据版本页暂时分别展示；新增证券和BTC现货不送入旧USDT线性永续回测。行情队列仍与既有回填共享worker，积压时UI请求会排队；后续D3规划数据任务资源/优先级隔离。
+
 ## 开发清单
 
 - [x] 原工程内新增backend/frontend，保留GPU lab和历史报告。

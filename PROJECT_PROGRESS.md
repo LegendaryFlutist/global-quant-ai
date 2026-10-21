@@ -1,5 +1,16 @@
 # 项目进度与会话交接
 
+## 2026-10-21 D1：三产品来源与不可变数据版本（已验证）
+
+- 完成：独立数据版本页、认证目录/任务/版本/as-of API、原生NVDA Yahoo研究日线和Coinbase BTC-USD现货日线、既有BTCUSDT永续15m只读桥接；新0004版本表及DB不可变触发器；真实session/DST/半日、Decimal/null成交量、实际observed/available时间、raw响应/SHA、按月内容寻址硬链接、分页落盘/手动续传。来源变更不混入旧MarketData；seed不覆盖人工binding。目录新增现货后实际88项。
+- 测试：`bash scripts/platform.sh test`最终 **117 passed**（40.86秒），含0001→0004迁移、直接SQL修改拒绝、旧永续指针不变、追加100天复用旧月份、失败续页、认证/CSRF/Origin和as-of。首次为114 passed/1 failed（元旦在日历首交易日前），修正后116 passed，补永续桥接后117 passed。既有Starlette/httpx弃用提示1条；测试使用旧镜像alembic.ini时另1条path_separator警告，配置已修复并在后续重建生效。
+- 前端：`npm ci --no-audit --no-fund && npm test && npm run build`通过；最后页面分页进度/日期文案改动后 `npm test && npm run build`再次 **6 passed / 构建成功**。`python3 scripts/check_docs.py` **795函数通过**，compileall与`git diff --check`通过；未改离线研究引擎、NVIDIA包、旧迁移0001–0003、冻结评估/报告，因此未重训或重跑研究收益。
+- 实际部署：`bash scripts/platform.sh up`重建API/Web/研究runner，Alembic **0004**；API health `ok/database connected/redis true/live_enabled false`，既有lab保留。本轮运行证据位于私有`.runtime/development-evidence/20261021-d1/`（测试/构建/启动日志）；不纳入Git。
+- 真实集成（不是fixture）：先14日窗口取得NVDA10根、Coinbase14根；随后2023-10-22至2026-10-20两个源各5页采集成功。NVDA **751根**，实际2023-10-23至2026-10-20，规范SHA256 `13e5fb33e9b8eaf7341a53e944ca4b2eab1b6ea14d618c5a5d48f297660aa4e8`；Coinbase **1095根**，SHA256 `1b51c5a1582631e16edde2fd3902ca5c7526d68fad28dfbfc673d4836155b6f6`。旧BTCUSDT快照 **8639根15m**，桥接规范SHA256 `78a114e8ddcd7206ac2805921dfae0f929b4a159920b5580efe9ffe81bbd6e9c`，不是Binance REST重新连通。三项都写入独立版本，未覆盖旧快照。
+- 队列限制：原worker有54个既有采集排队，本次仅将自己新建的验证任务转入临时`dataset-integration-check`队列，用相同RQ执行函数完成验证，未中断既有任务。正常页面仍使用共享market-data队列；D3需增加任务优先级/资源隔离。没有做已有用户认证浏览器端到端测试（当前无登录会话），不重置密码；前端函数/图表测试与后端认证集成已通过。
+- 边界：只完成D1小闭环，不是全球行情/实时paper全量完成。Yahoo个人研究、provider_native复权，XNYS日历为明确标注的NASDAQ常规时段近似；证券actions/规格、实时权限、全球特征模型/账本均仍待后续阶段。固定版本as-of不会伪造历史接收时点。实盘始终拒绝。
+- 下一步P0 D2：修复通用任务列表中模拟回测任务的owner隔离，随后A1/A2/D3按审计依赖推进。恢复：`bash scripts/resume.sh`；运行 `bash scripts/platform.sh up`；访问 `http://127.0.0.1:8080` → 数据版本；测试 `bash scripts/platform.sh test` 和 `cd frontend && npm test && npm run build`。本单元仅准备本地提交，尚未推送/核验远程CI。
+
 ## 2026-10-21 Stage0：全球扩展审计检查点
 
 - 完成：依据新附件核对数据、研究、平台三条链路；[审计矩阵与详细任务](docs/platform/global-expansion-audit.md)包含文件证据、依赖图、迁移/旧报告兼容、fixture与真实联网的独立验收。静态种子实际87项；三年归档已存在，不重复实施；当前四模型白名单与旧八类构造器分别说明。

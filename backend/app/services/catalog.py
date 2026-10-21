@@ -78,12 +78,17 @@ def seed(db):
         if asset is None:
             continue
         spec=dict(asset.specification or {})
-        spec['market_data_source']=source
-        asset.specification=spec
+        if 'market_data_source' not in spec:
+            spec['market_data_source']=source
+            asset.specification=spec
+        else:
+            source=spec['market_data_source']
+        if not isinstance(source,dict) or not source.get('alias') or not db.get(Provider,source.get('provider_id')):
+            continue  # Preserve incomplete/custom bindings; do not silently replace them at startup.
         alias=source['alias']
         for provider_id in [source['provider_id'], *source.get('fallback_provider_ids',[])]:
             existing_alias=db.scalar(select(Alias).where(Alias.provider_id==provider_id,Alias.alias==alias))
-            if existing_alias is None:
+            if existing_alias is None and db.get(Provider,provider_id):
                 db.add(Alias(asset_id=asset_id,provider_id=provider_id,alias=alias))
     for provider_id,contract in source_registry.get('providers',{}).items():
         provider=db.get(Provider,provider_id)
@@ -121,4 +126,6 @@ def seed(db):
     existing=db.scalar(select(MarketData).limit(1))
     if existing:
         provider=db.get(Provider,'research_snapshot');provider.status='CONNECTED';provider.detail={'mode':'historical_snapshot','last_success_at':existing.updated_at.isoformat(),'note':'真实历史缓存；不是实时报价'}
+    from app.services.research_data import seed_research_catalog
+    seed_research_catalog(db)
     db.commit()

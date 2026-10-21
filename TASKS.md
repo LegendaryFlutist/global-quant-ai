@@ -3,7 +3,7 @@
 本次阶段编号与下方历史Phase不同。完整依赖/差距/迁移/验收见 [阶段0审计](docs/platform/global-expansion-audit.md)。用户已授权后续本地paper开发，实盘仍关闭。
 
 - [x] Stage0：核对现有代码与87项静态种子、明确90天并非全局限制、来源混写/日历/版本/账号边界差距；形成证据矩阵、依赖图、详细任务与迁移兼容计划。
-- [ ] P0 D1：新NVDA日线来源、Coinbase BTC-USD现货、既有BTCUSDT永续快照，独立DatasetVersion/Parquet/raw证据、鉴权页面任务与版本查看；测试及真实联网分别验收。
+- [x] P0 D1：独立DatasetVersion/Parquet/raw证据、鉴权任务/版本页完成；117后端/6前端测试及构建、文档/部署通过；实际三年NVDA751根日线、Coinbase1095根日线，旧永续8639根15m独立快照。全链无实盘执行；真实用户浏览器验收/共享队列积压另列限制。
 - [ ] P0 D2：通用任务列表同时按owner隔离模拟回测任务。
 - [ ] 后续A1/A2/D3/D4/F1/R1/M1/M2/B1/P1/P2/U1按审计任务表依赖推进；全球交易日历、版本化模型、事件回测、持久账本和LIVE_PAPER未验收前仍PLANNED。
 

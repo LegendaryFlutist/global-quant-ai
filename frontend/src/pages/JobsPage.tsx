@@ -40,6 +40,7 @@ export default function JobsPage({
           <tbody>
             {jobs.map((j) => {
               const taskLabels: Record<string, string> = {
+                INGEST_DATASET: "保存不可变行情版本",
                 FETCH_UNDERLYING_HISTORY: "采集底层原始行情",
                 FETCH_HISTORY: "采集Binance合约近期行情",
                 FETCH_ARCHIVE: "归档Binance合约三年数据",
@@ -69,10 +70,12 @@ export default function JobsPage({
                   <small>{typeof j.parameters.interval === "string" ? j.parameters.interval : ""}</small>
                 </td>
                 <td>{badge(j.status)}</td>
-                <td>{j.attempts} / 3</td>
+                <td>{j.attempts} / {j.kind === "INGEST_DATASET" ? 1 : 3}</td>
                 <td className="job-result">
                   {j.kind === "FETCH_BINANCE_ARCHIVES"
                     ? <div><span>{completed} / {total} 个合约完成{current ? ` · 正在采集 ${current}` : ""}</span><progress style={{ width: "100%", height: "8px" }} max={Math.max(total, 1)} value={Math.min(completed, total)} />{typeof j.result.error === "string" && <small className="error" style={{ display: "block" }}>{j.result.error}</small>}</div>
+                    : j.kind === "INGEST_DATASET" && typeof progress.total_pages === "number"
+                      ? <div><span>{String(progress.completed_pages ?? 0)} / {progress.total_pages} 页 · {String(progress.rows_fetched ?? 0)} 根已获取</span><progress aria-label="数据采集分页进度" max={Math.max(progress.total_pages, 1)} value={Number(progress.completed_pages ?? 0)} />{typeof j.result.error === "string" && <small className="error">{j.result.error}</small>}</div>
                     : j.result.error
                     ? String(j.result.error)
                     : j.result.verification_mode === "VERIFIED_LOCAL_SNAPSHOT"
@@ -81,6 +84,8 @@ export default function JobsPage({
                       ? `${String(j.result.rows ?? 0)} 个日度参考值 · ${String(j.result.unit ?? "")}`
                       : j.kind === "FETCH_UNDERLYING_HISTORY" && j.result.rows_fetched
                         ? `${String(j.result.rows_fetched)} 根供应商原生K线 · ${String(j.result.source ?? "")}`
+                    : j.kind === "INGEST_DATASET" && j.status === "SUCCEEDED"
+                      ? "版本已保存；在数据版本页面查看实际覆盖与来源"
                     : j.result.rows
                       ? `${j.result.rows} 根真实 K 线${j.result.status ? ` · ${String(j.result.status)}` : ""}`
                       : j.kind === "FETCH_ARCHIVE"

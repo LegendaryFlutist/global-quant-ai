@@ -333,6 +333,7 @@ export interface SimulationEquityPoint {
   drawdown: string;
 }
 export type PageId =
+  | "datasets"
   | "dashboard"
   | "assets"
   | "charts"

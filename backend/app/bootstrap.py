@@ -35,7 +35,7 @@ def main():
                 continue  # The dedicated NVIDIA runner claims this durable task.
             if queue().fetch_job(task.id) is None:
                 timeout=21600 if task.kind=='FETCH_BINANCE_ARCHIVES' else 900
-                queue().enqueue(execute,task.id,job_id=task.id,retry=Retry(max=2,interval=[5,30]),job_timeout=timeout);task.status='QUEUED'
+                queue().enqueue(execute,task.id,job_id=task.id,retry=None if task.kind=='INGEST_DATASET' else Retry(max=2,interval=[5,30]),job_timeout=timeout);task.status='QUEUED'
         db.commit()
         from app.services.startup_market_data import queue_missing_binance_archives
         queue_missing_binance_archives(db)

@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 from app.core.config import ALLOWED_ORIGINS, REDIS_URL
 from app.core.db import get_db
-from app.api import auth, assets, market, jobs, settings, system, risk, simulation, research_backtests
+from app.api import auth, assets, market, jobs, settings, system, risk, simulation, research_backtests, datasets
 
 app=FastAPI(title='Global Quant AI',version='2.0.0-phase1',docs_url='/api/docs',openapi_url='/api/openapi.json')
 
@@ -46,5 +46,5 @@ def health(db:DBSession=Depends(get_db)):
     return {'status':'ok' if redis_ok else 'degraded','database':'connected','redis':bool(redis_ok),'phase':1,'live_enabled':False}
 
 
-for module in (auth,assets,market,jobs,settings,system,risk,simulation,research_backtests):
+for module in (auth,assets,market,jobs,settings,system,risk,simulation,research_backtests,datasets):
     app.include_router(module.router)

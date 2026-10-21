@@ -4,7 +4,7 @@
 
 全球市场量化研究工作台 · React / FastAPI / PostgreSQL / PyTorch · Phase 1及部分Phase 2研究功能。
 
-本轮增量路线：[全球扩展审计、差距矩阵与任务依赖](docs/platform/global-expansion-audit.md)。先交付来源隔离的数据版本小单元，再按依赖推进模型版本、事件回测与隔离本地paper；未实现阶段保留PLANNED，实盘关闭。当前静态资产种子87项，注册数量不代表已有行情覆盖。
+本轮增量路线：[全球扩展审计、差距矩阵与任务依赖](docs/platform/global-expansion-audit.md)。已增加“数据版本”页：NVDA Yahoo研究日线、Coinbase BTC-USD现货日线、既有BTCUSDT永续快照，分别保存原始证据、日历语义和不可变版本；任务/实际范围/来源与版本曲线可在页面查看。当前88项产品登记不代表全部已有行情。模型版本、全球事件回测与隔离本地paper按依赖继续开发，未实现阶段PLANNED，实盘关闭。
 
 ```bash
 git clone https://github.com/LegendaryFlutist/global-quant-ai.git
@@ -15,7 +15,7 @@ bash scripts/platform.sh credentials
 
 访问 http://localhost:8080 。首次启动随机生成本机登录密码。需要 Docker Engine 与 Compose v2。基础 Web 服务不需要 GPU；已有 NVIDIA 研究容器独立保留。
 
-新克隆不包含个人行情、交易记录、权重或数据库。首次启动会尝试通过 Binance 公开接口采集四个优先标的最近90天数据，网络失败会明确显示；示例目录是标明来源的合成数据，不能作为真实收益证据。其余研究登记资产尚未接入行情源。实盘交易未实现且后端禁止下单。
+新克隆不包含个人行情、交易记录、权重或数据库。旧Binance与底层行情启动补缺会按各自配置排队；新数据版本源由页面显式提交，来源/许可/实际覆盖分别显示。示例目录是标明来源的合成数据，不能作为真实收益证据。实盘交易未实现且后端禁止下单。
 
 会话恢复：先运行 `bash scripts/resume.sh`，读取[项目进度](PROJECT_PROGRESS.md)、[任务清单](TASKS.md)和[恢复/备份流程](docs/platform/recovery.md)。每个验证单元提交Git，换会话不依赖聊天记忆。
 
