@@ -41,7 +41,7 @@
 - [x] 服务启动会为六个缺失指数日线创建后台采集任务；无key来源免凭据校验，提供方失败后记录来源错误，不伪造/拼接/补齐OHLC。
 - [x] 验证：隔离平台后端87 passed，前端3 passed与生产构建成功，Python函数文档711项通过，配置JSON/py_compile/diff检查通过；平台Docker镜像重建、健康检查通过。真实HTTP探针及六项启动补档均失败：新浪/腾讯为`ConnectError`，任务3次尝试后FAILED，无本地指数K线。
 - [ ] 配置/恢复主机到新浪、腾讯公开行情域名的HTTPS连通后，在图表页选择指数、点击“采集底层三年数据”，观察数据时间范围与SHA256；当前Provider状态为UNAVAILABLE，不是密钥缺失。
-- [x] Git：实现提交`34ce6d9`和交接提交`a6baf33`已推送到`feature/phase2-market-structure`及Draft PR #11；Actions run `39531028569`针对`a6baf33`的backend、frontend、risk-engine、publish-hygiene全部success。
+- [x] Git：实现提交`34ce6d9`和交接提交`a6baf33`、`7ae0e91`已推送到`feature/phase2-market-structure`及Draft PR #11；Actions runs `39531028569`、`39531363009`各自的backend、frontend、risk-engine、publish-hygiene全部success。
 
 ## 2026-10-20 当前开发单元：市场分类、模拟账号保存与深度模型
 
