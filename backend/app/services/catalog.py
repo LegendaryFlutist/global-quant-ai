@@ -128,4 +128,6 @@ def seed(db):
         provider=db.get(Provider,'research_snapshot');provider.status='CONNECTED';provider.detail={'mode':'historical_snapshot','last_success_at':existing.updated_at.isoformat(),'note':'真实历史缓存；不是实时报价'}
     from app.services.research_data import seed_research_catalog
     seed_research_catalog(db)
+    from app.services.instruments import seed_instrument_timelines
+    seed_instrument_timelines(db)
     db.commit()

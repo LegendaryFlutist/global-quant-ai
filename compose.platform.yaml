@@ -194,6 +194,8 @@ services:
     volumes:
       - ./backend/app:/app/app:ro
       - ./backend/tests:/app/tests:ro
+      - ./backend/migrations:/app/migrations:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
       - ./config/platform:/app/config:ro
       - ./quant_lab:/app/quant_lab:ro
     depends_on:

@@ -1,5 +1,7 @@
 # Global Quant AI V2.0 — 系统架构
 
+2026-10-22 A1首个单元加入[产品规格与别名时间线](instruments.md)：迁移0005独立保存完整版本和有效期，查询同时约束规则时点与实际入库时点。资产页“规格历史”按需读取；新增东京1321和Xetra EXW1身份，总登记90项，但新增两个产品尚无行情。旧Asset/MarketData路径不变，全球完整规格/A2日历及证券撮合仍未完成。
+
 2026-10-21增量路线以[Stage0审计与依赖计划](global-expansion-audit.md)为准。下文Phase编号保留历史含义；新增Stage0–9按数据→特征→模型/策略→事件回测→账本→真实行情paper推进。用户授权后续隔离本地paper开发，当前未实现的账本、撮合与paper仍PLANNED，真实执行始终禁用。静态资产种子当前87项，历史80项为当时验收数字，不是当前真实行情覆盖。
 
 D1新增一个独立Coinbase现货产品后，种子/本机目录为88项。新链路为“数据版本页→认证API→现有RQ任务→GET适配器→有版本的session解析→原始响应/按月Parquet→PG不可变版本→DuckDB校验读取”。`adapters/research_public.py`仅支持两项固定免key日线源，`services/research_calendar.py`处理明确版本的US常规时段与24×7，`services/research_data.py`负责分页/合并/旧永续桥接，`storage/research_datasets.py`负责发布/恢复/哈希读取，`api/datasets.py`提供白名单任务与只读版本。新流不写旧MarketData、不经过旧UTC结构聚合、不改变现有研究报告。

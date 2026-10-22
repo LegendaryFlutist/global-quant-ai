@@ -4,7 +4,7 @@
 
 全球市场量化研究工作台 · React / FastAPI / PostgreSQL / PyTorch · Phase 1及部分Phase 2研究功能。
 
-本轮增量路线：[全球扩展审计、差距矩阵与任务依赖](docs/platform/global-expansion-audit.md)。已增加“数据版本”页：NVDA Yahoo研究日线、Coinbase BTC-USD现货日线、既有BTCUSDT永续快照，分别保存原始证据、日历语义和不可变版本；任务/实际范围/来源与版本曲线可在页面查看。当前88项产品登记不代表全部已有行情。模型版本、全球事件回测与隔离本地paper按依赖继续开发，未实现阶段PLANNED，实盘关闭。
+本轮增量路线：[全球扩展审计、差距矩阵与任务依赖](docs/platform/global-expansion-audit.md)。已增加“数据版本”页：NVDA Yahoo研究日线、Coinbase BTC-USD现货日线、既有BTCUSDT永续快照，分别保存原始证据、日历语义和不可变版本；任务/实际范围/来源与版本曲线可在页面查看。资产页增加[规格历史](docs/platform/instruments.md)：首批东京1321与Xetra EXW1，区分规则生效时间和系统收到证据时间。当前90项产品登记不代表全部已有行情。模型版本、全球事件回测与隔离本地paper按依赖继续开发，未实现阶段PLANNED，实盘关闭。
 
 ```bash
 git clone https://github.com/LegendaryFlutist/global-quant-ai.git

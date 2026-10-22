@@ -154,7 +154,7 @@ def test_dataset_api_boundaries_versions_and_asof(client, logged_in, isolated_ve
 
 
 def test_additive_migration_and_database_immutability(isolated_versions):
-    """Run 0001→0004 only in quant_test and prove direct SQL cannot mutate a frozen version."""
+    """Run 0001→head only in quant_test and prove direct SQL cannot mutate a frozen version."""
     from alembic import command
     from alembic.config import Config
     from sqlalchemy import text
@@ -166,6 +166,7 @@ def test_additive_migration_and_database_immutability(isolated_versions):
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
         connection.execute(text("DROP FUNCTION IF EXISTS reject_dataset_version_mutation()"))
+        connection.execute(text("DROP FUNCTION IF EXISTS reject_instrument_version_mutation()"))
     command.upgrade(Config("alembic.ini"), "head")
     with SessionLocal() as db:
         seed(db)
@@ -174,3 +175,13 @@ def test_additive_migration_and_database_immutability(isolated_versions):
             db.execute(text("UPDATE dataset_versions SET row_count=999 WHERE id=:id"), {"id": result["version"]["id"]})
         db.rollback()
         assert db.get(DatasetVersion, result["version"]["id"]).row_count == 2
+        # The additive instrument migration preserves source data and rejects direct rule edits.
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
+        for statement in (
+            "UPDATE instrument_versions SET recorded_at=now()",
+            "UPDATE instrument_spec_periods SET lot_size=999",
+            "DELETE FROM instrument_alias_periods",
+        ):
+            with pytest.raises(DBAPIError, match="immutable"):
+                db.execute(text(statement))
+            db.rollback()

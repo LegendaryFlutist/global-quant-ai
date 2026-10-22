@@ -5,6 +5,7 @@ from sqlalchemy import String, Integer, BigInteger, Boolean, DateTime, JSON, For
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 from app.domains.datasets import DatasetVersion  # Register additive metadata in test/Alembic discovery.
+from app.domains.instruments import InstrumentVersion, InstrumentPeriod, InstrumentAliasPeriod
 
 def utcnow():
     """为持久记录生成带UTC时区的当前时间。

@@ -2,7 +2,7 @@
 
 恢复入口是版本库内的AGENTS.md、PROJECT_PROGRESS.md、TASKS.md和Git状态，不是任何单次聊天。维护者可以更换Codex会话、模型或重启计算机。
 
-数据版本D1恢复：同时保留PostgreSQL（迁移0004）与`.runtime/market-data/dataset_versions/`的完整目录；manifest/raw/Parquet及共享blobs缺一不可。硬链接可以由保留链接的备份工具复制，也可恢复为独立但字节相同的文件，不删除被历史manifest引用的内容。先查`INGEST_DATASET`任务进度和版本SHA，再从页面重试；已经成功的版本不会覆盖。失败的新源不得用旧缓存冒充成功。新源任务本身不在启动时全量重拉；旧来源启动策略仍独立运行。
+数据版本D1恢复：同时保留PostgreSQL（当前迁移0005，0004增加数据版本，0005增加产品规格/别名时间线）与`.runtime/market-data/dataset_versions/`的完整目录；manifest/raw/Parquet及共享blobs缺一不可。硬链接可以由保留链接的备份工具复制，也可恢复为独立但字节相同的文件，不删除被历史manifest引用的内容。先查`INGEST_DATASET`任务进度和版本SHA，再从页面重试；已经成功的版本不会覆盖。失败的新源不得用旧缓存冒充成功。新源任务本身不在启动时全量重拉；旧来源启动策略仍独立运行。规格版本随数据库备份；只重新seed会产生新的实际入库时点，不能恢复旧known-at历史，须保留完整PG备份。
 
 ## 新会话 / 额度耗尽后
 

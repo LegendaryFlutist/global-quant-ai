@@ -1,5 +1,13 @@
 # 核心数据表与演进计划
 
+## A1 首个规格/别名版本单元（0005）
+
+- `instrument_versions`：完整内容SHA256主键、Asset外键、实际recorded_at、descriptor身份/来源证据；按产品和收到时间查询当时最新版本。
+- `instrument_spec_periods`：version_id+ordinal主键、UTC生效起止（结束不含）、lot/tick/multiplier/min_notional NUMERIC(38,18)、分币种/交收/卖出限制等rules。未知不默认赋值。
+- `instrument_alias_periods`：version_id+ordinal、Provider外键、精确字符串代码及UTC有效期。前导零保留；跨产品同源同代码查询冲突拒绝。
+
+三表只追加，ORM与PG触发器拒绝更新删除，读路径重组完整时间线并核对SHA256防止子记录增减导致静默改变。新版本修订必须包含完整时间线；最新已知版本缺少某日期时不回退到过时规则。现有asset_aliases/specification/行情版本保持原契约。详见[产品规格说明](instruments.md)。
+
 ## Stage1–2 首个数据版本单元（0004）
 
 `dataset_versions`为追加式版本表：SHA256主键、asset/provider外键、原生interval、price_type、adjustment、schema/calendar版本、规范数据SHA256、manifest SHA256及相对路径、真实首末时间/行数、observed_at、provenance/quality。ORM和PostgreSQL触发器都拒绝UPDATE/DELETE；修订发布新版本，旧`market_data_metadata`保持原约束和文件指针。

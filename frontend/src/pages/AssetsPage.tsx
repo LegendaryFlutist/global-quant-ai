@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Asset } from "../types";
 import { date } from "../services/api";
 import { badge } from "../components/StatusBadge";
+import InstrumentPanel from "../components/InstrumentPanel";
 
 /** 以底层身份、主题与实际核验状态检索资产；选择标的只打开研究图表。 */
 export default function AssetsPage({
@@ -19,6 +20,7 @@ export default function AssetsPage({
   const [product, setProduct] = useState("all");
   const [theme, setTheme] = useState("全部");
   const [search, setSearch] = useState("");
+  const [specAssetId, setSpecAssetId] = useState<string | null>(null);
   const categoryLabels: Record<string, string> = {
     crypto: "虚拟货币", stocks: "股票", etf: "ETF", indices: "指数",
     commodities: "商品", forex: "外汇", macro: "宏观参考", other: "其他",
@@ -88,6 +90,7 @@ export default function AssetsPage({
           ))}
         </select>
       </div>
+      {specAssetId && <InstrumentPanel key={specAssetId} assetId={specAssetId} timezone={timezone} onClose={() => setSpecAssetId(null)} />}
       <section className="panel table-panel">
         <table>
           <thead>
@@ -156,6 +159,7 @@ export default function AssetsPage({
                   </td>
                   <td>
                     <button onClick={() => onChart(a)}>查看图表</button>
+                    <button onClick={() => setSpecAssetId(a.id)}>规格历史</button>
                   </td>
                 </tr>
               ))}

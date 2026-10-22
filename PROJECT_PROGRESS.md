@@ -1,5 +1,15 @@
 # 项目进度与会话交接
 
+## 2026-10-22 A1a：产品规格和别名时间线（首个已验证子单元）
+
+- 完成：新增0005三表、NUMERIC(38,18)单位/价位/名义额、完整时间线SHA256与ORM/PG更新删除保护。有效时点和本机实际recorded_at分开；已知截止先选完整版本，再选有效区间，空档不沿用旧值。版本更正/重复导入、来源代码有效期/前导零/冲突拒绝、人工Asset/source/版本保护已实现。资产页增加按需“规格历史”和两个UTC时点查询，三个GET API需认证，无写入/交易入口。
+- 来源与覆盖：新增`xtks:1321`和`xetr:EXW1`，实际目录90项。根据JPX公告保存1321自2026-10-05日本本地零点lot 1→10、价位表类别变化；发行人核验ISIN/挂牌信息。EXW1限定Xetra/EUR，只从2026-10-22核验日起登记规格，不回填上市以来规则。公开证据及精确范围见`config/platform/instrument_timelines.json`与`docs/platform/instruments.md`。新产品未接行情，登记不算覆盖；日历/价位阶梯/结算/卖空未核验字段不填默认值。
+- 测试：`bash scripts/platform.sh test` **134 passed / 1条既有Starlette-httpx弃用提示，50.34秒**；涵盖0001→0005实际迁移、SQL/ORM保护、1321精确边界、known-at拒绝未来知识、修订/重复/人工保护、38位精度、额外子记录哈希检测和鉴权。测试配置新增只读挂载当前迁移/alembic.ini，避免旧镜像迁移假通过。`cd frontend && npm ci --no-audit --no-fund && npm test && npm run build` **8 passed / TypeScript+Vite构建成功**。`python3 scripts/check_docs.py` **834函数通过**；compileall、`git diff --check`通过。
+- 部署实证：`bash scripts/platform.sh up`重建成功，实际PG head为0005，API/Web/PG/Redis/代理桥健康，两个RQ worker与研究runner运行，原lab保留。生产只读查询验证1321在UTC 2026-10-04T14:59:59为lot1，15:00:00为lot10；将known-at设为9月15日返回NOT_KNOWN，不伪造当时入库。两份规格完整SHA通过：1321 `19dc7f7257c9b12d9140957e68380ccc0bc61d60912622a0a7a6ec4dc309ecab`，EXW1 `dd591d94c94ba008e0f7ff8616cee705981067ee9714a404b64833dd95cf158f`。既有13份行情版本全部读取/哈希校验通过。没有运行新产品收益回测或用户登录浏览器E2E。
+- 证据与Git：本机日志位于`.runtime/development-evidence/20261022-a1a/`；不发布数据或`.local/`。实现提交与远程CI在本阶段收尾核验，未完成前不能沿用上轮CI称本轮通过。
+- 未完成/下一步：完整A1仍未完成，下一单元补中美日韩欧的小池指数/ETF/股票候选与有效期规则/别名证据，再实现A2交易所session、午休/半日/DST聚合。Binance公网限制、真实登录浏览器验收仍未解决；本轮没有扩大全球数据采集或证券撮合权限。
+- 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；启动`bash scripts/platform.sh up`；测试`bash scripts/platform.sh test`；访问`http://127.0.0.1:8080` → 资产 → 搜索1321或EXW1 → 规格历史。
+
 ## 2026-10-22 D3前置：数据版本采集独立消费者（已验证）
 
 - 完成：新增服务端队列路由`services/task_queue.py`，新`INGEST_DATASET`进入`research-data`/`dataset-worker`，旧`market-data`及NVIDIA runner保留。专用worker限制1 CPU、2 GiB、128进程和BLAS单线程；现有供应商共享节流/429冷却不变。启动/停止脚本和备份停写说明已纳入新worker。
