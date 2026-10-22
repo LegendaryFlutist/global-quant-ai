@@ -15,6 +15,9 @@ flowchart TB
     API --> PG[(PostgreSQL 业务与审计)]
     API --> Redis[(Redis / RQ 任务队列)]
     Redis --> Worker[Python 3.11 行情 Worker]
+    Redis --> DatasetWorker[Python 3.11 数据版本 Worker / research-data]
+    DatasetWorker --> Native[Yahoo / Coinbase 原生研究日线]
+    Native --> PQ
     Worker --> Binance[Binance USDM 公开 GET]
     Worker --> Underlying[Massive / Twelve Data / EIA GET]
     Underlying --> Mapping[精确股票 / ETF / 能源参考身份]
@@ -55,7 +58,7 @@ flowchart TB
 | 实时缓存 | Redis TTL键 | Binance短TTL快照与底层供应商请求节流缓存；5秒页面刷新读取源数据状态，但供应商实际更新频率仍由市场时段、订阅延迟与限额决定。Redis可丢弃，不是历史事实来源 |
 | 身份 | Argon2id + 12小时服务端会话 | 随机令牌只存 SHA256，HttpOnly / SameSite，CSRF、来源校验与限流 |
 | GPU | 现有 NGC PyTorch 25.11 容器 | 保留 GB10/CUDA 环境；该镜像没有 TensorFlow；研究 Python3.12 与新 API3.11 隔离 |
-| 部署 | Docker Compose | web/api/worker/postgres/redis，与原 lab 共存；只发布127.0.0.1:8080 |
+| 部署 | Docker Compose | web/api/worker/dataset-worker/postgres/redis，与原 lab 共存；只发布127.0.0.1:8080 |
 
 相关实现依据：[FastAPI Cookie](https://fastapi.tiangolo.com/advanced/response-cookies/)、[SQLAlchemy PostgreSQL/psycopg](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#module-sqlalchemy.dialects.postgresql.psycopg)、[RQ Worker](https://python-rq.org/docs/workers/)、[ECharts](https://echarts.apache.org/en/index.html)。
 
@@ -79,6 +82,7 @@ flowchart TB
 
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
 - Ingestion：公开GET、来源与产品代码绑定、原生周期、清洗和恢复。`FETCH_BINANCE_ARCHIVES`只处理已核验USDM永续；`FETCH_UNDERLYING_HISTORY`只处理source registry指定的股票、ETF和能源参考资产。二者启动补缺均幂等且只在worker执行网络请求；没有密钥或未获准数据权限时明确显示待配置/不可用，不生成数据。
+- Queue isolation：服务端`services/task_queue.py`将新`INGEST_DATASET`路由到`research-data`，专用`dataset-worker`限制1 CPU/2 GiB/128进程，BLAS单线程。旧任务留在`market-data`，GPU任务仍归研究runner；持久Redis与提供方限流共享。补发与对账按全局RQ job ID查找，不用队列局部查询误判升级前任务缺失；没有自动搬迁、优先级插队或清空历史任务。队列隔离避免旧回填占据新源消费者，不能消除同源排队、供应商故障或共享磁盘瓶颈。
 - Sentiment / Contagion（Phase3）：各源有时间戳与缺失状态；0–100风险分、六类风险状态；无数据为UNKNOWN。联动统计区分相关、领先滞后与因果假设。
 - Technical（Phase2）：统一研究域结构报告与已认证`GET /api/market/structure`：优先读长期归档，否则使用近期Parquet缓存及可合法聚合的大周期闭合K线；返回已确认摆动点、结构趋势线/破坏、Dow 1-2-3、Elliott候选与因果价格-RSI背离。图表另外显示需要至少三个已确认独立摆动点的局部支撑/压力线、TD setup序列、MACD价格背驰、布林带、MACD与可配置日均线；日均线使用UTC日收盘并投影至当前图表周期。事件带发生/确认时间和来源SHA256；缺少周期明确报告缺档；分析请求不主动联网。
 - Live market（Phase2）：普通90天缓存图与三年缓存图均可每5秒尝试刷新所选周期；同源认证且CSRF保护的POST触发Binance公开GET。长期归档追加已闭合K线不可变分段，近期缓存写入新的不可变Parquet并更新DB指针，未收盘K线只作为图表快照，不进入结构评分。图表状态条显示连接状态、最后一次尝试和上游错误。失败保留旧行情并显示陈旧状态。宿主机公开请求返回HTTP 451，旧版API容器直连时DNS失败；Compose转发宿主机HTTP(S)代理，SOCKS代理需通过私有`PLATFORM_ALL_PROXY`显式设置，代理地址须Docker可达且策略允许`fapi.binance.com:443`，应用不能解除上游拒绝。单API进程锁不跨副本。

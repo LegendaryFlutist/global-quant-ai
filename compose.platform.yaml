@@ -95,6 +95,23 @@ services:
     depends_on:
       api: {condition: service_healthy}
     restart: unless-stopped
+  dataset-worker:
+    image: global-quant-api:phase1
+    environment:
+      <<: *api_environment
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    volumes: *api_volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Dedicated capacity: legacy backfills cannot consume this worker.
+    command: [rq, worker, --url, 'redis://redis:6379/0', --with-scheduler, research-data]
+    cpus: 1.0
+    mem_limit: 2g
+    pids_limit: 128
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
   research-runner:
     image: quant-lab:ngc25.11
     build:

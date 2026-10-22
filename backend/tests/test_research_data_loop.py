@@ -145,7 +145,6 @@ def test_dataset_api_boundaries_versions_and_asof(client, logged_in, isolated_ve
     assert logged_in.post("/api/datasets/ingest", json=payload, headers={"X-CSRF-Token": "invalid"}).status_code == 403
     assert logged_in.post("/api/datasets/ingest", json={**payload, "asset_id": "binance_usdm:BTCUSDT"}).status_code == 422
     assert logged_in.post("/api/datasets/ingest", json={**payload, "url": "https://invalid.example"}).status_code == 422
-    monkeypatch.setattr("app.services.jobs.queue", lambda: type("Q", (), {"enqueue": lambda *a, **k: None})())
     created = logged_in.post("/api/datasets/ingest", json=payload)
     assert created.status_code == 202
     assert logged_in.post("/api/datasets/ingest", json=payload).json()["id"] == created.json()["id"]

@@ -1,5 +1,15 @@
 # 项目进度与会话交接
 
+## 2026-10-22 D3前置：数据版本采集独立消费者（已验证）
+
+- 完成：新增服务端队列路由`services/task_queue.py`，新`INGEST_DATASET`进入`research-data`/`dataset-worker`，旧`market-data`及NVIDIA runner保留。专用worker限制1 CPU、2 GiB、128进程和BLAS单线程；现有供应商共享节流/429冷却不变。启动/停止脚本和备份停写说明已纳入新worker。
+- 恢复兼容：补发/状态对账按全局RQ ID查询，避免队列局部查询把升级前旧origin误报为丢失；已有任务不搬迁、不清空。统一发布函数保留超时与有限重试，Redis发布失败保留分页检查点。数据库schema、旧迁移、冻结数据/模型均未变更。
+- 实际测试：`bash scripts/platform.sh test` **122 passed / 1条既有Starlette-httpx弃用提示，45.15秒**；新增4项覆盖50个旧任务积压时专用worker完成新任务、客户端不能指定队列、升级前origin保留、缺失任务重发、跨队列终态和Redis故障进度保留。测试仅quant_test/redis-test；积压场景为隔离fixture，无供应商网络请求。`python3 scripts/check_docs.py` **805函数通过**；compileall、`bash -n scripts/platform.sh`和`git diff --check`通过。前端无代码变动，本轮未重复运行前端单测；Docker up仍完成Web构建。
+- 实际部署：`bash scripts/platform.sh up`重建成功，原lab保持运行，API/Web/PostgreSQL/Redis/代理桥健康，两个RQ worker与研究runner运行。Docker实测新worker为1 CPU、2147483648字节内存、128进程上限。真实本地公开快照任务`54b6b979-3b61-4715-a600-a3988cb13332`在`research-data`一次完成（0.644128秒），RQ FINISHED/DB SUCCEEDED，8639根K线完整性读取通过；没有再次下载上游行情。验证时旧队列等待数0，不能把隔离fixture积压验收称作生产拥塞测试。
+- 证据：`.runtime/development-evidence/20261022-d3/`保存本轮测试/重建日志；本机数据与既有`.local/`不提交。Git提交/推送及当前提交远程CI在本阶段收尾核验，未核验前不能沿用前一轮CI称本轮通过。
+- 限制/下一步：这是D3前置资源隔离，不代表完整D3 ingestion/质量/熔断统一完成；队列内部FIFO、共享磁盘和上游限制仍存在，旧队列升级前任务原位处理。下一单元推进A1产品规格有效期/别名与小规模日欧资产池，再按依赖实现A2 session聚合；真实用户登录浏览器验收和Binance公网问题仍未解决。
+- 恢复命令：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；服务`bash scripts/platform.sh up`；状态`bash scripts/platform.sh status`；新worker日志`bash scripts/platform.sh logs dataset-worker`；测试`bash scripts/platform.sh test`。
+
 ## 2026-10-22 D2：通用任务列表的用户隔离
 
 - 修复：`GET /api/tasks`对`RUN_SIMULATION_BACKTEST`与`RUN_FULL_RESEARCH`统一校验owner；缺少owner的私有任务也不公开，公共行情任务保持共享。双用户集成测试覆盖双方看不到对方任务，不只依靠前端过滤。

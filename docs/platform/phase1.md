@@ -8,7 +8,9 @@
 
 API：`GET /api/datasets/catalog`、`POST /api/datasets/ingest`、`GET /api/datasets?asset_id=...`、`GET /api/datasets/{version_id}/bars?as_of_ms=...`。全部要求会话；写请求继续验证CSRF和Origin，不接收URL/key/interval覆盖。as-of仅表示该固定版本在观测时点可见的行，不伪造历史当时接收时间。
 
-已有MarketData图表与数据版本页暂时分别展示；新增证券和BTC现货不送入旧USDT线性永续回测。行情队列仍与既有回填共享worker，积压时UI请求会排队；后续D3规划数据任务资源/优先级隔离。
+已有MarketData图表与数据版本页暂时分别展示；新增证券和BTC现货不送入旧USDT线性永续回测。新建数据版本采集使用`research-data`队列和独立`dataset-worker`（1 CPU、2 GiB内存、单任务并发）；旧行情回填仍由`market-data`/`worker`处理，不争用同一个消费者。数据版本队列内部仍按FIFO排队，供应商共享限流/429冷却不变，不承诺立即取得上游数据。
+
+升级前已发布到旧队列的任务原位完成，不清空或搬迁队列。启动补发只处理Redis中不存在的`QUEUED/QUEUE_ERROR`任务；旧来源和新来源的任务ID都可跨队列对账，分页进度保留。查询`bash scripts/platform.sh logs dataset-worker`可查看新消费者；更广泛的采集优先级/公平调度仍属后续D3工作。
 
 ## 开发清单
 
@@ -33,7 +35,7 @@ bash scripts/platform.sh credentials
 
 访问 http://localhost:8080 。账号`admin`，随机密码只在本机`.runtime/bootstrap-admin.txt`（0600）。首次登录后可修改密码。修改后初始文件失效；本阶段没有公网密码找回流程。不要把该文件发到聊天中。
 
-服务：web、api、worker、postgres、redis；现有lab仍保留。`up`先构建镜像再启动，避免错误拉取本地自建镜像。镜像首次需要网络下载依赖。
+服务：web、api、worker、dataset-worker、postgres、redis及研究runner；现有lab仍保留。`up`先构建镜像再启动，避免错误拉取本地自建镜像。镜像首次需要网络下载依赖。
 
 ```bash
 bash scripts/platform.sh status

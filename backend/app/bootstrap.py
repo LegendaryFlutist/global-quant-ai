@@ -27,16 +27,9 @@ def main():
             db.add(User(username='admin',password_hash=hasher.hash(password),role='admin'))
             db.add(Audit(actor='system',action='BOOTSTRAP_ADMIN',detail={'credential':'local file only'}));db.commit()
         # Resume queue publication after Redis outage, and enqueue seed imports once.
-        from app.services.jobs import enqueue, queue, execute
+        from app.services.jobs import enqueue, recover_unpublished_tasks
         from app.domains.models import Task, MarketData
-        from rq import Retry
-        for task in db.scalars(select(Task).where(Task.status.in_(['QUEUED','QUEUE_ERROR']))):
-            if task.kind == 'RUN_FULL_RESEARCH':
-                continue  # The dedicated NVIDIA runner claims this durable task.
-            if queue().fetch_job(task.id) is None:
-                timeout=21600 if task.kind=='FETCH_BINANCE_ARCHIVES' else 900
-                queue().enqueue(execute,task.id,job_id=task.id,retry=None if task.kind=='INGEST_DATASET' else Retry(max=2,interval=[5,30]),job_timeout=timeout);task.status='QUEUED'
-        db.commit()
+        recover_unpublished_tasks(db)
         from app.services.startup_market_data import queue_missing_binance_archives
         queue_missing_binance_archives(db)
         from app.services.startup_market_data import queue_missing_underlying_history

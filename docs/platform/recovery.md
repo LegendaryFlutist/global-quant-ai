@@ -69,7 +69,7 @@ BACKUP_ROOT="$PWD/.runtime/backups/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_ROOT"
 git rev-parse HEAD > "$BACKUP_ROOT/git-commit.txt"
 # 应用当前无交易执行；做完整一致备份时先停止写入端，期间网页暂不可用。
-docker compose --env-file .runtime/platform.env -p quant-lab -f compose.yaml -f compose.platform.yaml stop worker api
+docker compose --env-file .runtime/platform.env -p quant-lab -f compose.yaml -f compose.platform.yaml stop worker dataset-worker research-runner api
 docker exec quant-lab-postgres-1 pg_dump -U quant -d global_quant -Fc > "$BACKUP_ROOT/postgres.dump"
 # 根据本机存在的文件选取；首次克隆没有.env/data/runs时先删去不存在项。
 tar -czf "$BACKUP_ROOT/private-state.tar.gz" \

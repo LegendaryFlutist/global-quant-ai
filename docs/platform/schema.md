@@ -10,6 +10,8 @@
 
 首批新源只支持NVDA Yahoo日线与Coinbase BTC-USD日线；旧BTCUSDT只读15m快照独立。三产品不接入证券撮合/新模型训练，actions和执行规格尚未完整。`scheduled_tasks.INGEST_DATASET`记录分页日期检查点/行数/版本ID，供应商拒绝后停止，手动重试可续已保存分页。新来源不会被启动全量采集扫描自动调用。
 
+D3队列隔离不修改表或既有迁移：新`INGEST_DATASET`进入RQ `research-data`，其它RQ任务继续`market-data`；`scheduled_tasks.id`仍是全局job ID。已发布任务的实际origin保留，Redis缺失的待发布任务按当前路由恢复，数据库`result`中的分页检查点不因发布失败丢失。GPU `RUN_FULL_RESEARCH`不进入RQ。
+
 所有时刻为UTC TIMESTAMPTZ，K线时间为交易所epoch毫秒；界面按设置显示时区。金额/价格/数量用NUMERIC(38,18)/Decimal，Arrow行情为Decimal128(34,12)；浮点仅用于图表显示和研究统计。模型计算类型不替代账本精度。
 
 ## Phase1 已创建表（Alembic 0001）

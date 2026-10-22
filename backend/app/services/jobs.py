@@ -1,10 +1,8 @@
 """持久任务入队、重试和状态对账；行情业务委派给ingestion领域服务。"""
 import uuid
 from datetime import timezone
-from redis import Redis
-from rq import Queue, Retry
+from rq import Retry
 from sqlalchemy import select
-from app.core.config import REDIS_URL
 from app.core.db import SessionLocal
 from app.domains.models import Asset, Task, utcnow
 
@@ -15,14 +13,42 @@ from app.services.simulation_backtest import run_simulation_backtest
 from app.services.underlying_market import fetch_underlying_history
 from app.services.research_data import ingest_dataset
 from app.adapters.research_public import ResearchPublicError
+from app.services.task_queue import queue, find_job
 
-def queue():
-    """构造具有统一超时的market-data持久RQ队列连接。
+
+def publish_task(task: Task):
+    """Publish a persisted task to its server-owned queue using the stable task ID.
 
     Returns:
-        Queue对象；不在构造时执行具体采集。
+        RQ job with unchanged timeout/retry policy; never runs provider work here.
+        INGEST_DATASET has one attempt and resumes saved pages only on manual retry.
     """
-    return Queue('market-data', connection=Redis.from_url(REDIS_URL), default_timeout=900)
+    timeout = 21600 if task.kind == 'FETCH_BINANCE_ARCHIVES' else 900
+    return queue(task.kind).enqueue(
+        execute, task.id, job_id=task.id,
+        retry=None if task.kind == 'INGEST_DATASET' else Retry(max=2, interval=[5, 30]),
+        job_timeout=timeout, result_ttl=86400,
+    )
+
+
+def recover_unpublished_tasks(db):
+    """Republish missing QUEUED/QUEUE_ERROR jobs without moving existing queue entries.
+
+    PostgreSQL progress and IDs survive Redis loss. A global job lookup preserves
+    old queue origins, retry schedules and running work; GPU tasks remain runner-owned.
+    Returns the number republished; Redis failure keeps the remaining durable state.
+    """
+    recovered = 0
+    for task in db.scalars(select(Task).where(Task.status.in_(['QUEUED', 'QUEUE_ERROR']))):
+        if task.kind == 'RUN_FULL_RESEARCH':
+            continue
+        if find_job(task.id) is None:
+            publish_task(task)
+            task.status = 'QUEUED'
+            task.updated_at = utcnow()
+            db.commit()
+            recovered += 1
+    return recovered
 
 def enqueue(db,kind: str,parameters: dict, task_id: str | None = None, initial_result: dict | None = None):
     """先持久化任务，再用同一ID发布RQ并配置有限重试。
@@ -40,10 +66,9 @@ def enqueue(db,kind: str,parameters: dict, task_id: str | None = None, initial_r
     task=Task(id=task_id,kind=kind,parameters=parameters,status='QUEUED',result=initial_result or {})
     db.add(task); db.commit()
     try:
-        timeout=21600 if kind=='FETCH_BINANCE_ARCHIVES' else 900
-        queue().enqueue(execute,task_id,job_id=task_id,retry=None if kind=='INGEST_DATASET' else Retry(max=2,interval=[5,30]),job_timeout=timeout,result_ttl=86400)
+        publish_task(task)
     except Exception:
-        task.status='QUEUE_ERROR'; task.result={'error':'Redis 队列暂不可用，请重试'};db.commit()
+        task.status='QUEUE_ERROR'; task.result={**task.result, 'error':'Redis 队列暂不可用，请重试'};db.commit()
     return task
 
 def execute(task_id: str):
@@ -132,11 +157,10 @@ def reconcile_task_states(db):
         Reflect RQ terminal failures, including worker termination, in durable UI status.
     """
     try:
-        q=queue()
         for task in db.scalars(select(Task).where(Task.status.in_(['QUEUED','RUNNING','RETRYING']))):
             if task.kind == 'RUN_FULL_RESEARCH':
                 continue  # The NVIDIA runner owns this task lifecycle, not the RQ queue.
-            job=q.fetch_job(task.id)
+            job=find_job(task.id)
             if job is not None:
                 status=job.get_status(refresh=True)
                 value=getattr(status,'value',status)
