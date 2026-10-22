@@ -153,7 +153,7 @@ def tasks(user:User=Depends(current_user),db:DBSession=Depends(get_db)):
     rows = db.scalars(select(Task).order_by(Task.created_at.desc()).limit(100))
     visible = []
     for task in rows:
-        if task.kind == 'RUN_FULL_RESEARCH' and task.parameters.get('owner_user_id') != user.id:
+        if task.kind in {'RUN_FULL_RESEARCH', 'RUN_SIMULATION_BACKTEST'} and task.parameters.get('owner_user_id') != user.id:
             continue
         parameters = {key: value for key, value in task.parameters.items()
                       if key not in {'owner_user_id', 'output_id'}}

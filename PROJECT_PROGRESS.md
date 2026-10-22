@@ -1,5 +1,14 @@
 # 项目进度与会话交接
 
+## 2026-10-22 D2：通用任务列表的用户隔离
+
+- 修复：`GET /api/tasks`对`RUN_SIMULATION_BACKTEST`与`RUN_FULL_RESEARCH`统一校验owner；缺少owner的私有任务也不公开，公共行情任务保持共享。双用户集成测试覆盖双方看不到对方任务，不只依靠前端过滤。
+- 验证：`bash scripts/platform.sh test` **118 passed / 1条既有Starlette-httpx弃用提示**（41.33秒）；D1新增Alembic path_separator配置已由新镜像确认，迁移提示消失。`python3 scripts/check_docs.py` **796函数通过**，`git diff --check`通过。D2没有前端改动，沿用D1最后6项前端测试与构建结果，不重复声称新增前端验收。
+- D1功能提交：`7e9da33 feat: add source-isolated immutable research datasets`；Stage0审计提交`810996c`。D1三年实际数据与范围/SHA见下节，实际数据仅在私有磁盘，Git不备份它们。
+- 运行：D2 `bash scripts/platform.sh up`重建成功，API/Web/PostgreSQL/Redis/代理桥健康，worker/研究runner运行，既有lab保留；API返回`ok/live_enabled=false`。13个数据版本逐一完成manifest/raw/Parquet/规范内容哈希读取验证，三个最新版本仍为751/1095/8639根。证据`.runtime/development-evidence/20261021-d1/integration-verified.json`与`.runtime/development-evidence/20261022-d2/`；已有`.local/`保留不提交。Git推送与远程CI尚待以下交接记录确认。
+- 下一阶段：A1有效期规格/别名与日欧小池、A2 session聚合；优先处理D3行情任务优先级/资源隔离（旧回填队列会拖慢新任务）。本轮不启动新模型训练/新产品回测/实时paper；真实用户登录浏览器交互仍未验收。
+- 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；启动 `bash scripts/platform.sh up`；状态 `bash scripts/platform.sh status`；页面 `http://127.0.0.1:8080` → 数据版本；测试 `bash scripts/platform.sh test`。
+
 ## 2026-10-21 D1：三产品来源与不可变数据版本（已验证）
 
 - 完成：独立数据版本页、认证目录/任务/版本/as-of API、原生NVDA Yahoo研究日线和Coinbase BTC-USD现货日线、既有BTCUSDT永续15m只读桥接；新0004版本表及DB不可变触发器；真实session/DST/半日、Decimal/null成交量、实际observed/available时间、raw响应/SHA、按月内容寻址硬链接、分页落盘/手动续传。来源变更不混入旧MarketData；seed不覆盖人工binding。目录新增现货后实际88项。
@@ -19,7 +28,7 @@
 - D1正在实施、UNVERIFIED：新日线源/BTC现货/旧永续桥接、独立版本存储和页面。当前审计提交只纳入文档，不能视作D1完成。真实公网可用性待单独探测；不替换任何旧行情/冻结报告。
 - 下一条命令：`git status --short --branch`；继续D1服务/API整合，然后 `bash scripts/platform.sh test`、前端测试/构建和Docker重建。完整恢复：`bash scripts/resume.sh`；文档提交后另记录实际功能验证和提交。
 
-更新时间：2026-10-21（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
+更新时间：2026-10-22（Asia/Shanghai）。每个经过验证的开发单元都更新本文件、TASKS.md并创建本地提交。本文件不依赖聊天历史。
 
 ## 当前阶段
 
