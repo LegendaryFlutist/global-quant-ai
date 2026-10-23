@@ -5,7 +5,7 @@ import re
 
 from sqlalchemy import select
 
-from app.adapters.energy_public import ENERGY_SYMBOLS, fetch_yahoo_energy
+from app.adapters.energy_public import ENERGY_SYMBOLS, PARSER_VERSION, fetch_yahoo_energy
 from app.core.db import SessionLocal
 from app.domains.models import Asset, Alias, Membership, Provider, MarketData, Setting
 from app.storage.redis_cache import cache_underlying_refresh, read_cached_underlying_refresh
@@ -108,7 +108,9 @@ def fetch_energy_history(db, asset_id, interval, days=1095, now_ms=None):
         "live_candle": ({**forming, **{field: str(forming[field]) for field in FIELDS}} if forming else None),
         "last_closed_at_ms": saved["last_close_ms"], "updated_at_ms": received,
         "source_event_at_ms": evidence["source_event_at_ms"], "source": "yahoo_energy",
-        "source_freshness": evidence["source_freshness"], "dataset_sha256": saved["sha256"],
+        "source_freshness": evidence["source_freshness"] + ("；存在异常未确认K线，已忽略" if evidence.get("discarded_provisional_bars") else ""),
+        "discarded_provisional_bars": evidence.get("discarded_provisional_bars", 0),
+        "dataset_sha256": saved["sha256"],
         "research_only": True, "stale": received-evidence["source_event_at_ms"] > 90*60_000}
     cache_underlying_refresh(asset_id, interval, payload, 86400)
     _set_provider_state(db, "yahoo_energy", "CONNECTED", asset_id=asset_id, interval=interval,
@@ -164,13 +166,15 @@ def refresh_streams_once(db, *, now_ms=None, client=None, fetch_candles=None, fe
             # Upgrade old generic network backoff without shortening any 429 cooldown.
             if interval == "15m" and state.get("error_code") == "UnderlyingDataError":
                 due = min(due, int(state.get("last_attempt_at_ms", current)) + seconds*1000)
+            if state.get("error_code") == "SOURCE_VALIDATION" and state.get("parser_version") != PARSER_VERSION:
+                due = current  # One retry after a parser upgrade, never a 429 bypass.
             if due > current:
                 continue
             asset = db.get(Asset, asset_id)
             source = (asset.specification or {}).get("market_data_source", {}) if asset else {}
             if source.get("provider_id") != ("yahoo_energy" if asset_id.startswith("yahoo_energy:") else "eia"):
                 continue
-            state.update({"last_attempt_at_ms": current, "interval": interval, "poll_seconds": seconds})
+            state.update({"last_attempt_at_ms": current, "interval": interval, "poll_seconds": seconds, "parser_version": PARSER_VERSION})
             try:
                 if asset_id.startswith("yahoo_energy:"):
                     previous = db.scalar(select(MarketData).where(MarketData.asset_id == asset_id, MarketData.interval == interval))

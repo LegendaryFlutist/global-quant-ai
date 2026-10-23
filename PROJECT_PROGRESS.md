@@ -9,7 +9,8 @@
 - 最终验证：`bash scripts/platform.sh test` **145 passed / 1既有Starlette-httpx弃用提示，52.63秒**，仅quant_test/redis-test。前端`npm ci --no-audit --no-fund`（沙箱esbuild EPERM后经正常审批执行）、`npm test` **8 passed**、`npm run build`及Docker前端构建通过。`python3 scripts/check_docs.py` **862函数通过**，`git diff --check`通过。早期143/1失败（参考优先级误入情绪池）与真实精度失败均已修正，不隐瞒失败。
 - 部署：最终`bash scripts/platform.sh up`成功；API/Web/PG/Redis/代理桥/market-refresh健康，原lab保留；两个RQ worker和research-runner运行。未重置数据库、改私钥、下单或发送邮件。隔离API测试覆盖认证行情缓存调用；未声称真实用户登录浏览器E2E已完成。
 - 证据：`.runtime/development-evidence/20261023-energy/backend-tests.log`、`integration.json`与重建日志；架构/来源/范围见`docs/platform/energy-data.md`。本机原始行情、测试证据及既有.local/不提交。
-- Git：本单元等待显式路径提交，父提交0ed1dd7；本节的本地成功不代表GitHub CI成功。提交/推送与CI状态在后续交接记录。
+- Git：实现提交`8bafa36 feat: refresh free energy references independently of charts`已经推送至`feature/phase2-market-structure`，沿用Draft PR #11，未合并main。发布扫描289文件通过。本地没有gh命令，实现提交8bafa36的[GitHub CI 39922816305](https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39922816305)已完成，backend/frontend/risk-engine/publish-hygiene四项全部success。此结果不覆盖后续解析器补丁。
+- 长时间验收补丁（测试已通过，部署验收中）：21:07北京时间核验，盘中运行5小时并自动推进到20:29，旧CLUSDT SHA和13份D1仍通过。NG日线当天未收盘OHLC出现open低于low，导致整页拒绝；新增parser v2只忽略并计数异常未确认K线，已确认异常仍拒绝；解析器升级允许一次校验失败重试，不绕过429。146项初验通过；增加恢复测试后的最终`bash scripts/platform.sh test` **147 passed / 1既有弃用提示，50.94秒**，check_docs **865函数通过**。正在platform up重建部署此补丁。证据raw SHA `d7eefeef806ac460203351d4099e691e523e70487123a05527abd16f021cf47e`仅公共行情。下一步：等待/tmp/quant-energy-parser-build.log重建结束，再核验NG日线恢复并记录最终提交/CI。
 - 未完成/下一步：免费接口没有SLA或已核验盘中同产品备用；EIA现货不能当期货盘中备用。其他资产自动更新、D1能源点时版本、交易日历/换月版本、真实用户浏览器验收仍待实施；A1b/A2按审计依赖继续。纸面/实盘执行均未由本单元启用。
 - 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；运行`bash scripts/platform.sh up`；查看`bash scripts/platform.sh logs market-refresh`；隔离回归`bash scripts/platform.sh test`。备份停写必须包括market-refresh。
 

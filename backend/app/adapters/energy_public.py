@@ -23,6 +23,7 @@ EIA_PAGES = {
     "RNGWHHD": ("https://www.eia.gov/dnav/ng/hist/rngwhhdd.htm", "Henry Hub Natural Gas Spot Price"),
 }
 MAX_BYTES = 4 * 1024 * 1024
+PARSER_VERSION = "energy_public_v2"
 
 
 def public_response(url, params=None, *, transport=None):
@@ -73,7 +74,7 @@ def save_public_evidence(raw, provider, received_ms):
     finally:
         os.unlink(temporary)
     return {"provider": provider, "raw_sha256": digest, "raw_path": str(path.relative_to(DATA_ROOT)),
-            "received_at_ms": received_ms, "parser_version": "energy_public_v1"}
+            "received_at_ms": received_ms, "parser_version": PARSER_VERSION}
 
 
 def parse_yahoo_energy(raw, symbol, interval, received_ms):
@@ -82,7 +83,8 @@ def parse_yahoo_energy(raw, symbol, interval, received_ms):
     Intraday trailing quote snapshots are discarded unless on the 15-minute grid.
     Bars remain provisional until their duration plus a conservative 30-minute
     delay has elapsed. Daily close bounds are conservative 24h labels, not a
-    verified futures session calendar. Missing bars/volume are never fabricated.
+    verified futures session calendar. Invalid provisional OHLC is omitted with
+    a quality count; corrupt confirmed OHLC fails closed. No values are repaired.
     """
     if symbol not in ENERGY_SYMBOLS.values() or interval not in {"15m", "1d"}:
         raise ValueError("未登记的能源参考产品或周期")
@@ -101,6 +103,7 @@ def parse_yahoo_energy(raw, symbol, interval, received_ms):
             raise ValueError
         duration = 900_000 if interval == "15m" else 86_400_000
         closed, forming, previous = [], None, None
+        discarded_provisional = 0
         for index, timestamp in enumerate(timestamps):
             if not isinstance(timestamp, int) or isinstance(timestamp, bool) or timestamp < 0:
                 raise ValueError
@@ -112,12 +115,19 @@ def parse_yahoo_energy(raw, symbol, interval, received_ms):
             values = {field: quote[field][index] for field in fields}
             if any(value is None for value in values.values()):
                 continue
-            values = {field: Decimal(str(value)) for field, value in values.items()}
-            if any(not value.is_finite() for value in values.values()) or values["volume"] < 0:
-                raise ValueError
-            if values["high"] < max(values[k] for k in fields[:4]) or values["low"] > min(values[k] for k in fields[:4]):
-                raise ValueError
             opening = timestamp * 1000
+            is_confirmed = opening + duration - 1 + 1_800_000 < received_ms
+            try:
+                values = {field: Decimal(str(value)) for field, value in values.items()}
+                if any(not value.is_finite() for value in values.values()) or values["volume"] < 0:
+                    raise ValueError
+                if values["high"] < max(values[k] for k in fields[:4]) or values["low"] > min(values[k] for k in fields[:4]):
+                    raise ValueError
+            except (ValueError, InvalidOperation):
+                if is_confirmed:
+                    raise  # Never repair or silently discard corrupt confirmed history.
+                discarded_provisional += 1
+                continue  # A malformed provisional/roll snapshot is not a usable candle.
             row = {"open_time": opening, "close_time": opening + duration - 1, **values}
             if row["close_time"] + 1_800_000 < received_ms:
                 closed.append(row)
@@ -128,6 +138,7 @@ def parse_yahoo_energy(raw, symbol, interval, received_ms):
             raise ValueError
         return closed, forming, {"source_event_at_ms": event_ms,
             "contract_label": str(meta.get("shortName", ""))[:120],
+            "discarded_provisional_bars": discarded_provisional,
             "source_freshness": "Yahoo延迟参考行情；延迟分钟数未承诺；连续代码换月规则未核验",
             "session_calendar": "UNVERIFIED_CONSERVATIVE_24H_DAILY", "execution_eligible": False}
     except (KeyError, IndexError, TypeError, ValueError, InvalidOperation):

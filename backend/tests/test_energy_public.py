@@ -165,3 +165,42 @@ def test_transient_failure_retry_is_bounded_and_safe():
         state = db.get(Setting, energy_status_key("yahoo_energy:CL", "15m")).value
         assert state["error_code"] == "UPSTREAM_UNREACHABLE"
         assert state["next_attempt_at_ms"] == NOW+300000
+
+
+def test_invalid_forming_roll_bar_does_not_block_valid_daily_history():
+    """An inconsistent provisional day is excluded, while confirmed corruption still fails."""
+    body = yahoo_body()
+    result = body["chart"]["result"][0]
+    result["meta"]["dataGranularity"] = "1d"
+    result["timestamp"] = [NOW//1000-172800, NOW//1000-3600]
+    result["indicators"]["quote"] = [{"open": [70, 2.78], "high": [72, 3.16],
+        "low": [69, 3.07], "close": [71, 3.11], "volume": [100, 50]}]
+    closed, forming, meta = parse_yahoo_energy(json.dumps(body), "CL=F", "1d", NOW)
+    assert len(closed) == 1 and forming is None and meta["discarded_provisional_bars"] == 1
+    with pytest.raises(UnderlyingDataError):
+        parse_yahoo_energy(json.dumps(body), "CL=F", "1d", NOW+172800000)
+
+
+def test_parser_upgrade_retries_validation_once_without_bypassing_rate_limit():
+    """A new parser can retry a validation failure; provider 429 deadlines stay in force."""
+    from app.adapters.energy_public import PARSER_VERSION
+    with SessionLocal() as db:
+        for code, error in (("CL", "SOURCE_VALIDATION"), ("NG", "ResearchPublicError")):
+            db.add(Setting(key=energy_status_key(f"yahoo_energy:{code}", "1d"), value={
+                "status": "ERROR", "error_code": error, "parser_version": "energy_public_v1",
+                "next_attempt_at_ms": NOW+3600000}))
+        db.commit()
+        calls = []
+
+        def fetch(db, asset_id, interval, days, now_ms):
+            """Capture source attempts and return fixed persisted bounds without network."""
+            calls.append((asset_id, interval))
+            return {"last_close_ms": NOW-1, "last_observed_at_ms": NOW-86400000}
+
+        refresh_streams_once(db, now_ms=NOW, fetch_candles=fetch, fetch_observations=fetch)
+        assert ("yahoo_energy:CL", "1d") in calls
+        assert ("yahoo_energy:NG", "1d") not in calls
+        assert db.get(Setting, energy_status_key("yahoo_energy:CL", "1d")).value["parser_version"] == PARSER_VERSION
+        calls.clear()
+        refresh_streams_once(db, now_ms=NOW+1000, fetch_candles=fetch, fetch_observations=fetch)
+        assert calls == []
