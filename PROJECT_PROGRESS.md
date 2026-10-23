@@ -1,5 +1,18 @@
 # 项目进度与会话交接
 
+## 2026-10-23 能源数据持续刷新：已测试、部署并真实入库
+
+- 完成：优先处理原油10月19日停更；旧CLUSDT确为一次性MCP快照。新增独立`yahoo_energy:CL/NG`延迟连续参考（15m/1d），EIA官方无密钥HTML日度现货；公共raw SHA、不可变Parquet、源/请求双时间；独立market-refresh自动启动、Redis流锁和共享Yahoo配额、PG持久检查点、失败降级与重启恢复。页面原油合约旁可切换“WTI原油连续参考”，首次无缓存也会在入库后恢复显示；原合约数据不被替换。
+- 数值与时序：能源Parquet使用Decimal(38,18)，解决真实Yahoo超过旧12位小数的ArrowInvalid，新增精度回归；允许能源真实负值，不改加密资产正价校验。Yahoo非网格尾部tick不生成K线；保守收盘确认延后30分钟。日线边界/连续代码换月规则未核验，不允许据此声称已完成训练或撮合准入。
+- 运行故障修复：多轮自动更新曾成功，随后旧通用错误指数退避过长。现盘中普通错误最多300秒重试、429尊重更长Retry-After、增加固定脱敏错误类别；兼容旧UnderlyingDataError检查点，不缩短供应商429冷却。实际部署后CL/NG自动恢复成功，六流状态OK。
+- 实际数据验收（2026-10-23 16:08北京时间）：原油3858根/天然气3863根15m，已确认K线到15:29:59，源报价时间约15:58、缓存stale=false；日线分别753/754根，最多请求1095天。EIA分别745/746个日度点，最新官方观测10月20日。数据完整性读取、全部raw SHA、既有13份D1版本校验通过。旧CLUSDT8639根仍到10月19日，SHA `a483134249f0dd13f3768205ed6f3da1d841f6d65085ee6ba24396e506ea9354`未改变。不能把参考源日期说成Binance合约已更新。
+- 最终验证：`bash scripts/platform.sh test` **145 passed / 1既有Starlette-httpx弃用提示，52.63秒**，仅quant_test/redis-test。前端`npm ci --no-audit --no-fund`（沙箱esbuild EPERM后经正常审批执行）、`npm test` **8 passed**、`npm run build`及Docker前端构建通过。`python3 scripts/check_docs.py` **862函数通过**，`git diff --check`通过。早期143/1失败（参考优先级误入情绪池）与真实精度失败均已修正，不隐瞒失败。
+- 部署：最终`bash scripts/platform.sh up`成功；API/Web/PG/Redis/代理桥/market-refresh健康，原lab保留；两个RQ worker和research-runner运行。未重置数据库、改私钥、下单或发送邮件。隔离API测试覆盖认证行情缓存调用；未声称真实用户登录浏览器E2E已完成。
+- 证据：`.runtime/development-evidence/20261023-energy/backend-tests.log`、`integration.json`与重建日志；架构/来源/范围见`docs/platform/energy-data.md`。本机原始行情、测试证据及既有.local/不提交。
+- Git：本单元等待显式路径提交，父提交0ed1dd7；本节的本地成功不代表GitHub CI成功。提交/推送与CI状态在后续交接记录。
+- 未完成/下一步：免费接口没有SLA或已核验盘中同产品备用；EIA现货不能当期货盘中备用。其他资产自动更新、D1能源点时版本、交易日历/换月版本、真实用户浏览器验收仍待实施；A1b/A2按审计依赖继续。纸面/实盘执行均未由本单元启用。
+- 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；运行`bash scripts/platform.sh up`；查看`bash scripts/platform.sh logs market-refresh`；隔离回归`bash scripts/platform.sh test`。备份停写必须包括market-refresh。
+
 ## 2026-10-22 A1a：产品规格和别名时间线（首个已验证子单元）
 
 - 完成：新增0005三表、NUMERIC(38,18)单位/价位/名义额、完整时间线SHA256与ORM/PG更新删除保护。有效时点和本机实际recorded_at分开；已知截止先选完整版本，再选有效区间，空档不沿用旧值。版本更正/重复导入、来源代码有效期/前导零/冲突拒绝、人工Asset/source/版本保护已实现。资产页增加按需“规格历史”和两个UTC时点查询，三个GET API需认证，无写入/交易入口。

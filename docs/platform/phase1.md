@@ -152,3 +152,8 @@ Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存�
 The authenticated research page lists the 13 exact Binance USD-M contract IDs and enables only symbols with matching local bars, funding, mark-price bars and frozen evaluation plans. Its current model whitelist compares the deterministic multi-timeframe Dow-123 rule, PatchTST (Transformer attention), TFT-Attention and TCN under the same folds, features, costs and exit rules. Deep models use train-fold-only normalization and record seed, architecture audit, source/data hashes and per-model curves/operations. The implementation adds no claim of superior or profitable future returns; the previously inspected validation periods remain selection-biased, and no full GPU run was triggered in this change.
 
 The asset API now derives market category (`crypto`, `stocks`, `etf`, `other`) separately from product type (`spot`, `perpetual`, `future`, `reference`, `other`). This is a presentation projection over the existing catalog, not new market verification. Simulation account names are trimmed/validated and the account policy now accepts up to 100 assets, covering all 13 verified contracts; single-account deep-model version loading remains a separate planned integration. Current network access is blocked: direct Binance DNS lookup fails and the configured proxy returns HTTP 451.
+
+
+## 能源持续刷新（2026-10-23）
+
+能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。

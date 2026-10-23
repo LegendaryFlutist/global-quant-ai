@@ -24,6 +24,8 @@
 - `quant_lab/{analysis,models,strategies,backtesting,research,reports,notifications,risk}`: offline domain implementations; `core` owns resource paths; `cli` owns entry points; `services/risk_research.py` creates a read-only, versioned report from previously used validation windows. Root same-name modules only alias the actual module for old imports and trusted pickles. Live signals and execution are not implemented.
 - Persistent local state: PostgreSQL named volume, Redis AOF volume, `.runtime/market-data/`, `data/` and `runs/`. Git intentionally excludes these. Git is not a backup of personal research artifacts.
 
+- `adapters/energy_public.py` and `services/energy_market.py` own credential-free Yahoo CL/NG delayed references and official EIA scalar history. `market-refresh` runs independently of browser/RQ backfills, with shared Yahoo quota, per-stream Redis locks and `Setting` retry checkpoints. Preserve separate `yahoo_energy:*`, EIA and Binance IDs, raw SHA evidence and 38,18 energy Parquet precision. Continuous-reference roll rules/session calendar remain unverified; this path is not D1 point-in-time/model/execution acceptance. See `docs/platform/energy-data.md`.
+
 ## Mandatory session recovery and checkpoints
 
 1. At every new session or after interruption, read `AGENTS.md`, `PROJECT_PROGRESS.md`, `TASKS.md`, then `git status --short --branch` and `git log -5 --oneline` **before deciding what to implement**. `bash scripts/resume.sh` performs these read-only steps.

@@ -37,8 +37,11 @@ export default function ChartPage({
   const [reload, setReload] = useState(0);
   const asset = assets.find((a) => a.id === assetId);
   const sourceBinding = asset?.specification.market_data_source as {
-    provider_id?: string; kind?: "candles" | "observations"; intervals?: string[];
+    provider_id?: string; kind?: "candles" | "observations"; intervals?: string[]; history_days?: Record<string, number>;
   } | undefined;
+  const isEnergyReference = sourceBinding?.provider_id === "yahoo_energy";
+  const relatedReferences = assets.filter((item) => item.id !== assetId && item.underlying_id === asset?.underlying_id
+    && ["YAHOO_REFERENCE", "EIA"].includes(item.venue));
   const isObservationSeries = sourceBinding?.kind === "observations";
   const isUnderlyingCandle = sourceBinding?.kind === "candles";
   useEffect(() => {
@@ -128,12 +131,13 @@ export default function ChartPage({
       active = false;
     };
   }, [assetId, interval, reload, showArchive, isObservationSeries]);
-  const canRefresh = !isObservationSeries && (showArchive ? archive?.available === true : Boolean(data?.candles.length));
+  const canRefresh = !isObservationSeries && (isEnergyReference || (showArchive ? archive?.available === true : Boolean(data?.candles.length)));
   useEffect(() => {
     if (!canRefresh) return;
     let active = true;
     let timer = 0;
     let retryDelay = 5000;
+    let waitingForHistory = isEnergyReference;
     /** Refresh the selected verified cycle, waiting five seconds after each request settles. */
     async function refreshSelectedCycle() {
       try {
@@ -141,6 +145,13 @@ export default function ChartPage({
         if (!active) return;
         retryDelay = 5000;
         setLive(result);
+        if (waitingForHistory && result.closed_candles.length) {
+          const history = await api<CandleResult>(`/market/candles?asset_id=${encodeURIComponent(assetId)}&interval=${interval}&limit=10000`);
+          if (!active) return;
+          setData(history);
+          setError("");
+          waitingForHistory = false;
+        }
         if (result.closed_candles.length) {
           if (showArchive) setArchive((previous) => {
             if (!previous?.candles) return previous;
@@ -192,9 +203,9 @@ export default function ChartPage({
         const providerInterval = isObservationSeries ? "1d" : interval;
         const result = await post<{ id: string }>("/tasks", {
           kind: "FETCH_UNDERLYING_HISTORY", asset_id: assetId,
-          interval: providerInterval, days: 1095,
+          interval: providerInterval, days: sourceBinding?.history_days?.[providerInterval] ?? 1095,
         });
-        onTask(`已创建${asset?.symbol}底层源头三年行情任务 ${result.id.slice(0, 8)}；结果和数据覆盖会显示在后台任务`);
+        onTask(`已创建${asset?.symbol}源头行情任务 ${result.id.slice(0, 8)}；结果和数据覆盖会显示在后台任务`);
         return;
       }
       const result = await post<{ id: string }>("/tasks", {
@@ -283,10 +294,16 @@ export default function ChartPage({
         <div>
           <span className="eyebrow">MARKET WORKSPACE</span>
           <h1>多周期行情</h1>
-          <p>{isObservationSeries ? "供应商发布的日度能源现货参考值 · 保留真实观测频率" : isUnderlyingCandle ? "底层股票 / ETF 原始行情 · 来源与更新频率按交易所及供应商授权显示" : "Binance公开永续行情 · 本地真实K线 · 只显示已收盘结构信号"}</p>
+          <p>{isObservationSeries ? "供应商发布的日度能源现货参考值 · 保留真实观测频率" : isUnderlyingCandle ? "原始标的参考行情 · 来源、产品身份与更新频率独立显示" : "Binance公开永续行情 · 本地真实K线 · 只显示已收盘结构信号"}</p>
         </div>
         <button onClick={() => setReload((n) => n + 1)}>重新读取缓存</button>
       </header>
+      {relatedReferences.length > 0 && <section className="panel" aria-label="相关能源参考">
+        <strong>相关原始标的参考</strong>
+        <p>合约历史保持原来源。以下为独立参考产品，不能替代当前合约的成交价。</p>
+        {relatedReferences.map((item) => <button key={item.id} onClick={() => { setAssetId(item.id); setShowArchive(false); setInterval(item.venue === "EIA" ? "1d" : "15m"); }}>{item.name}</button>)}
+      </section>}
+      {isEnergyReference && <p className="panel">后台自动更新，无需保持本页面打开。15分钟历史最多请求59天；日线最多三年，以实际覆盖为准。连续代码包含换月，未核验换月规则；仅供研究。</p>}
       <section className="panel chart-panel">
         <div className="chart-toolbar">
           <select
@@ -306,7 +323,7 @@ export default function ChartPage({
           <details className="chart-actions">
             <summary>数据管理</summary>
             <div className="chart-actions-menu">
-              <button onClick={collect}>{isUnderlyingCandle || isObservationSeries ? "采集底层三年数据" : "补齐最近90天"}</button>
+              <button onClick={collect}>{isUnderlyingCandle || isObservationSeries ? isEnergyReference ? "补齐来源可用历史" : "采集底层三年数据" : "补齐最近90天"}</button>
               {!isUnderlyingCandle && !isObservationSeries && <button disabled={asset?.venue !== "BINANCE_USDM" || !["VERIFIED", "VERIFIED_SNAPSHOT"].includes(asset?.verification ?? "")} onClick={() => void collectArchive()}>补齐所选合约三年</button>}
               {verifiedBinanceCount > 0 && <button onClick={() => void collectAllBinanceArchives()}>补齐全部 Binance 合约三年（{verifiedBinanceCount}）</button>}
             </div>
@@ -376,10 +393,11 @@ export default function ChartPage({
         </div>
         {!isObservationSeries && <div className="chart-live-status">
           <span className={`badge ${live?.stale ? "negative" : live ? "positive" : "neutral"}`}>
-            {!canRefresh ? "等待本地K线" : live?.stale ? "数据源连接中断" : live ? isUnderlyingCandle ? "底层源已连接" : "Binance行情已连接" : "正在连接行情"}
+            {!canRefresh ? "等待本地K线" : live?.stale ? "数据偏旧 / 休市 / 更新异常" : live ? isUnderlyingCandle ? "底层源已连接" : "Binance行情已连接" : "正在连接行情"}
           </span>
           <span>{live?.updated_at_ms ? `${live.source ?? "Binance"} · 页面5秒刷新；${live.source_freshness ?? "本地公开行情刷新"} · 最近拉取 ${date(live.updated_at_ms, timezone)}` : "当前周期每5秒检查本地更新；数据源按其授权/频率限制请求"}</span>
-          {live?.request_queue_wait_seconds ? <span>{`Massive 配额队列等待 ${Math.ceil(live.request_queue_wait_seconds)} 秒`}</span> : null}
+          {live?.source_event_at_ms && <span>源行情时间 {date(live.source_event_at_ms, timezone)}</span>}
+          {live?.request_queue_wait_seconds ? <span>{`数据源配额队列等待 ${Math.ceil(live.request_queue_wait_seconds)} 秒`}</span> : null}
           {live?.refresh_error && <span className="error">{live.refresh_error}</span>}
         </div>}
         {loading ? (

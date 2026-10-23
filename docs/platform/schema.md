@@ -113,3 +113,8 @@ Alembic 0003增加`market_observation_metadata`，指向单值观察系列的Par
 模型版本与策略版本禁止原地改产物；晋升状态与运行账户绑定需显式流程。审批引用建议内容哈希、用户和2FA事件，执行请求引用审批与风控复核。审批修改、参数漂移、过期、撤回、重复提交、未知交易所结果均需独立状态机测试。
 
 The full-research task allowlist admits up to 13 exchange-verified symbols and four algorithm IDs for new runs: `analysis_dow123`, `patchtst`, `tft_attention`, and `tcn`. Existing archived model names remain readable through the archive path; no database migration is needed. Task parameters continue to pin selected symbol/model/timeframe lists and the output UUID; local source readiness is checked before enqueueing.
+
+
+## 能源持续刷新（2026-10-23）
+
+能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。

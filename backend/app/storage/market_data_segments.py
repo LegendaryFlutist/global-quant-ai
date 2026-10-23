@@ -142,6 +142,7 @@ def save_underlying_segments(db, asset, interval, rows, source, now_ms, *, max_a
     closed = normalize(
         rows, now_ms, interval, max_age_days=max_age_days,
         provider_native=source.get("timestamp_alignment") == "exchange_session",
+        allow_nonpositive_prices=source.get("provider") == "yahoo_energy" and asset.id in {"yahoo_energy:CL", "yahoo_energy:NG"},
     )
     existing = db.scalar(select(MarketData).where(MarketData.asset_id == asset.id, MarketData.interval == interval))
     prior = read_dataset(existing) if existing is not None else []
@@ -176,6 +177,12 @@ def save_underlying_segments(db, asset, interval, rows, source, now_ms, *, max_a
     if append_rows:
         partition.mkdir(parents=True, exist_ok=True)
         table_schema = SCHEMA
+        if source.get("provider") == "yahoo_energy":
+            # Preserve Yahoo's native decimal payload, which may exceed 12 places.
+            table_schema = pa.schema([
+                field.with_type(pa.decimal128(38, 18)) if pa.types.is_decimal(field.type) else field
+                for field in SCHEMA
+            ])
         for offset in range(0, len(append_rows), SEGMENT_ROW_LIMIT):
             page = append_rows[offset:offset + SEGMENT_ROW_LIMIT]
             target, digest = write_content_addressed_parquet(

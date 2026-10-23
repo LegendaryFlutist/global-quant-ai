@@ -132,6 +132,8 @@ def queue_missing_underlying_history(db: Session, *, enqueue_task=None, now=None
             source = _source_for_asset(asset)
         except ValueError:
             continue
+        if source["provider_id"] in {"yahoo_energy", "eia"}:
+            continue  # Dedicated collector owns startup and recurring refresh.
         credential_env = PROVIDER_CREDENTIAL_ENVS[source["provider_id"]]
         if credential_env and not os.environ.get(credential_env, "").strip():
             continue

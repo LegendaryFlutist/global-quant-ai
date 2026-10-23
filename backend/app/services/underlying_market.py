@@ -33,7 +33,8 @@ BAR_DURATIONS_MS = {"15m": 900_000, "1h": 3_600_000, "1d": 86_400_000}
 PROVIDER_CREDENTIAL_ENVS = {
     "massive_stocks": "MASSIVE_API_KEY",
     "twelve_data": "TWELVE_DATA_API_KEY",
-    "eia": "EIA_API_KEY",
+    "eia": None,
+    "yahoo_energy": None,
     "sina_cn_public": None,
     "tencent_cn_public": None,
 }
@@ -451,12 +452,16 @@ def fetch_underlying_history(db, asset_id, interval="1d", days=HISTORY_DAYS, now
     asset = db.get(Asset, asset_id)
     source = _source_for_asset(asset)
     provider_id = source["provider_id"]
+    if provider_id == "yahoo_energy":
+        from app.services.energy_market import fetch_energy_history
+        return fetch_energy_history(db, asset_id, interval, days, current_ms)
     start_date, end_date = _iso_date_range(current_ms, days, source.get("timezone", "UTC"))
     try:
         if source["kind"] == "observations":
             if interval != "1d":
                 raise ValueError("EIA能源现货是日度参考值，不存在15分钟OHLC")
-            client = adapter or EIAOpenDataPublic()
+            from app.adapters.energy_public import EIAHistoryPublic
+            client = adapter or EIAHistoryPublic()
             response = client.daily_observations(source["route"], source["alias"], start_date, end_date)
             observations = _parse_eia_observations(response, start_date, end_date)
             if not observations:
@@ -465,7 +470,8 @@ def fetch_underlying_history(db, asset_id, interval="1d", days=HISTORY_DAYS, now
                 db, asset.id, source["metric"], observations, source["unit"],
                 {"provider": provider_id, "series": source["alias"], "route": source["route"],
                  "mode": "daily_spot_observations", "lookback_days": days,
-                 "retrieved_at_ms": current_ms, "value_semantics": "scalar_observation_not_ohlc"},
+                 "retrieved_at_ms": current_ms, "value_semantics": "scalar_observation_not_ohlc",
+                 **getattr(client, "evidence", {})},
             )
             _set_provider_state(db, provider_id, "CONNECTED", asset_id=asset.id, interval="1d", latest_at_ms=result["last_observed_at_ms"])
             db.commit()
@@ -535,6 +541,9 @@ def refresh_underlying_latest(db, asset_id, interval, now_ms=None):
     source = _source_for_asset(asset)
     if source["kind"] != "candles":
         raise ValueError("每日能源现貨参考值是标量序列，请读取参考序列页面")
+    if source["provider_id"] == "yahoo_energy":
+        from app.services.energy_market import read_energy_snapshot
+        return read_energy_snapshot(db, asset_id, interval, current_ms)
     ttl = REFRESH_TTLS.get(source["provider_id"])
     if interval not in source.get("intervals", []) or ttl is None:
         raise ValueError("所选周期没有配置实时/日线刷新")

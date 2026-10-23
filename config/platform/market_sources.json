@@ -23,10 +23,10 @@
     },
     "eia": {
       "name": "US Energy Information Administration",
-      "credential_env": "EIA_API_KEY",
+      "credential_env": null,
       "data_kind": "observations",
-      "freshness": "daily published spot reference series",
-      "history": "daily values; not intraday OHLCV"
+      "freshness": "官方日度现货参考；公开表按发布日更新，非盘中实时",
+      "history": "免费公开历史表；无密钥；真实日度数值，不构造OHLC"
     },
     "sina_cn_public": {
       "name": "新浪中国指数公开行情（研究用途）",

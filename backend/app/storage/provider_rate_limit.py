@@ -151,6 +151,7 @@ def provider_request_slot(
     minimum_spacing_seconds: int | None = None,
     *,
     client: Redis | None = None,
+    max_wait_seconds: int = 3600,
 ):
     """Serialize one outbound call and enforce spacing at dispatch time.
 
@@ -158,6 +159,7 @@ def provider_request_slot(
         provider_id: Fixed provider bucket shared by the API and workers.
         minimum_spacing_seconds: Optional test/administrative spacing override.
         client: Optional isolated Redis client; production uses the service cache.
+        max_wait_seconds: Maximum dispatch wait before yielding to a later cycle.
 
     Yields:
         Seconds spent waiting for this provider's shared dispatch slot.
@@ -184,7 +186,7 @@ def provider_request_slot(
     prefix = f"market:provider-quota:{provider_id}"
     next_key, blocked_key = _bucket_keys(provider_id)
     lock = redis_client.lock(
-        f"{prefix}:dispatch-lock", timeout=60, blocking_timeout=3600,
+        f"{prefix}:dispatch-lock", timeout=60, blocking_timeout=max_wait_seconds,
     )
     queue_started = time.monotonic()
     waited_seconds = 0.0
@@ -214,6 +216,8 @@ def provider_request_slot(
             except RedisError:
                 raise ProviderQueueUnavailable("共享行情限流队列暂不可用，已暂停上游请求") from None
             delay_seconds = wait_ms / 1000
+            if time.monotonic() - queue_started + delay_seconds > max_wait_seconds:
+                raise ProviderQueueUnavailable("供应商冷却中，留待下一轮调度")
             time.sleep(delay_seconds)
             waited_seconds += delay_seconds
             continue

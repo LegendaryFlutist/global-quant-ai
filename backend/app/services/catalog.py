@@ -126,6 +126,8 @@ def seed(db):
     existing=db.scalar(select(MarketData).limit(1))
     if existing:
         provider=db.get(Provider,'research_snapshot');provider.status='CONNECTED';provider.detail={'mode':'historical_snapshot','last_success_at':existing.updated_at.isoformat(),'note':'真实历史缓存；不是实时报价'}
+    from app.services.energy_market import seed_energy_catalog
+    seed_energy_catalog(db)
     from app.services.research_data import seed_research_catalog
     seed_research_catalog(db)
     from app.services.instruments import seed_instrument_timelines

@@ -17,7 +17,7 @@ FIELDS = ('open', 'high', 'low', 'close', 'volume')
 DECIMAL = pa.decimal128(34, 12)
 SCHEMA = pa.schema([('open_time',pa.int64()), *[(x, DECIMAL) for x in FIELDS], ('close_time',pa.int64())])
 
-def normalize(rows: list[dict], now_ms: int, interval: str = '15m', *, max_age_days: int = 90, provider_native: bool = False) -> list[dict]:
+def normalize(rows: list[dict], now_ms: int, interval: str = '15m', *, max_age_days: int = 90, provider_native: bool = False, allow_nonpositive_prices: bool = False) -> list[dict]:
     """校验OHLC、Decimal数值和时间边界，去重并去掉未来/过期K线。
 
     Args:
@@ -25,6 +25,7 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m', *, max_age_d
         now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
         interval: 精确K线周期名称，月线1M区别于分钟。
         max_age_days: 保留窗口天数；公开历史采集可大于默认90天。
+        allow_nonpositive_prices: 仅由已登记能源参考存储开启，允许真实负油价。
         provider_native: 允许有明确交易所来源的原生小时K线采用当地盘中偏移。
 
     Returns:
@@ -39,7 +40,7 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m', *, max_age_d
             row.update({k:Decimal(str(raw[k])) for k in FIELDS})
         except (KeyError, ValueError, InvalidOperation):
             raise ValueError('K线字段无效') from None
-        if not all(row[k].is_finite() for k in FIELDS) or min(row[k] for k in FIELDS[:4]) <= 0 or row['volume'] < 0:
+        if not all(row[k].is_finite() for k in FIELDS) or (not allow_nonpositive_prices and min(row[k] for k in FIELDS[:4]) <= 0) or row['volume'] < 0:
             raise ValueError('K线包含非法价格或数量')
         if row['high'] < max(row['open'],row['close'],row['low']) or row['low'] > min(row['open'],row['close'],row['high']):
             raise ValueError('OHLC 范围无效')

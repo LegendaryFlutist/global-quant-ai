@@ -99,6 +99,7 @@ export interface LiveMarketResult {
   last_closed_at_ms?: number | null;
   updated_at_ms?: number;
   source_freshness?: string;
+  source_event_at_ms?: number | null;
   archive_sha256?: string;
   dataset_sha256?: string;
   live_snapshot_sha256?: string | null;

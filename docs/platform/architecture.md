@@ -125,3 +125,8 @@ Phase1审计是应用只追加，不声称具备数据库级防篡改。Phase7�
 - 数据库卷与Parquet目录需一起备份，恢复后校验SHA256。不能用`down -v`重置用户数据。
 
 - Full research strategy selection (2026-10-19): new system backtests expose only the deterministic multi-timeframe structure/Dow-123 rule strategy. The UI lists all 13 exchange-verified contract IDs and obtains readiness from local real bars, funding, mark-price bars and a matching frozen evaluation plan. Assets missing any component are shown as unavailable and cannot be included in a run. Older ML batches remain read-only archives; the selector does not imply model training. Reports include long/short operation counts.
+
+
+## 能源持续刷新（2026-10-23）
+
+能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。
