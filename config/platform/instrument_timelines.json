@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "asset": {
+        "id": "xtks:1321",
+        "symbol": "1321",
+        "name": "NEXT FUNDS 日经225 ETF",
+        "underlying_id": "nf_nikkei225_etf",
+        "asset_type": "etf",
+        "venue": "XTKS"
+      },
+      "providers": [
+        {
+          "id": "jpx_reference",
+          "name": "JPX 产品公告（身份参考）"
+        }
+      ],
+      "timeline": {
+        "asset_id": "xtks:1321",
+        "instrument_type": "etf",
+        "asset_class": "equity",
+        "mic": "XTKS",
+        "isin": "JP3027650005",
+        "timezone": "Asia/Tokyo",
+        "calendar_id": "XTKS",
+        "listing_date": "2001-07-13",
+        "identity_status": "SOURCE_VERIFIED",
+        "note": "仅核验身份及公告覆盖的交易单位/价位表类别。未实现日本日历聚合、价位阶梯、拆分复权或证券撮合；不能把10月5日交易规则生效日当作10月7日份额拆分生效日。ISIN为发行人当前产品标识。",
+        "evidence": [
+          {
+            "url": "https://www.jpx.co.jp/english/news/1030/20260915-01.html",
+            "title": "JPX 1321交易单位及价位表变更公告",
+            "published_on": "2026-09-15",
+            "checked_on": "2026-10-22",
+            "scope": "2026-10-05开始lot从1变10，价位表由One unit ETF改为TOPIX 500；只覆盖公告日起的旧规则，不推断更早历史。"
+          },
+          {
+            "url": "https://nextfunds.jp/uk/lineup/1321/",
+            "title": "NEXT FUNDS 1321发行人产品身份",
+            "checked_on": "2026-10-22",
+            "scope": "东京上市、日元、ISIN及上市日期；页面说明2026-10-07份额拆分，复权处理仍属后续阶段。"
+          }
+        ],
+        "periods": [
+          {
+            "effective_from": "2026-09-15T00:00:00+09:00",
+            "effective_to": "2026-10-05T00:00:00+09:00",
+            "currency": "JPY",
+            "quote_currency": "JPY",
+            "lot_size": "1",
+            "tick_rule": "JPX_ONE_UNIT_ETF_TABLE",
+            "note": "仅保存价位表名称；未核验价格分档，不提供单一tick_size。"
+          },
+          {
+            "effective_from": "2026-10-05T00:00:00+09:00",
+            "currency": "JPY",
+            "quote_currency": "JPY",
+            "lot_size": "10",
+            "tick_rule": "JPX_TOPIX500_TABLE",
+            "note": "按JPX公告交易日生效；未知结算/卖空/保证金规则不设默认值。"
+          }
+        ],
+        "aliases": [
+          {
+            "provider_id": "jpx_reference",
+            "alias": "1321",
+            "effective_from": "2026-09-15T00:00:00+09:00"
+          }
+        ]
+      }
+    },
+    {
+      "asset": {
+        "id": "xetr:EXW1",
+        "symbol": "EXW1",
+        "name": "iShares Core EURO STOXX 50 UCITS ETF (DE)",
+        "underlying_id": "ishares_eurostoxx50_etf",
+        "asset_type": "etf",
+        "venue": "XETR"
+      },
+      "providers": [
+        {
+          "id": "ishares_reference",
+          "name": "iShares 产品资料（身份参考）"
+        }
+      ],
+      "timeline": {
+        "asset_id": "xetr:EXW1",
+        "instrument_type": "etf",
+        "asset_class": "equity",
+        "mic": "XETR",
+        "isin": "DE0005933956",
+        "timezone": "Europe/Berlin",
+        "calendar_id": "XETR",
+        "listing_date": "2001-01-03",
+        "identity_status": "SOURCE_VERIFIED",
+        "note": "精确限定Deutsche Boerse Xetra的EUR挂牌；不合并其他场所或币种挂牌。规格覆盖仅从本次核验日开始，上市日期不等于交易规则历史覆盖。",
+        "evidence": [
+          {
+            "url": "https://www.ishares.com/nl/professionele-belegger/nl/producten/251783/ishares-euro-stoxx-50-ucits-etf-de-fund?siteEntryPassthrough=true&switchLocale=y",
+            "title": "iShares EXW1发行人产品及挂牌资料",
+            "checked_on": "2026-10-22",
+            "scope": "DE0005933956、Deutsche Boerse Xetra、EXW1、EUR与挂牌日期；lot/tick/结算/卖空权限未核验。"
+          }
+        ],
+        "periods": [
+          {
+            "effective_from": "2026-10-22T00:00:00+02:00",
+            "currency": "EUR",
+            "quote_currency": "EUR",
+            "note": "仅核验身份和报价币种；未接行情、交易规则待核验。"
+          }
+        ],
+        "aliases": [
+          {
+            "provider_id": "ishares_reference",
+            "alias": "EXW1",
+            "effective_from": "2026-10-22T00:00:00+02:00"
+          }
+        ]
+      }
+    }
+  ]
+}

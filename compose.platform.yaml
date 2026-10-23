@@ -25,6 +25,25 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+  proxy-bridge:
+    image: global-quant-api:phase1
+    network_mode: host
+    environment:
+      PROXY_BRIDGE_BIND_ADDRESS: ${PLATFORM_PROXY_BRIDGE_BIND_ADDRESS:-172.17.0.1}
+      PROXY_BRIDGE_BIND_PORT: ${PLATFORM_PROXY_BRIDGE_PORT:-17897}
+      PROXY_BRIDGE_UPSTREAM_HOST: ${PLATFORM_PROXY_UPSTREAM_HOST:-127.0.0.1}
+      PROXY_BRIDGE_UPSTREAM_PORT: ${PLATFORM_PROXY_UPSTREAM_PORT:-7897}
+      PROXY_BRIDGE_CLIENT_CIDR: ${PLATFORM_PROXY_CLIENT_CIDR:-172.26.0.0/16}
+    command: [python, -m, app.services.host_proxy_bridge]
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1', int(__import__('os').environ['PROXY_BRIDGE_UPSTREAM_PORT'])), timeout=2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
   api:
     image: global-quant-api:phase1
     build:
@@ -35,6 +54,17 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATA_ROOT: /market-data
       RESEARCH_ROOT: /research
+      RESEARCH_RUNS_ROOT: /research/research-runs
+      RESEARCH_WORKER_TOKEN: ${PLATFORM_RESEARCH_TOKEN:?Use scripts/platform.sh to generate local credentials}
+      # Public-data vendor keys are optional and are never sent to the browser or written to reports.
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      # This host-specific runtime setting reaches Clash through the restricted bridge.
+      HTTP_PROXY: ${PLATFORM_HTTP_PROXY:-}
+      HTTPS_PROXY: ${PLATFORM_HTTPS_PROXY:-}
+      ALL_PROXY: ${PLATFORM_ALL_PROXY:-}
+      NO_PROXY: ${PLATFORM_NO_PROXY:-localhost,127.0.0.1,::1,api,worker,postgres,redis}
       COOKIE_SECURE: ${PLATFORM_COOKIE_SECURE:-false}
       ALLOWED_ORIGINS: ${PLATFORM_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
     volumes: &api_volumes
@@ -42,9 +72,13 @@ services:
       - ./.runtime:/secrets
       - ./data:/research/data:ro
       - ./runs:/research/runs:ro
+      - ./.runtime/research-runs:/research/research-runs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      proxy-bridge: {condition: service_started}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3)"]
       interval: 10s
@@ -55,7 +89,88 @@ services:
     image: global-quant-api:phase1
     environment: *api_environment
     volumes: *api_volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: [rq, worker, --url, 'redis://redis:6379/0', --with-scheduler, market-data]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  dataset-worker:
+    image: global-quant-api:phase1
+    environment:
+      <<: *api_environment
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    volumes: *api_volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Dedicated capacity: legacy backfills cannot consume this worker.
+    command: [rq, worker, --url, 'redis://redis:6379/0', --with-scheduler, research-data]
+    cpus: 1.0
+    mem_limit: 2g
+    pids_limit: 128
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  market-refresh:
+    image: global-quant-api:phase1
+    environment:
+      <<: *api_environment
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    volumes: *api_volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: [python, -m, app.services.energy_market]
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, python, -c, "from app.storage.provider_rate_limit import _redis_client; assert _redis_client().get('energy-refresh:heartbeat')"]
+      interval: 60s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  research-runner:
+    image: quant-lab:ngc25.11
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace/quant_lab
+    user: "1000:1000"
+    init: true
+    gpus: all
+    ipc: private
+    shm_size: 8gb
+    environment:
+      RESEARCH_API_URL: http://api:8000
+      RESEARCH_WORKER_TOKEN: ${PLATFORM_RESEARCH_TOKEN:?Use scripts/platform.sh to generate local credentials}
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: /tmp/quant-matplotlib
+      QUANT_MAIL_MODE: simulate
+      HOME: /home/quant
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace/quant_lab
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.env
+        read_only: true
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.runtime/platform.env
+        read_only: true
+      - type: bind
+        source: /dev/null
+        target: /workspace/quant_lab/.runtime/bootstrap-admin.txt
+        read_only: true
+    command: ["/opt/quant-venv/bin/python", "scripts/research_worker.py"]
     depends_on:
       api: {condition: service_healthy}
     restart: unless-stopped
@@ -98,6 +213,13 @@ services:
       REDIS_URL: redis://redis-test:6379/0
       DATA_ROOT: /tmp/market-data-tests
     command: [pytest, -q, tests]
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/tests:/app/tests:ro
+      - ./backend/migrations:/app/migrations:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+      - ./config/platform:/app/config:ro
+      - ./quant_lab:/app/quant_lab:ro
     depends_on:
       postgres-test: {condition: service_healthy}
       redis-test: {condition: service_started}

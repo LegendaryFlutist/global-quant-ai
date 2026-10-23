@@ -1,6 +1,14 @@
 # Global Quant AI V2.0 — 系统架构
 
-本架构覆盖全部八个阶段；代码当前实现 Phase 1。既有离线模型研究不等于已经完成 Web 模型中心、模拟账户或审批交易。
+2026-10-22 A1首个单元加入[产品规格与别名时间线](instruments.md)：迁移0005独立保存完整版本和有效期，查询同时约束规则时点与实际入库时点。资产页“规格历史”按需读取；新增东京1321和Xetra EXW1身份，总登记90项，但新增两个产品尚无行情。旧Asset/MarketData路径不变，全球完整规格/A2日历及证券撮合仍未完成。
+
+2026-10-21增量路线以[Stage0审计与依赖计划](global-expansion-audit.md)为准。下文Phase编号保留历史含义；新增Stage0–9按数据→特征→模型/策略→事件回测→账本→真实行情paper推进。用户授权后续隔离本地paper开发，当前未实现的账本、撮合与paper仍PLANNED，真实执行始终禁用。静态资产种子当前87项，历史80项为当时验收数字，不是当前真实行情覆盖。
+
+D1新增一个独立Coinbase现货产品后，种子/本机目录为88项。新链路为“数据版本页→认证API→现有RQ任务→GET适配器→有版本的session解析→原始响应/按月Parquet→PG不可变版本→DuckDB校验读取”。`adapters/research_public.py`仅支持两项固定免key日线源，`services/research_calendar.py`处理明确版本的US常规时段与24×7，`services/research_data.py`负责分页/合并/旧永续桥接，`storage/research_datasets.py`负责发布/恢复/哈希读取，`api/datasets.py`提供白名单任务与只读版本。新流不写旧MarketData、不经过旧UTC结构聚合、不改变现有研究报告。
+
+来源状态与交易权限独立：Yahoo为个人研究补充、provider_native调整口径，XNYS日程仅作为明确标注的Nasdaq常规时段近似；Coinbase是USD现货单场所，日线不等于实时；旧Binance缓存不是重新连通REST。新源API/worker共用Redis每源15秒节流及429冷却，不转代理规避拒绝、不轮换key。原始数据和源快照不能随代码发布。完整全球规格/日历、质量报告表、历史修订查询、模型与账本仍按后续任务实施。
+
+本架构覆盖全部八个阶段。Phase 1 提供认证的公开数据研究平台；Phase 2 已落地按需三年归档、多周期结构API/图表、传统底层公开行情适配和日度能源参考值、多模拟策略配置及只读回测报告。回测曲线和逐笔文件绑定策略、算法及数据SHA256；这些能力不包含实盘执行。
 
 ```mermaid
 flowchart TB
@@ -9,9 +17,18 @@ flowchart TB
     API --> PG[(PostgreSQL 业务与审计)]
     API --> Redis[(Redis / RQ 任务队列)]
     Redis --> Worker[Python 3.11 行情 Worker]
-    Worker --> Public[Binance 公开 GET 数据]
-    Worker --> PQ[(不可变 Parquet 历史快照)]
-    API --> PQ
+    Redis --> DatasetWorker[Python 3.11 数据版本 Worker / research-data]
+    DatasetWorker --> Native[Yahoo / Coinbase 原生研究日线]
+    Native --> PQ
+    Worker --> Binance[Binance USDM 公开 GET]
+    Worker --> Underlying[Massive / Twelve Data / EIA GET]
+    Underlying --> Mapping[精确股票 / ETF / 能源参考身份]
+    Mapping --> PQ
+    Binance --> PQ
+    Worker --> PQ[(不可变 Parquet 行情分区)]
+    API --> DuckDB[DuckDB 只读分析层]
+    DuckDB --> PQ
+    API --> Cache[(Redis 20秒实时快照缓存)]
     Legacy[现有 NGC PyTorch GPU 研究容器] -. Phase 3/4 接入 .-> Registry[模型版本 / 实验 / 回测服务]
     Registry -.-> PG
     Features[情绪 / 联动 / 技术 / 波浪 / 道氏 / 多周期特征] -.-> Registry
@@ -26,31 +43,54 @@ flowchart TB
     Ideas[研究思想 / 实验登记] -.-> Registry
 ```
 
-实线是 Phase 1 已实现的数据通路；虚线为后续设计。Phase 1 没有 Broker 订单实现，订单 API 在后端拒绝。
+实线是已实现的数据通路；虚线为后续设计。底层行情与Binance永续使用独立产品ID、来源元数据和缓存；Phase 1 没有Broker订单实现，订单API在后端拒绝。
 
 ## 技术选型
 
 | 组件 | 选择 | 原因与边界 |
 |---|---|---|
 | Web | React 19 + TypeScript + Vite 6.4 | 桌面优先、响应式、深色工作台；npm 锁文件 |
-| 图表 | Apache ECharts 6.1（Apache-2.0） | 蜡烛、量柱、MA、十字线、缩放；仅显示已收盘实际数据 |
+| 图表 | Apache ECharts 6.1（Apache-2.0） | 默认仅显示MA与量柱；布林带、MACD、TD九转、趋势线、123、背离和波浪可在指标设置中单独切换并存入PostgreSQL；结构判断只读已收盘实际数据 |
 | API | Python 3.11 / FastAPI / Pydantic | 同源 REST；未来需要时添加 WebSocket，不将轮询声称为 WebSocket |
 | ORM / 迁移 | SQLAlchemy 2.1 / Alembic | 业务与迁移分离，首版迁移冻结表定义 |
 | 数据库 | PostgreSQL 15 | 持久业务、外键、事务；未来账本 NUMERIC(38,18) |
-| 任务 | Redis 6 + RQ 2 | AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
-| 历史数据 | Arrow Decimal128 + Parquet/Zstd | 不可变文件 + SHA256 + DB 指针；数据库不存大批重复 OHLC |
+| 任务 | Redis 6 + RQ 2 | 承载任务队列、认证限流、20秒实时K线快照缓存及Massive Stocks账户级共享限流；AOF、独立 Worker、持久任务状态、失败最多3次；采集分页检查点 |
+| 分析查询 | DuckDB 1.5.6（Python 3.11，ARM64/x86_64） | 进程内只读 SQL 查询已校验的 Parquet 文件；每个请求独立内存连接，不引入第二份可变数据库 |
+| 历史数据 | Arrow Decimal128 + Parquet/Zstd | 不可变文件 + SHA256 + PostgreSQL 元数据指针；数据库不存大批重复 OHLC |
+| 实时缓存 | Redis TTL键 | Binance短TTL快照与底层供应商请求节流缓存；5秒页面刷新读取源数据状态，但供应商实际更新频率仍由市场时段、订阅延迟与限额决定。Redis可丢弃，不是历史事实来源 |
 | 身份 | Argon2id + 12小时服务端会话 | 随机令牌只存 SHA256，HttpOnly / SameSite，CSRF、来源校验与限流 |
 | GPU | 现有 NGC PyTorch 25.11 容器 | 保留 GB10/CUDA 环境；该镜像没有 TensorFlow；研究 Python3.12 与新 API3.11 隔离 |
-| 部署 | Docker Compose | web/api/worker/postgres/redis，与原 lab 共存；只发布127.0.0.1:8080 |
+| 部署 | Docker Compose | web/api/worker/dataset-worker/postgres/redis，与原 lab 共存；只发布127.0.0.1:8080 |
 
 相关实现依据：[FastAPI Cookie](https://fastapi.tiangolo.com/advanced/response-cookies/)、[SQLAlchemy PostgreSQL/psycopg](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#module-sqlalchemy.dialects.postgresql.psycopg)、[RQ Worker](https://python-rq.org/docs/workers/)、[ECharts](https://echarts.apache.org/en/index.html)。
 
 ## 模块边界与后续服务
 
+### 数据层职责
+
+- `backend/app/adapters/` 只负责特定供应商的公开读取和响应解析；不在适配器中落库或推断不同产品可交易。
+- `backend/app/adapters/public_binance.py` 仅读取已核验永续；`underlying_public.py` 提供Massive美股/ETF、Twelve Data XKRX日线、EIA每日WTI/Henry Hub标量参考，以及中国指数的新浪公开日线与腾讯备用日线。后两者免密钥但属于未经服务承诺的公开页面接口，可能延迟、限流或变更；真实源时间戳和失败状态必须保留。
+- `backend/app/services/ingestion.py`、`long_history.py`与`underlying_market.py`负责清洗、原生周期校验、任务恢复和写入编排；源头证券K线与相关永续不混用。能源现货只存标量观察值，禁止伪造OHLC；不补造缺失报价、不向下插值。
+- `backend/app/storage/` 统一文件读写契约。`storage/parquet_files.py`负责流式SHA256、同目录临时文件、fsync与不可变/内容寻址Parquet发布，并原子更新小型manifest；`storage/duckdb_query.py`只读取调用方已校验且明确列出的Parquet分段，时间字段白名单化、文件名用SQL参数传递、Decimal128通过Arrow往返。
+- Parquet是行情/模型输入的规范事实存储；PostgreSQL保存资产/供应商/任务/策略配置和文件哈希指针；Redis当前承载任务队列、认证限流、20秒实时行情快照，以及Massive Stocks的API与后台worker共享账户级限流队列。该队列每16秒最多安排一个上游请求，HTTP 429时统一冷却至少60秒并遵从更长的`Retry-After`；同一账户多个API Key仍共享供应商配额。Redis失效时Massive请求安全暂停，其他行情缓存仍按自身策略读取本地带哈希快照。DuckDB不是独立服务，也不另建共享可变`.duckdb`文件，避免多个API/worker进程竞争写入。
+- 回测交易、净值和完整模型产物保存在带来源/配置/代码SHA256的不可变本地Parquet文件；PostgreSQL仅保留所有者、任务状态与结果索引。技术指标和结构特征应先按确定版本从输入行情计算，保存时须带定义版本、`as_of`、`known_at`和源哈希。
+- US/KRX/CN底层K线写入`DATA_ROOT/underlying_history/<asset-hash>/<interval>/`不可变分段及内容哈希manifest；新闭合K线只追加新段，已知数据修订时发布新manifest。EIA价格点存独立Parquet和Alembic 0003元数据表。实时刷新缓存按供应商节流：Massive同一标的约30秒、全局账户/Stocks队列16秒、429后至少60秒；XKRX日线约6小时、中国公开指数源约60秒。页面轮询不会变成无上限上游请求。
+
+### 接入覆盖范围
+
+资产目录80项中，当前13项具有精确核验的Binance USDT永续代码；这13项各有一份约90天、8,639根15分钟真实K线。此前批量入口及启动补档只扫描注册表中`BINANCE_USDM`且已核验的产品，不触碰其它67个股票、ETF、指数关联资产或未验证代码。服务启动时检查三年15m归档清单，只把缺失/不完整且没有活动任务的资产交给后台队列；检查不在API启动线程内访问网络，已完成归档不会重复采集。图表也保留手动补档入口；图表用完整真实15m桶向上聚合更大周期，不做小周期插值。当前公开REST仍受DNS/代理限制，排队不代表已取得三年行情；页面会显示任务失败原因和实际覆盖范围。
+
+传统底层产品已经按来源分开登记：美国上市股票/ETF接Massive公开聚合接口、SK海力士和三星接Twelve Data XKRX EOD、WTI Cushing与Henry Hub接EIA日度标量序列；中国六个指数（上证、深证、创业板、科创50、中证500、沪深300）接新浪公开日线并以腾讯公开日线备用。中国指数免密钥源在服务启动时可自动排队采集；首次实连仍以任务状态为准。`config/platform/market_sources.json`记录主源、备用源和数据频率。Massive免费档仍要求注册key并限于EOD；Twelve Data key不等于市场权限，XKRX具体可用档位须核对账户；EIA key免费注册。新浪/腾讯公开页面接口不是交易所授权API，禁止把其免key等同于数据再分发授权。NYMEX CL/NG期货不在本次现货接口中，因需独立处理到期和换月。
+
 - Asset Registry：唯一产品ID、底层资产ID、供应商别名、多主题归属；股票与ETF、杠杆ETF、商品期货、相关永续、未上市相关合约不可混用。
-- Ingestion：公开 GET、来源核验、上市时间、交易日历、原生周期、清洗与分页恢复。无可信来源的全球资产只登记，行情显示缺失。
+- Ingestion：公开GET、来源与产品代码绑定、原生周期、清洗和恢复。`FETCH_BINANCE_ARCHIVES`只处理已核验USDM永续；`FETCH_UNDERLYING_HISTORY`只处理source registry指定的股票、ETF和能源参考资产。二者启动补缺均幂等且只在worker执行网络请求；没有密钥或未获准数据权限时明确显示待配置/不可用，不生成数据。
+- Queue isolation：服务端`services/task_queue.py`将新`INGEST_DATASET`路由到`research-data`，专用`dataset-worker`限制1 CPU/2 GiB/128进程，BLAS单线程。旧任务留在`market-data`，GPU任务仍归研究runner；持久Redis与提供方限流共享。补发与对账按全局RQ job ID查找，不用队列局部查询误判升级前任务缺失；没有自动搬迁、优先级插队或清空历史任务。队列隔离避免旧回填占据新源消费者，不能消除同源排队、供应商故障或共享磁盘瓶颈。
 - Sentiment / Contagion（Phase3）：各源有时间戳与缺失状态；0–100风险分、六类风险状态；无数据为UNKNOWN。联动统计区分相关、领先滞后与因果假设。
-- Technical（Phase2）：指标、已确认摆动点、多个 Elliott 候选（硬规则过滤）、经典道氏 HH/HL 与 1-2-3 反转作为独立分析器。保存发生时间和实际确认时间。
+- Technical（Phase2）：统一研究域结构报告与已认证`GET /api/market/structure`：优先读长期归档，否则使用近期Parquet缓存及可合法聚合的大周期闭合K线；返回已确认摆动点、结构趋势线/破坏、Dow 1-2-3、Elliott候选与因果价格-RSI背离。图表另外显示需要至少三个已确认独立摆动点的局部支撑/压力线、TD setup序列、MACD价格背驰、布林带、MACD与可配置日均线；日均线使用UTC日收盘并投影至当前图表周期。事件带发生/确认时间和来源SHA256；缺少周期明确报告缺档；分析请求不主动联网。
+- Live market（Phase2）：普通90天缓存图与三年缓存图均可每5秒尝试刷新所选周期；同源认证且CSRF保护的POST触发Binance公开GET。长期归档追加已闭合K线不可变分段，近期缓存写入新的不可变Parquet并更新DB指针，未收盘K线只作为图表快照，不进入结构评分。图表状态条显示连接状态、最后一次尝试和上游错误。失败保留旧行情并显示陈旧状态。宿主机公开请求返回HTTP 451，旧版API容器直连时DNS失败；Compose转发宿主机HTTP(S)代理，SOCKS代理需通过私有`PLATFORM_ALL_PROXY`显式设置，代理地址须Docker可达且策略允许`fapi.binance.com:443`，应用不能解除上游拒绝。单API进程锁不跨副本。
+- Market cycle（Phase2）：已实现`GET /api/market/sentiment`汇总四个优先永续资产的本地已收盘结构状态；方向分分项包含大小周期趋势、道氏123及最近确认价格-RSI背离，报告波浪候选、20根已收盘对数收益波动、趋势线/破坏、支撑压力和数据哈希。波动率只作背景展示，不改变方向分。大周期冲突或趋势线破坏显示TRANSITIONING，缺档显示UNKNOWN；分数为规则摘要，不是概率或策略收益预测。财经新闻/宏观事件/跨市场传导仍属Phase3。
+- Simulation research（Phase2）：Alembic 0002和认证CRUD保存多个每用户隔离的策略配置；按本地交易价K线、标记价K线和结算资金费回放因果趋势/道氏123/波浪候选/RSI背离/反转形态分数。每账号分别生成带费用、滑点、资金费和保证金假设的逐笔/净值/回撤报告；报告为本地不可变Parquet并绑定配置、算法及来源SHA256，API按账号所有者读取。它不是持续纸面账户，也不能连接实盘或声称收益可复现于未来。
+- Full offline model backtests（Phase2）：`/simulation`中的全模型面板可排队本地行情研究；当前白名单为多周期道氏123规则、PatchTST、TFT-Attention和TCN，采用同一验证窗口、特征、成本与退出方式比较，深度算法在各训练折独立标准化并记录随机种子、算法配置和代码/数据SHA256。API写入带所有者的`RUN_FULL_RESEARCH`持久任务，独立NVIDIA PyTorch容器逐模型/周期/验证折/退出模式更新进度。报告写入`.runtime/research-runs/<task UUID>`，按任务所有者读取；`runs/`里已有`batch_summary.json`的完成批次也以只读归档方式显示。RQ行情worker不消费GPU任务；研究容器不读取私有凭据、不发真实邮件、不产生订单。该页面不代表模型注册、滚动样本外实验或自动择优，也不表示任何模型收益率更高。
 - Multi-timeframe（Phase2）：仅用截至决策时刻已收盘的大周期。配置高低周期关系，不读取未来高周期收盘。
 - Features / Models（Phase3）：训练集拟合预处理，时间切分与标签窗口隔离；不可变模型版本、代码/数据/特征校验、随机种子、训练产物、评估与批准状态。
 - Ensemble（Phase4）：版本固定的加权、投票、层级、OOF元模型；不能在线自动替换已运行策略。
@@ -76,9 +116,17 @@ Phase1审计是应用只追加，不声称具备数据库级防篡改。Phase7�
 ## 数据与运行恢复
 
 - 四个优先标的通过已验证本地真实15m快照导入；只读挂载原始数据，不改回测划分和历史结果。所有来源路径及原始 provenance 写入元数据。
-- Binance公开REST采集使用精确已登记合约代码、原生周期和最近最多90天。每页完成后更新不可变Parquet快照与事务元数据；重试从最新持久K线开始，不重复追加。
+- Binance公开REST的常规快照采集使用精确已登记合约代码、原生周期和最近最多90天。每页完成后更新不可变Parquet快照与事务元数据；重试从最新持久K线开始，不重复追加。
+- Phase2普通长期K线归档可由用户显式创建`FETCH_ARCHIVE`单资产任务，或`FETCH_BINANCE_ARCHIVES`批量任务；服务启动时还会把缺失的已核验合约排入同一可续传批任务。批量流程只采集精确核验的Binance USDM产品三年15m原生K线，逐合约进度保存在`scheduled_tasks.result`，同一合约/周期的已落盘Parquet分页可断点续传。30m、1h、2h、4h、6h、12h、1d和1w可由完整15m桶向上聚合；1m/3m/5m不从15m伪造。分段位于`DATA_ROOT/long_history/<symbol>/<interval>/`，包含SHA256及原子manifest，与90天表和既有报告完全隔离。配置账号页面可以显式请求`FETCH_DERIVATIVE_DATA`，只通过Binance公开GET补充真实mark-price K线与资金结算率；分别存于`DATA_ROOT/derivatives/<symbol>/<interval>/{mark,funding}/`，失败按持久任务重试，读取本地文件不联网。尚未实现从这些数据计算模拟成交或净收益。
 - 每个资产/周期写入通过PostgreSQL事务 advisory lock 串行。新文件原子落盘后更新指针，不覆盖旧文件；异常可留下孤立文件，当前版本不自动清理，后续需要备份/保留策略。
 - 聚合依据UTC边界；周线周一00:00，月线自然月。不完整/缺失桶排除并显示数量。不把大周期插值为小周期。
-- 上游451/超时明确记录失败、重试次数与供应商状态，不替换域名规避限制，不伪造行情。页面每10秒轮询状态，行情是缓存，不宣称实时盘口。
+- 上游DNS/451/超时明确记录失败、重试次数与供应商状态，不替换域名规避限制，不伪造行情。历史任务状态每10秒轮询；缺档Binance归档在服务启动时自动排队，按需标记价与资金费仍由账号页面触发。图表五秒刷新只轮询当前打开页面的已选择K线，不提供逐笔盘口或WebSocket。
 - Redis AOF保存队列；数据库记录任务与分页进度。普通异常最多3次。启动时补发未发布的QUEUED/QUEUE_ERROR任务。Worker被强杀的RUNNING任务由RQ维护及重试处理；任务页可对最终失败任务重新入队。严格跨进程 exactly-once 不作保证，数据写入幂等。
 - 数据库卷与Parquet目录需一起备份，恢复后校验SHA256。不能用`down -v`重置用户数据。
+
+- Full research strategy selection (2026-10-19): new system backtests expose only the deterministic multi-timeframe structure/Dow-123 rule strategy. The UI lists all 13 exchange-verified contract IDs and obtains readiness from local real bars, funding, mark-price bars and a matching frozen evaluation plan. Assets missing any component are shown as unavailable and cannot be included in a run. Older ML batches remain read-only archives; the selector does not imply model training. Reports include long/short operation counts.
+
+
+## 能源持续刷新（2026-10-23）
+
+能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。

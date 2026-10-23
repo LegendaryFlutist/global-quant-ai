@@ -1,32 +1,32 @@
 import csv
-import hashlib
-import json
-import os
-import math
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import pyarrow as pa
-import pyarrow.parquet as pq
 from sqlalchemy import select, text
 from app.core.config import DATA_ROOT
 from app.domains.models import MarketData, utcnow
 from app.adapters.public_binance import INTERVALS
+from app.storage.duckdb_query import query_parquet_rows
+from app.storage.parquet_files import sha256_file, write_parquet_immutable
 
 MINUTES = {'1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'2h':120,'4h':240,'6h':360,'12h':720,'1d':1440,'1w':10080}
 FIELDS = ('open', 'high', 'low', 'close', 'volume')
 DECIMAL = pa.decimal128(34, 12)
 SCHEMA = pa.schema([('open_time',pa.int64()), *[(x, DECIMAL) for x in FIELDS], ('close_time',pa.int64())])
 
-def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict]:
+def normalize(rows: list[dict], now_ms: int, interval: str = '15m', *, max_age_days: int = 90, provider_native: bool = False, allow_nonpositive_prices: bool = False) -> list[dict]:
     """校验OHLC、Decimal数值和时间边界，去重并去掉未来/过期K线。
 
     Args:
         rows: 原始K线/记录列表；字段契约由当前领域函数校验。
         now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
         interval: 精确K线周期名称，月线1M区别于分钟。
+        max_age_days: 保留窗口天数；公开历史采集可大于默认90天。
+        allow_nonpositive_prices: 仅由已登记能源参考存储开启，允许真实负油价。
+        provider_native: 允许有明确交易所来源的原生小时K线采用当地盘中偏移。
 
     Returns:
         按时间排序的已收盘真实记录；冲突或非法数值抛出ValueError。
@@ -40,7 +40,7 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict
             row.update({k:Decimal(str(raw[k])) for k in FIELDS})
         except (KeyError, ValueError, InvalidOperation):
             raise ValueError('K线字段无效') from None
-        if not all(row[k].is_finite() for k in FIELDS) or min(row[k] for k in FIELDS[:4]) <= 0 or row['volume'] < 0:
+        if not all(row[k].is_finite() for k in FIELDS) or (not allow_nonpositive_prices and min(row[k] for k in FIELDS[:4]) <= 0) or row['volume'] < 0:
             raise ValueError('K线包含非法价格或数量')
         if row['high'] < max(row['open'],row['close'],row['low']) or row['low'] > min(row['open'],row['close'],row['high']):
             raise ValueError('OHLC 范围无效')
@@ -48,7 +48,7 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict
             raise ValueError('K线结束时间无效')
         if interval in MINUTES:
             step = MINUTES[interval]*60000
-            if row['close_time'] != row['open_time']+step-1 or (interval != '1w' and row['open_time'] % step):
+            if row['close_time'] != row['open_time']+step-1 or (interval != '1w' and row['open_time'] % step and not provider_native):
                 raise ValueError('K线周期与时间戳不匹配')
         # Never import a currently forming candle. Keep at most the last 90 days of supplied data.
         if row['close_time'] >= now_ms:
@@ -60,10 +60,12 @@ def normalize(rows: list[dict], now_ms: int, interval: str = '15m') -> list[dict
     ordered = sorted(clean.values(), key=lambda x:x['open_time'])
     if not ordered:
         raise ValueError('没有已收盘的真实行情')
-    cutoff = max(now_ms, ordered[-1]['close_time']) - 90*86400000
+    if not isinstance(max_age_days, int) or not 1 <= max_age_days <= 3650:
+        raise ValueError('行情保留范围必须在1到3650天之间')
+    cutoff = max(now_ms, ordered[-1]['close_time']) - max_age_days*86400000
     return [r for r in ordered if r['open_time'] >= cutoff]
 
-def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dict, now_ms: int | None = None):
+def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dict, now_ms: int | None = None, *, max_age_days: int = 90):
     """以资产周期事务锁写不可变Parquet并原子更新元数据指针。
 
     Args:
@@ -73,6 +75,7 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
         rows: 原始K线/记录列表；字段契约由当前领域函数校验。
         source: 已知来源元数据，或对齐函数中的源K线表。
         now_ms: 用于判断已收盘/新鲜度的UTC当前毫秒时间戳。
+        max_age_days: 保留本地行情历史的天数，默认兼容原90日缓存策略。
 
     Returns:
         行数、SHA256和截止时间；拒绝用旧快照覆盖新数据。
@@ -80,7 +83,8 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
     if db.bind.dialect.name == 'postgresql':
         db.execute(text('SELECT pg_advisory_xact_lock(hashtext(:key))'), {'key':asset_id+interval})
-    rows = normalize(rows, now_ms, interval)
+    rows = normalize(rows, now_ms, interval, max_age_days=max_age_days,
+                     provider_native=source.get('timestamp_alignment') == 'exchange_session')
     if not rows:
         raise ValueError('行情已超出最近90天，请更新数据')
     metadata = db.scalar(select(MarketData).where(MarketData.asset_id==asset_id, MarketData.interval==interval))
@@ -90,10 +94,7 @@ def save_dataset(db, asset_id: str, interval: str, rows: list[dict], source: dic
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     filename = f'{uuid.uuid4().hex}.parquet'
     target = DATA_ROOT / filename
-    temp = target.with_suffix('.tmp')
-    pq.write_table(pa.Table.from_pylist(rows,schema=SCHEMA),temp,compression='zstd')
-    os.replace(temp,target)
-    sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    _, sha = write_parquet_immutable(pa.Table.from_pylist(rows,schema=SCHEMA),target)
     values = dict(path=filename,row_count=len(rows),first_open_ms=rows[0]['open_time'],last_close_ms=rows[-1]['close_time'],sha256=sha,source=source,updated_at=utcnow())
     if metadata is None:
         db.add(MarketData(asset_id=asset_id,interval=interval,**values))
@@ -113,12 +114,15 @@ def read_dataset(metadata: MarketData):
     Returns:
         记录列表；文件缺失或损坏立即拒绝读取。
     """
+    if metadata.path.endswith('.json'):
+        from app.storage.market_data_segments import read_underlying_segments
+        return read_underlying_segments(metadata)
     path = DATA_ROOT / metadata.path
     if path.parent != DATA_ROOT or not path.is_file():
         raise ValueError('历史数据文件不存在')
-    if hashlib.sha256(path.read_bytes()).hexdigest() != metadata.sha256:
+    if sha256_file(path) != metadata.sha256:
         raise ValueError('历史文件校验失败，停止读取')
-    return pq.read_table(path).to_pylist()
+    return query_parquet_rows([path], order_column='open_time')
 
 def bucket_bounds(ms: int, interval: str):
     """计算UTC固定周期、周一周线或自然月的聚合边界。

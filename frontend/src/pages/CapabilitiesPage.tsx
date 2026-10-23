@@ -22,10 +22,10 @@ export default function CapabilitiesPage({
             <h3>{c.name}</h3>
             <span
               className={
-                "badge " + (c.status === "IMPLEMENTED" ? "positive" : "neutral")
+              "badge " + (c.status === "IMPLEMENTED" ? "positive" : "neutral")
               }
             >
-              {c.status === "IMPLEMENTED" ? "本阶段已实现" : "后续计划"}
+              {c.status === "IMPLEMENTED" ? "已实现" : c.status === "PARTIAL" ? "部分已实现" : "后续计划"}
             </span>
             <p>{c.detail}</p>
           </section>

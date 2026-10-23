@@ -10,7 +10,7 @@
 | core | 项目资源路径、研究配置和本机配置解析 |
 | data | 公开K线解析与历史基础特征 |
 | analysis | 12类反转形态、经典道氏/123、确认摆动点与波浪候选 |
-| models | 注册名称、PyTorch GRU训练/推断及可信检查点序列化 |
+| models | 旧可信GRU检查点兼容；PatchTST、TFT-Attention、TCN因果序列训练/推断与审计 |
 | strategies | 只用已收盘大周期的入场过滤、特征和未来标签隔离 |
 | backtesting | 逐仓执行、手续费/滑点/资金费、近似强平与完整仓位账本 |
 | research | 冻结时间切分、候选筛选、杠杆场景对比、模拟审计 |

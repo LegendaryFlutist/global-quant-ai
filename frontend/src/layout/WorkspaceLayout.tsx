@@ -3,8 +3,10 @@ import type { User, PageId } from "../types";
 const nav: [PageId, string, string][] = [
   ["dashboard", "◈", "总览"],
   ["assets", "▤", "全球资产"],
+  ["datasets", "▥", "数据版本"],
   ["charts", "⌁", "多周期 K 线"],
   ["risk", "◉", "评分与仓位风控"],
+  ["simulation", "▧", "模拟账号与回测"],
   ["jobs", "◷", "后台任务"],
   ["roadmap", "▦", "模型与平台能力"],
   ["settings", "⚙", "系统设置"],

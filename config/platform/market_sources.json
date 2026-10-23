@@ -1,0 +1,60 @@
+{
+  "providers": {
+    "massive_stocks": {
+      "name": "Massive US Stocks",
+      "credential_env": "MASSIVE_API_KEY",
+      "data_kind": "candles",
+      "freshness": "Basic免费档仅EOD；实时行情需对应付费权限及交易所协议",
+      "history": "Basic最多两年EOD聚合；盘中/实时权限取决于Stocks订阅计划",
+      "request_pacing": {
+        "max_requests_per_minute": 5,
+        "safe_spacing_seconds": 16,
+        "cooldown_on_429_seconds": 60,
+        "quota_scope": "account_per_asset_class",
+        "note": "Keys on one account share subscriptions and limits; this service serializes requests with margin."
+      }
+    },
+    "twelve_data": {
+      "name": "Twelve Data Korea equities",
+      "credential_env": "TWELVE_DATA_API_KEY",
+      "data_kind": "candles",
+      "freshness": "XKRX end-of-day",
+      "history": "daily OHLCV"
+    },
+    "eia": {
+      "name": "US Energy Information Administration",
+      "credential_env": null,
+      "data_kind": "observations",
+      "freshness": "官方日度现货参考；公开表按发布日更新，非盘中实时",
+      "history": "免费公开历史表；无密钥；真实日度数值，不构造OHLC"
+    },
+    "sina_cn_public": {
+      "name": "新浪中国指数公开行情（研究用途）",
+      "credential_env": null,
+      "data_kind": "candles",
+      "freshness": "unofficial public endpoint; provider timestamp; may be delayed",
+      "history": "daily OHLCV; request capped at 1023 bars",
+      "terms_note": "Unofficial endpoint; verify source terms and market-data licensing before redistribution or commercial use."
+    },
+    "tencent_cn_public": {
+      "name": "腾讯中国指数公开行情备用源（研究用途）",
+      "credential_env": null,
+      "data_kind": "candles",
+      "freshness": "unofficial public endpoint; provider timestamp; may be delayed",
+      "history": "daily OHLCV; provider output window is limited",
+      "terms_note": "Unofficial endpoint; verify source terms and market-data licensing before redistribution or commercial use."
+    }
+  },
+  "assets": {
+    "krx:000660": {"provider_id": "twelve_data", "alias": "000660", "kind": "candles", "intervals": ["1d"], "mic_code": "XKRX", "timezone": "Asia/Seoul"},
+    "krx:005930": {"provider_id": "twelve_data", "alias": "005930", "kind": "candles", "intervals": ["1d"], "mic_code": "XKRX", "timezone": "Asia/Seoul"},
+    "cn_index:000001": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000001", "kind": "candles", "intervals": ["1d"], "exchange": "SSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:399001": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sz399001", "kind": "candles", "intervals": ["1d"], "exchange": "SZSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:399006": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sz399006", "kind": "candles", "intervals": ["1d"], "exchange": "SZSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:000688": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000688", "kind": "candles", "intervals": ["1d"], "exchange": "SSE", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn_index:000905": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000905", "kind": "candles", "intervals": ["1d"], "exchange": "CSI", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "cn:000300": {"provider_id": "sina_cn_public", "fallback_provider_ids": ["tencent_cn_public"], "alias": "sh000300", "kind": "candles", "intervals": ["1d"], "exchange": "CSI", "timezone": "Asia/Shanghai", "freshness": "public feed; delayed/unspecified; use source event timestamp", "history_limit_bars": 1023},
+    "eia:WTI_CUSHING_SPOT": {"provider_id": "eia", "alias": "RWTC", "kind": "observations", "metric": "spot_price", "unit": "USD/barrel", "route": "petroleum/pri/spt"},
+    "eia:HENRY_HUB_SPOT": {"provider_id": "eia", "alias": "RNGWHHD", "kind": "observations", "metric": "spot_price", "unit": "USD/MMBtu", "route": "natural-gas/pri/fut"}
+  }
+}

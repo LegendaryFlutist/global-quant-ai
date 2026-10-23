@@ -1,5 +1,25 @@
 # 核心数据表与演进计划
 
+## A1 首个规格/别名版本单元（0005）
+
+- `instrument_versions`：完整内容SHA256主键、Asset外键、实际recorded_at、descriptor身份/来源证据；按产品和收到时间查询当时最新版本。
+- `instrument_spec_periods`：version_id+ordinal主键、UTC生效起止（结束不含）、lot/tick/multiplier/min_notional NUMERIC(38,18)、分币种/交收/卖出限制等rules。未知不默认赋值。
+- `instrument_alias_periods`：version_id+ordinal、Provider外键、精确字符串代码及UTC有效期。前导零保留；跨产品同源同代码查询冲突拒绝。
+
+三表只追加，ORM与PG触发器拒绝更新删除，读路径重组完整时间线并核对SHA256防止子记录增减导致静默改变。新版本修订必须包含完整时间线；最新已知版本缺少某日期时不回退到过时规则。现有asset_aliases/specification/行情版本保持原契约。详见[产品规格说明](instruments.md)。
+
+## Stage1–2 首个数据版本单元（0004）
+
+`dataset_versions`为追加式版本表：SHA256主键、asset/provider外键、原生interval、price_type、adjustment、schema/calendar版本、规范数据SHA256、manifest SHA256及相对路径、真实首末时间/行数、observed_at、provenance/quality。ORM和PostgreSQL触发器都拒绝UPDATE/DELETE；修订发布新版本，旧`market_data_metadata`保持原约束和文件指针。
+
+`DATA_ROOT/dataset_versions/<provider>/<asset-hash>/<version>/manifest.json`连接原始响应与规范Parquet。按UTC月份分区的规范文件和raw字节在同产品/来源的`blobs/`内容寻址存储，各版本用硬链接引用；未变月份不重写，不以日历连续性补造bar。文件先持久化，DB后提交；崩溃留下的完整manifest可校验恢复，异常不移动成功状态、不自动删除文件。
+
+行情列用Decimal128(38,18)，volume未知保留null与volume_missing；session_date和真实session开收盘与观测时间分开。`source_published_at_ms`未知为null；历史下载使用实际observed_at/available_at，固定版本的as-of过滤只返回已观测行，不能当作完整历史vintage重建。旧永续桥接保留原source SHA并声明历史接收时间未知。
+
+首批新源只支持NVDA Yahoo日线与Coinbase BTC-USD日线；旧BTCUSDT只读15m快照独立。三产品不接入证券撮合/新模型训练，actions和执行规格尚未完整。`scheduled_tasks.INGEST_DATASET`记录分页日期检查点/行数/版本ID，供应商拒绝后停止，手动重试可续已保存分页。新来源不会被启动全量采集扫描自动调用。
+
+D3队列隔离不修改表或既有迁移：新`INGEST_DATASET`进入RQ `research-data`，其它RQ任务继续`market-data`；`scheduled_tasks.id`仍是全局job ID。已发布任务的实际origin保留，Redis缺失的待发布任务按当前路由恢复，数据库`result`中的分页检查点不因发布失败丢失。GPU `RUN_FULL_RESEARCH`不进入RQ。
+
 所有时刻为UTC TIMESTAMPTZ，K线时间为交易所epoch毫秒；界面按设置显示时区。金额/价格/数量用NUMERIC(38,18)/Decimal，Arrow行情为Decimal128(34,12)；浮点仅用于图表显示和研究统计。模型计算类型不替代账本精度。
 
 ## Phase1 已创建表（Alembic 0001）
@@ -13,14 +33,40 @@
 | assets | id, symbol, name, underlying_id, asset_type, venue, priority, verification, specification JSON, verified_at | id为市场+精确产品代码；相同底层不合并不同产品 |
 | asset_aliases | id, asset_id, provider_id, alias | FK assets/providers；provider+alias唯一 |
 | sector_membership | asset_id, sector | 组合主键；一个资产可有多个行业/主题 |
-| market_data_metadata | id, asset_id, interval, path, row_count, first_open_ms, last_close_ms, sha256, source JSON, updated_at | asset+interval唯一；指向不可变Parquet快照 |
-| scheduled_tasks | id UUID, kind, status, parameters JSON, result JSON, attempts, created_at, updated_at | 持久任务记录，对应RQ job_id；失败原因可见 |
-| system_settings | key, value JSON | 当前仅显示偏好；不接受API凭据 |
+| market_data_metadata | id, asset_id, interval, path, row_count, first_open_ms, last_close_ms, sha256, source JSON, updated_at | asset+interval唯一；指向不可变Parquet快照或经哈希校验的分段manifest |
+| scheduled_tasks | id UUID, kind, status, parameters JSON, result JSON, attempts, created_at, updated_at | 持久任务记录，对应RQ job_id；批量Binance归档将已完成合约ID、当前合约和计数保存在result供重试/页面恢复；失败原因可见 |
+| system_settings | key, value JSON | `display`和`chart_indicators`保存经过认证的界面偏好；不接受API凭据 |
 | system_events | id, kind, detail JSON, created_at | 预留系统事件记录，目前无监控告警引擎 |
 
-## Phase2–8 规划表（尚未迁移创建）
+行情事实文件由本地不可变Parquet保存，`market_data_metadata.path/sha256/row_count/time bounds/source`只作为PostgreSQL清单指针。`underlying_history/`使用内容寻址Parquet段和不可变manifest；普通Binance快照保持原契约。DuckDB以进程内只读连接查询通过SHA256校验的文件；Redis用于任务队列、认证限流和有TTL的公开行情刷新缓存，缓存不能覆盖本地历史事实。
 
-以下是完整领域规划，不表示存在业务功能。后续迁移会补齐更精确字段、外键和并发约束。
+Alembic 0003增加`market_observation_metadata`，指向单值观察系列的Parquet。其schema是`observed_at_ms / value DECIMAL128 / unit`，用于EIA WTI Cushing和Henry Hub日度现货参考值。标量series API只返回原值和单位，不把它变成OHLC蜡烛。资产原始源绑定保存在`assets.specification.market_data_source`，供应商最近状态和“密钥是否配置”布尔值记在`providers.detail`；密钥值不写数据库。`config/platform/market_sources.json`定义可用提供方、精确符号、源类型、原生周期、单位与交易所时区。
+
+资产API在现有`asset_type`基础上派生`market_category`（crypto/stocks/etf/indices/commodities/forex/macro/other）和`product_type`（spot/perpetual/future/reference/other），不改变持久schema。比如`us:NVDA`、`us:KORU`、`krx:000660`、`cn:000001`、`eia:WTI_CUSHING_SPOT`与`binance_usdm:NVDAUSDT`各自身份独立，底层价格不会替换永续合约成交价。供应商状态与`live_tradable`各自独立，分类不代表有交易能力。中国研究指数ID使用`cn:<交易所/指数代码>`，六个指数均为`index/reference`，不是股票或ETF。
+
+`assets.specification.market_data_source`可以绑定一个主provider和有序的`fallback_provider_ids`；provider注册信息用`credential_env: null`表达免密钥公开源，并在API返回`credential_required=false`。`providers.detail`只保存是否配置、授权状态、最近成功/失败与新鲜度，不存密钥值。新增中国指数使用`cn_index:<代码>`以免与相同数字的个股代码冲突；已有沪深300的历史主键`cn:000300`保持兼容。新浪/腾讯指数接口属于免密钥公开页面源，不能据此推导数据许可或实时SLA；当前只映射原生日线且保持研究用途。
+
+三年Binance长期历史仍以`DATA_ROOT/long_history/<symbol>/<interval>/`内的不可变Parquet分段及manifest为权威。`FETCH_BINANCE_ARCHIVES`任务参数保存本次确切资产ID列表，任务result保存合约级检查点，不新增数据库表或迁移；仅对已核验USDM合约排队。长期图表目标周期缺少独立归档时，API可从较长覆盖范围的15m真实K线聚合更大周期，并返回`source_interval`和源manifest/分段哈希；向下插值禁止。
+
+`system_settings.chart_indicators`记录图表显示偏好：MA开关和2–500的均线长度列表，以及布林、MACD、TD九转、趋势线、道氏123、背离和波浪候选的可见开关。精简默认只显示MA与量柱。写入要求当前会话和CSRF，并产生审计事件；偏好只影响图表，不参与回测或策略计算。新增该JSON键无需数据库迁移。
+
+底层行情使用`FETCH_UNDERLYING_HISTORY`持久任务，默认回溯1095天并记录精确资产/周期。美国股票/ETF按供应商OHLCV读取15m、1h、1d；韩国XKRX与能源参考只支持1d。刷新来源受服务器环境变量配置，不接收浏览器提供的URL或密钥；上游的延迟、额度或地区不可用不会被报告为成功。
+
+## Phase2 已迁移配置表（Alembic 0002）
+
+| 表 | 主键 / 关键字段 | 约束与用途 |
+|---|---|---|
+| simulation_accounts | id, owner_user_id, name, initial_equity NUMERIC(28,8), base_currency, configuration JSON, configuration_sha256, revision, created_at, updated_at | 每用户名称唯一；资金使用Decimal/NUMERIC；配置绑定标的、周期、理论权重和风险上限；revision/hash便于回测引用；仅研究配置，不是资金余额、成交或订单账本 |
+
+回测执行由`scheduled_tasks`的`RUN_SIMULATION_BACKTEST`任务承载；任务参数固定账号所有者、配置修订/哈希和UTC时间窗，结果保存算法及行情来源哈希与报告相对路径。组合权益、回撤和逐笔数据作为按任务UUID隔离的本地不可变Parquet，不新增交易账本数据库表，也不记录模拟账号余额变更。
+
+通用`GET /api/tasks`与专用报告API均按owner隔离`RUN_SIMULATION_BACKTEST`和`RUN_FULL_RESEARCH`；缺owner的私有任务不公开。公共行情采集任务不包含账户报告，可以由已登录用户共享查看。
+
+整套离线模型比较复用`scheduled_tasks`并使用`RUN_FULL_RESEARCH`类型；JSON参数只保存用户ID、固定输出UUID及白名单标的/模型/周期。GPU runner状态和进度写入任务`result`，完整模型/标的报告保存在`.runtime/research-runs/<UUID>/`；该目录不进入Git。已有`runs/`报告只读挂载，通过`batch_summary.json`发现并浏览，不迁移、不覆盖原有产物。
+
+## Phase2–8 其他规划表（尚未迁移创建）
+
+以下是完整领域规划，不表示存在业务功能；除上方明确列出的revision 0002配置账号表外，其他表都还不存在。后续迁移会补齐更精确字段、外键和并发约束。
 
 | 阶段 / 表 | 核心字段、关联和关键约束 |
 |---|---|
@@ -65,3 +111,10 @@
 账户资金、仓位、订单、成交、事件和权益变动必须同事务提交，账户行/版本锁隔离。成交引用的账户必须与订单、策略版本一致，不能仅靠API检查跨账户完整性。未来用组合外键、唯一约束与账本守恒测试实现。
 
 模型版本与策略版本禁止原地改产物；晋升状态与运行账户绑定需显式流程。审批引用建议内容哈希、用户和2FA事件，执行请求引用审批与风控复核。审批修改、参数漂移、过期、撤回、重复提交、未知交易所结果均需独立状态机测试。
+
+The full-research task allowlist admits up to 13 exchange-verified symbols and four algorithm IDs for new runs: `analysis_dow123`, `patchtst`, `tft_attention`, and `tcn`. Existing archived model names remain readable through the archive path; no database migration is needed. Task parameters continue to pin selected symbol/model/timeframe lists and the output UUID; local source readiness is checked before enqueueing.
+
+
+## 能源持续刷新（2026-10-23）
+
+能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。

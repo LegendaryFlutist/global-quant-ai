@@ -7,7 +7,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 from lab import demo
-from pattern_research import finalize_pattern_mail,run_pattern_research
+from pattern_research import export_pattern_report,finalize_pattern_mail,run_pattern_research
+from quant_lab.models.model_registry import MODEL_NAMES
 
 
 class PatternResearchTests(unittest.TestCase):
@@ -63,14 +64,55 @@ class PatternResearchTests(unittest.TestCase):
                 eq=pd.DataFrame({'close_time':frame.close_time.to_numpy(),'equity':np.linspace(1.,1.01,size)})
                 return dict(metrics=metric,equity=eq,risk_points=[1.,.99,1.01],trades=pd.DataFrame([dict(net_pnl=.01,entry_time=int(frame.open_time.iloc[0]),exit_time=int(frame.close_time.iloc[-1]))]))
             with patch('pattern_research.fit_model',return_value=(None,[])),patch('pattern_execution.simulate_patterns',side_effect=fake_engine),patch('pattern_research.export_pattern_report'),patch('operation_report.export_operations_report',return_value={}),patch('operation_report.print_operations_summary'):
-                result=run_pattern_research(data,root/'out',baseline,['15m'],['fixed_rr'])
+                result=run_pattern_research(data,root/'out',baseline,['15m'],['fixed_rr'],models=['analysis_dow123'])
             self.assertTrue(result['holdout_used'])
-            self.assertEqual(len(result['ranking']),8)
+            self.assertEqual(len(result['ranking']),1)
+            self.assertEqual(len(result['feature_schema_sha256']),64)
+            self.assertEqual(len(result['model_code_sha256']),64)
             self.assertEqual(sum(first>=cut for first,last in calls),2)
             self.assertTrue(all(last<cut for first,last in calls if first<cut))
             self.assertTrue((root/'out/selected_holdout_equity.csv').exists())
             # Source is synthetic: even a positive mocked test never permits promotion.
             self.assertEqual(result['status'],'REJECTED')
+
+    def test_new_backtest_registry_exposes_dow123_and_three_deep_algorithms(self):
+        """确保新回测白名单只含结构规则和三个已实现深度时序算法。
+
+        Returns:
+            无返回值；算法遗漏或旧简单模型误入新任务时断言失败。
+        """
+        self.assertEqual(MODEL_NAMES, ('analysis_dow123', 'patchtst', 'tft_attention', 'tcn'))
+
+    def test_report_names_all_selected_algorithms(self):
+        """Render the comparison report from its stored model IDs and independent curves.
+
+        Returns:
+            No value; the report must contain all four registered algorithm names.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            out = Path(root)
+            models = list(MODEL_NAMES)
+            ranking = []
+            curves = {}
+            for model in models:
+                key = f"15m|{model}|fixed_rr"
+                ranking.append({
+                    "config": key, "timeframe": "15m", "model": model, "exit_mode": "fixed_rr",
+                    "net_return": 0.0, "max_drawdown": 0.0, "entries": 0,
+                    "complete_folds": 0, "eligible": False, "rejection_reasons": [],
+                })
+                curves[key] = {"1000": 1.0, "2000": 1.0}
+            report = {
+                "model_names": models, "source": {"symbol": "SYNTHETIC"}, "status": "REJECTED",
+                "risk": {"leverage": 5.0, "margin_fraction": 0.1},
+                "period_pairs": {"15m": {"higher_minutes": 60}},
+                "exit_modes": {"fixed_rr": "Fixed R/R"}, "ranking": ranking,
+            }
+            export_pattern_report(out, report, curves)
+            html = (out / "comparison.html").read_text()
+            for model in models:
+                self.assertIn(model, html)
+            self.assertIn("回测收益无保证", html)
 
     def test_partial_exit_mail_is_recorded_once_without_smtp(self):
         """验证减仓模拟通知仅记录一次且不调用SMTP。

@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from app.core.db import SessionLocal
 from app.core.security import digest
-from app.domains.models import Session, MarketData, Asset, utcnow
+from app.domains.models import Session, MarketData, Asset, Task, utcnow
 from app.services.market_data import normalize, aggregate, save_dataset, candles, read_dataset
 from app.adapters.public_binance import BinancePublic, PublicDataError
 
@@ -106,8 +106,37 @@ def test_asset_priority_identity_and_truthful_capabilities(logged_in):
     assert all(not a['live_tradable'] for a in assets)
     assert next(a for a in assets if a['id']=='us:NVDA')['underlying_id']==next(a for a in assets if a['symbol']=='NVDAUSDT')['underlying_id']
     caps=logged_in.get('/api/capabilities').json()
-    assert all(c['status']=='PLANNED' for c in caps if c['phase']>1)
+    statuses={c['id']:c['status'] for c in caps}
+    assert statuses['platform']=='IMPLEMENTED'
+    assert statuses['technical']=='PARTIAL'
+    assert statuses['backtests']=='PARTIAL'
+    assert all(status=='PLANNED' for key,status in statuses.items() if key not in ('platform','technical','backtests'))
     assert logged_in.post('/api/execution/orders',json={'side':'BUY'}).status_code==403
+
+def test_asset_market_category_and_product_type_are_separate(logged_in):
+    """区分标的所属市场类别与实际现货/永续/期货产品结构。
+
+    Args:
+        logged_in: 通过测试登录流程创建的认证客户端。
+
+    Returns:
+        无返回值；ETF相关永续不得误标为现货，研究登记ETF须保持现货产品身份。
+    """
+    assets = {asset['id']: asset for asset in logged_in.get('/api/assets').json()}
+    assert assets['binance_usdm:BTCUSDT']['market_category'] == 'crypto'
+    assert assets['binance_usdm:BTCUSDT']['product_type'] == 'perpetual'
+    assert assets['binance_usdm:KORUUSDT']['market_category'] == 'etf'
+    assert assets['binance_usdm:KORUUSDT']['product_type'] == 'perpetual'
+    assert assets['us:NVDA']['market_category'] == 'stocks'
+    assert assets['us:NVDA']['product_type'] == 'spot'
+    assert assets['us:QQQ']['market_category'] == 'etf'
+    assert assets['us:QQQ']['product_type'] == 'spot'
+    assert assets['us:SPX']['market_category'] == 'indices'
+    assert assets['us:SPX']['product_type'] == 'reference'
+    assert assets['cn_index:000001']['market_category'] == 'indices'
+    assert assets['cn_index:000001']['market_source']['credential_required'] is False
+    assert assets['cn_index:000001']['market_source']['fallback_provider_ids'] == ['tencent_cn_public']
+    assert assets['cn:000300']['name'] == '沪深300指数'
 
 def test_settings_validation_persistence_and_csrf(logged_in):
     """验证显示设置校验、持久化及CSRF保护。
@@ -123,6 +152,30 @@ def test_settings_validation_persistence_and_csrf(logged_in):
     assert logged_in.get('/api/settings').json()['display']==payload
     assert logged_in.put('/api/settings/display',json={**payload,'timezone':'invalid'}).status_code==422
     assert logged_in.put('/api/settings/display',json={**payload,'default_asset':'NONEXISTENT'}).status_code==400
+
+def test_chart_indicator_settings_are_persisted_and_validated(logged_in):
+    """验证图表指标默认精简、可持久化并受会话和CSRF边界保护。
+
+    Args:
+        logged_in: 通过测试登录流程创建的认证客户端。
+
+    Returns:
+        无返回值；默认配置、无效输入或未授权写入会使测试失败。
+    """
+    defaults = logged_in.get('/api/settings').json()['chart_indicators']
+    assert defaults['show_ma'] is True
+    assert defaults['ma_periods'] == [5, 10, 20]
+    assert not any(defaults[key] for key in ('show_bollinger','show_macd','show_td','show_trendlines','show_dow123','show_divergence','show_wave'))
+    updated = {**defaults, 'show_macd': True, 'show_wave': True, 'ma_periods': [8, 21, 55]}
+    response = logged_in.put('/api/settings/chart-indicators', json=updated)
+    assert response.status_code == 200
+    assert logged_in.get('/api/settings').json()['chart_indicators'] == updated
+    assert logged_in.put('/api/settings/chart-indicators', json={**updated, 'ma_periods': [8, 8]}).status_code == 422
+    assert logged_in.put('/api/settings/chart-indicators', json={**updated, 'ma_periods': [501]}).status_code == 422
+    assert logged_in.put('/api/settings/chart-indicators', json=updated, headers={'X-CSRF-Token':'invalid'}).status_code == 403
+    unauthenticated = logged_in.__class__(logged_in.app)
+    assert unauthenticated.put('/api/settings/chart-indicators', json=updated).status_code == 401
+    unauthenticated.close()
 
 @pytest.mark.parametrize('case',['ohlc','conflict','nan','wrong_interval'])
 def test_reject_invalid_or_conflicting_data(case):
@@ -224,6 +277,116 @@ def test_public_adapter_451_is_not_fabricated(monkeypatch):
     monkeypatch.setattr(httpx.Client,'get',fake_get)
     with pytest.raises(PublicDataError,match='HTTP 451'):BinancePublic().exchange_info()
 
+def test_public_adapter_reports_dns_cause_without_proxy_misclassification(monkeypatch):
+    """Classify a chained resolver failure as DNS even when proxy env is present.
+
+    Args:
+        monkeypatch: Replaces the HTTP request and adds a harmless proxy marker.
+
+    Returns:
+        No value; an unexpected error classification fails the test.
+    """
+    import httpx
+    import socket
+    request=httpx.Request('GET','https://fapi.binance.com/fapi/v1/time')
+    def fail(*args,**kwargs):
+        """Raise a DNS exception as the root cause of an HTTP connect error."""
+        error=httpx.ConnectError('connection failed',request=request)
+        error.__cause__=socket.gaierror(-3,'Temporary failure in name resolution')
+        raise error
+    monkeypatch.setenv('HTTPS_PROXY','http://127.0.0.1:7897')
+    monkeypatch.setattr(httpx.Client,'get',fail)
+    with pytest.raises(PublicDataError,match='DNS 解析失败'):
+        BinancePublic().exchange_info()
+
+def test_host_proxy_bridge_forwards_only_allowlisted_docker_clients():
+    """Verify the bridge relays TCP bytes and restricts use by client subnet.
+
+    Returns:
+        No value; unexpected forwarding or rejection fails the test. All sockets
+        bind to ephemeral loopback ports and never contact an external network.
+    """
+    import ipaddress
+    import socket
+    import threading
+    from app.services.host_proxy_bridge import _client_is_allowed, _relay_connection
+
+    allowed=ipaddress.ip_network('127.0.0.1/32')
+    assert _client_is_allowed('127.0.0.1',allowed)
+    assert not _client_is_allowed('10.1.2.3',allowed)
+
+    upstream=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    upstream.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+    upstream.bind(('127.0.0.1',0));upstream.listen(1)
+    upstream_port=upstream.getsockname()[1]
+    def upstream_echo():
+        """Echo one test payload to exercise both directions of the TCP relay.
+
+        Returns:
+            No value; closes the ephemeral upstream listener after one client.
+        """
+        connection,_=upstream.accept()
+        with connection:
+            connection.sendall(b'proxy:'+connection.recv(128))
+        upstream.close()
+    upstream_thread=threading.Thread(target=upstream_echo,daemon=True);upstream_thread.start()
+
+    bridge=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    bridge.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+    bridge.bind(('127.0.0.1',0));bridge.listen(1)
+    bridge_port=bridge.getsockname()[1]
+    def bridge_once():
+        """Relay one loopback test client using the allowlist under test.
+
+        Returns:
+            No value; closes the ephemeral bridge listener after one client.
+        """
+        client,_=bridge.accept();bridge.close()
+        _relay_connection(client,'127.0.0.1',upstream_port,allowed)
+    bridge_thread=threading.Thread(target=bridge_once,daemon=True);bridge_thread.start()
+
+    with socket.create_connection(('127.0.0.1',bridge_port),timeout=3) as client:
+        client.settimeout(3)
+        client.sendall(b'CONNECT test.invalid:443')
+        assert client.recv(128)==b'proxy:CONNECT test.invalid:443'
+        client.shutdown(socket.SHUT_WR)
+    bridge_thread.join(timeout=3)
+    upstream_thread.join(timeout=3)
+    assert not bridge_thread.is_alive() and not upstream_thread.is_alive()
+
+def test_verify_assets_retains_verified_snapshot_when_public_dns_fails(monkeypatch):
+    """保留已核验快照，且把在线解析失败报告为降级结果而非伪造实时核验。
+
+    Args:
+        monkeypatch: 临时替换公开exchangeInfo调用，禁止外部网络请求。
+
+    Returns:
+        无返回值；验证本机快照状态不被DNS故障覆盖。
+    """
+    from app.core.db import SessionLocal
+    from app.domains.models import Provider
+    from app.services.ingestion import verify_assets
+
+    def failed_exchange_info(self):
+        """模拟公开域名不可解析，不访问网络或改写行情数据。
+
+        Args:
+            self: 当前公开Binance适配器实例。
+
+        Returns:
+            不返回行情；抛出可识别的公开连接错误。
+        """
+        raise PublicDataError('Binance 公开连接失败：DNS 解析失败')
+
+    monkeypatch.setattr(BinancePublic, 'exchange_info', failed_exchange_info)
+    with SessionLocal() as db:
+        result = verify_assets(db)
+        assert result['verification_mode'] == 'VERIFIED_LOCAL_SNAPSHOT'
+        assert result['live_refresh'] is False
+        assert result['verified_assets'] > 0
+        assert db.get(Provider, 'binance_public').status == 'UNAVAILABLE'
+        assert db.get(Asset, AID).verification in ('VERIFIED_SNAPSHOT', 'VERIFIED')
+
 def test_task_dedup_and_real_redis_queue(logged_in):
     """验证真实Redis入队与相同进行中任务去重。
 
@@ -299,6 +462,60 @@ def test_fetch_history_resumes_from_checkpoint_and_is_idempotent(monkeypatch):
         metadata=db.scalar(select(MarketData).where(MarketData.asset_id==AID))
         assert metadata.row_count==32
 
+
+def test_binance_archive_batch_saves_progress_and_resumes_after_failure(monkeypatch):
+    """验证批量三年归档逐合约持久进度，并在重试时跳过已完成合约。
+
+    Args:
+        monkeypatch: pytest提供的依赖替换器，用于注入一次性公开接口故障。
+
+    Returns:
+        无返回值；任务若丢失检查点、重复采集已完成合约或错误标成功则失败。
+    """
+    from app.services import jobs
+    task_id='batch-resume-test-0000000000000001'
+    asset_ids=['binance_usdm:BTCUSDT','binance_usdm:KORUUSDT']
+    with SessionLocal() as db:
+        for asset_id in asset_ids:
+            db.get(Asset,asset_id).verification='VERIFIED'
+        db.add(Task(id=task_id,kind='FETCH_BINANCE_ARCHIVES',parameters={'asset_ids':asset_ids,'interval':'15m'},status='QUEUED'))
+        db.commit()
+    calls=[]
+    injected={'pending':True}
+
+    def fake_fetch(db, asset_id, interval):
+        """记录模拟合约下载并在第二合约首次请求时中断。
+
+        Args:
+            db: 批量任务持有的隔离测试数据库会话。
+            asset_id: 当前精确测试USDM资产ID。
+            interval: 当前公开K线周期。
+
+        Returns:
+            可序列化的最小归档摘要；指定的首次失败返回异常。
+        """
+        calls.append(asset_id)
+        if asset_id.endswith('KORUUSDT') and injected['pending']:
+            injected['pending']=False
+            raise RuntimeError('temporary public API outage')
+        return {'asset_id':asset_id,'interval':interval,'rows':12,'first_open_ms':1,
+                'last_close_ms':2,'status':'THREE_YEARS','dataset_sha256':'a'*64}
+
+    monkeypatch.setattr(jobs,'fetch_three_year_archive',fake_fetch)
+    with pytest.raises(RuntimeError,match='temporary public API outage'):
+        jobs.execute(task_id)
+    with SessionLocal() as db:
+        task=db.get(Task,task_id)
+        assert task.status=='RETRYING'
+        assert task.result['progress']['completed_asset_ids']==[asset_ids[0]]
+        assert task.result['progress']['current_symbol']=='KORUUSDT'
+    result=jobs.execute(task_id)
+    assert calls==[asset_ids[0],asset_ids[1],asset_ids[1]]
+    assert result['progress']['phase']=='COMPLETE'
+    assert result['completed_count']==2
+    with SessionLocal() as db:
+        assert db.get(Task,task_id).status=='SUCCEEDED'
+
 def test_public_adapter_reports_dns_failure(monkeypatch):
     """验证DNS解析错误以明确脱敏原因报告。
 
@@ -336,11 +553,65 @@ def test_fresh_clone_uses_public_history_jobs_without_private_data(monkeypatch,t
     import app.bootstrap as bootstrap
     import app.core.config as config
     import app.services.jobs as jobs
+    from types import SimpleNamespace
     created=[]
     monkeypatch.setattr(config,'RESEARCH_ROOT',tmp_path)
-    monkeypatch.setattr(jobs,'enqueue',lambda db,kind,parameters:created.append((kind,parameters)))
+    def capture_enqueue(db,kind,parameters):
+        """Capture startup jobs and return the minimal durable-task contract."""
+        created.append((kind,parameters))
+        return SimpleNamespace(id='startup-test-task',status='QUEUED')
+    monkeypatch.setattr(jobs,'enqueue',capture_enqueue)
     bootstrap.main()
     histories=[params for kind,params in created if kind=='FETCH_HISTORY']
     assert [params['asset_id'] for params in histories]==['binance_usdm:'+symbol for symbol in ['KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT']]
     assert all(params['interval']=='15m' and params['days']==90 for params in histories)
     assert all(kind!='IMPORT_LOCAL' for kind,_ in created)
+    archives=[params for kind,params in created if kind=='FETCH_BINANCE_ARCHIVES']
+    assert len(archives)==1
+    assert archives[0]['interval']=='15m' and archives[0]['startup_reconcile'] is True
+    assert set(archives[0]['asset_ids'])=={'binance_usdm:'+symbol for symbol in ['KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT','SKHYNIXUSDT','SPCXUSDT','SNDKUSDT','XAUUSDT','QQQUSDT','INTCUSDT','TSLAUSDT','ZHIPUUSDT','OPENAIUSDT']}
+
+def test_startup_archive_backfill_skips_assets_already_covered_by_active_task():
+    """Verify service startup does not duplicate an existing all-contract archive task.
+
+    Returns:
+        No value; an unexpected second queue insertion fails the test.
+    """
+    from app.services.startup_market_data import queue_missing_binance_archives
+    with SessionLocal() as db:
+        assets=list(db.scalars(select(Asset).where(Asset.venue=='BINANCE_USDM',Asset.verification.in_(['VERIFIED','VERIFIED_SNAPSHOT']))))
+        ids=[asset.id for asset in assets]
+        db.add(Task(id='startup-active-archive-test',kind='FETCH_BINANCE_ARCHIVES',status='RUNNING',parameters={'asset_ids':ids,'interval':'15m'}))
+        db.commit()
+        def fail_if_enqueued(db_session,kind,parameters):
+            """Fail if the startup reconciler attempts to duplicate active work."""
+            raise AssertionError('active archive task should cover every missing asset')
+        result=queue_missing_binance_archives(db,enqueue_task=fail_if_enqueued,manifest_reader=lambda *_:None)
+    assert result['status']=='ALREADY_QUEUED_OR_RETRY_COOLDOWN'
+    assert result['queued_asset_count']==0
+
+def test_startup_archive_backfill_retries_after_a_fixed_proxy_dependency():
+    """Verify a fixed runtime/configuration error does not suppress the next startup retry.
+
+    Returns:
+        No value; a stale dependency failure must leave missing work eligible to queue.
+    """
+    from types import SimpleNamespace
+    import uuid
+    from app.services.startup_market_data import queue_missing_binance_archives
+    with SessionLocal() as db:
+        assets=list(db.scalars(select(Asset).where(Asset.venue=='BINANCE_USDM',Asset.verification.in_(['VERIFIED','VERIFIED_SNAPSHOT']))))
+        ids=[asset.id for asset in assets]
+        db.add(Task(id=str(uuid.uuid4()),kind='FETCH_BINANCE_ARCHIVES',status='FAILED',
+                    parameters={'asset_ids':ids,'interval':'15m','startup_reconcile':True},
+                    result={'error':'SOCKS proxy client dependency was missing'}))
+        db.commit()
+        queued=[]
+        def capture_enqueue(db_session,kind,parameters):
+            """Capture an eligible retry after a non-network setup failure was repaired."""
+            queued.append((kind,parameters))
+            return SimpleNamespace(id='startup-retry-task',status='QUEUED')
+        result=queue_missing_binance_archives(db,enqueue_task=capture_enqueue,manifest_reader=lambda *_:None)
+    assert len(queued)==1
+    assert result['queued_asset_count']==13
+    assert queued[0][0]=='FETCH_BINANCE_ARCHIVES'

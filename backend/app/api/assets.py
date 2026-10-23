@@ -4,10 +4,57 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 from app.core.db import get_db
 from app.core.security import current_user
-from app.domains.models import User, Asset, Provider, Membership, MarketData
+from app.domains.models import User, Asset, Provider, Membership, MarketData, MarketObservation
 
 
 router=APIRouter()
+
+def classify_asset(asset):
+    """按底层资产类别映射注册表条目，保留永续/现货产品身份差异。
+
+    Args:
+        asset: 资产注册表ORM记录。
+
+    Returns:
+        A stable market category such as crypto, stocks, etf, indices or other.
+    """
+    if asset.asset_type in {"crypto_spot", "crypto_perpetual"}:
+        return "crypto"
+    if asset.asset_type in {"etf", "leveraged_etf"} or asset.underlying_id.endswith("_etf"):
+        return "etf"
+    if asset.asset_type in {"stock", "equity_related_perpetual", "preipo_related_perpetual"}:
+        return "stocks"
+    if asset.asset_type in {"index", "dollar_index"}:
+        return "indices"
+    if asset.asset_type.startswith("commodity_") or asset.asset_type == "commodity_related_perpetual":
+        return "commodities"
+    if asset.asset_type == "fx":
+        return "forex"
+    if asset.asset_type in {"yield", "macro_indicator", "industry_indicator", "company_research", "commodity_indicator"}:
+        return "macro"
+    return "other"
+
+def classify_product_type(asset):
+    """按已登记交易产品类型标注现货、永续、期货或参考数据。
+
+    Args:
+        asset: 资产注册表ORM记录；venue和asset_type必须来自已有目录。
+
+    Returns:
+        `spot`、`perpetual`、`future`、`reference`或`other`产品标识。
+    """
+    if asset.venue == "BINANCE_USDM":
+        return "perpetual"
+    if asset.asset_type.endswith("_spot") or asset.asset_type in {"stock", "etf", "leveraged_etf"}:
+        return "spot"
+    if asset.asset_type == "commodity_future":
+        return "future"
+    if asset.asset_type in {
+        "index", "yield", "dollar_index", "fx", "macro_indicator",
+        "industry_indicator", "company_research", "commodity_indicator",
+    }:
+        return "reference"
+    return "other"
 
 def asset_dict(db,asset):
     """组装资产身份、主题、核验状态与历史数据覆盖范围。
@@ -20,7 +67,22 @@ def asset_dict(db,asset):
         适合API序列化的资产字典；live_tradable始终为False。
     """
     data=list(db.scalars(select(MarketData).where(MarketData.asset_id==asset.id)))
-    return {'id':asset.id,'symbol':asset.symbol,'name':asset.name,'underlying_id':asset.underlying_id,'asset_type':asset.asset_type,'venue':asset.venue,'priority':asset.priority,'verification':asset.verification,'verified_at':asset.verified_at,'themes':list(db.scalars(select(Membership.sector).where(Membership.asset_id==asset.id))),'specification':asset.specification,'datasets':[{'interval':m.interval,'rows':m.row_count,'as_of_ms':m.last_close_ms,'first_open_ms':m.first_open_ms,'sha256':m.sha256} for m in data],'live_tradable':False}
+    observations=list(db.scalars(select(MarketObservation).where(MarketObservation.asset_id==asset.id)))
+    binding=(asset.specification or {}).get('market_data_source')
+    provider=db.get(Provider,binding['provider_id']) if isinstance(binding,dict) and binding.get('provider_id') else None
+    source_status={
+        'provider_id':binding.get('provider_id'),
+        'kind':binding.get('kind'),
+        'intervals':binding.get('intervals',[]),
+        'fallback_provider_ids':binding.get('fallback_provider_ids',[]),
+        'provider_status':provider.status if provider else 'UNKNOWN',
+        'credential_configured':bool((provider.detail or {}).get('credential_configured')) if provider else False,
+        'credential_required':bool((provider.detail or {}).get('credential_required', True)) if provider else True,
+        'request_pacing':(provider.detail or {}).get('request_pacing') if provider else None,
+        'freshness':binding.get('freshness') or ((provider.detail or {}).get('freshness_contract') if provider else None),
+        'latest_data_at_ms':max((item.last_close_ms for item in data),default=max((item.last_observed_at_ms for item in observations),default=None)),
+    } if binding else None
+    return {'id':asset.id,'symbol':asset.symbol,'name':asset.name,'underlying_id':asset.underlying_id,'asset_type':asset.asset_type,'market_category':classify_asset(asset),'product_type':classify_product_type(asset),'venue':asset.venue,'priority':asset.priority,'verification':asset.verification,'verified_at':asset.verified_at,'themes':list(db.scalars(select(Membership.sector).where(Membership.asset_id==asset.id))),'specification':asset.specification,'market_source':source_status,'datasets':[{'interval':m.interval,'rows':m.row_count,'as_of_ms':m.last_close_ms,'first_open_ms':m.first_open_ms,'sha256':m.sha256} for m in data],'series':[{'metric':item.metric,'rows':item.row_count,'as_of_ms':item.last_observed_at_ms,'unit':item.unit,'sha256':item.sha256} for item in observations],'live_tradable':False}
 
 @router.get('/api/assets')
 def assets(user:User=Depends(current_user),db:DBSession=Depends(get_db)):
