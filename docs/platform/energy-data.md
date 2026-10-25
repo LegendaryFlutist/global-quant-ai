@@ -28,3 +28,11 @@
 免费源没有交易所级SLA；盘中能源暂无经过同产品身份核验的第二来源，失败时只能明确降级至旧缓存。EIA是独立现货参考，不是期货盘中备用价。完整交易日历、换月版本、D1 DatasetVersion接入、回测/交易准入仍待后续验收。其他股票/ETF/指数来源暂沿用现有配置，本单元没有声称全目录已经持续同步。
 
 启动：`bash scripts/platform.sh up`；状态：`bash scripts/platform.sh status`；采集日志：`bash scripts/platform.sh logs market-refresh`。备份停写和恢复流程须包括market-refresh。验收应检查实际最新行情日期、参考源SHA、旧合约SHA未改变、后台至少两次成功周期和API健康，而非仅检查HTTP 200。
+
+## 能源诊断分层（2026-10-25）
+
+`services/energy_health.py`只在读缓存时计算状态，不请求上游、不写行情/模型特征。`/api/market/live`对Yahoo能源增加`health`：采集状态（等待/成功/失败/超期）、缓存状态（存在/过期/缺失）、源报价状态（延迟参考/偏旧/缺失/时间异常）、上次成功/下次计划和常规时段。旧`stale`保留，周末也不把旧报价标新。前端页面请求失败时撤下当前“正常”徽标并注明保留上次状态，避免缓存成功状态掩盖页面断连。
+
+常规时间参考[CME WTI说明](https://www.cmegroup.com/education/courses/event-contracts-underlying-markets/wti-overview)和[CME能源交易时段说明（含Henry Hub）](https://www.cmegroup.com/articles/whitepapers/leveraging-cme-group-asia-trading-hours-liquidity-for-cross-commodity-trading.html)：芝加哥时间周日17:00至周五16:00，工作日16:00–17:00维护。诊断版本`nymex_weekly_reference_20261025_v1`使用IANA America/Chicago处理夏令时；只显示常规时段，不保证Yahoo持续合约当时交易或报价交付。节假日/半日/临时停市未核验，常规交易窗口不标记为“已开市”；恢复时间只是常规计划。不得用于历史聚合、known-at特征、执行许可或暂停采集，不等于A2完整交易日历。
+
+报价偏旧阈值沿用15m的90分钟和1d的8小时；缓存期限为采集周期+120秒，下一采集计划逾期120秒另标超期。长Retry-After期限内不会误判任务超期。休市前报价已经超过对应阈值时单独提示缺口。HTTP失败只输出固定中文类别或状态码，不暴露异常原文。能源面板同时保留研究/延迟限定，故障与常规休市独立显示。

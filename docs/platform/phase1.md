@@ -157,3 +157,5 @@ The asset API now derives market category (`crypto`, `stocks`, `etf`, `other`) s
 ## 能源持续刷新（2026-10-23）
 
 能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。
+
+2026-10-25能源诊断新增只读`health`响应与独立中文状态面板：采集/缓存/源时间分别判定，常规周末及维护时段使用芝加哥DST参考，节假日未核验、仅展示且不降低stale。页面断连保留旧状态并撤下正常徽标。复用原Setting检查点，无数据库迁移或行情改写；完整规则与边界见[能源数据设计](energy-data.md)。

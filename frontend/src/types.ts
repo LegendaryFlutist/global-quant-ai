@@ -90,6 +90,29 @@ export interface ArchiveResult {
   research_only: boolean;
   available?: boolean;
 }
+/** Read-only diagnostics; weekly hours are not a verified trading calendar. */
+export interface EnergyHealth {
+  version: number;
+  checked_at_ms: number;
+  collector_status: "WAITING" | "OK" | "ERROR" | "OVERDUE";
+  collector_error: string | null;
+  last_success_at_ms: number | null;
+  next_attempt_at_ms: number | null;
+  source_status: "MISSING" | "INVALID_TIME" | "STALE" | "DELAYED_REFERENCE";
+  source_age_seconds: number | null;
+  cache_status: "MISSING" | "EXPIRED" | "PRESENT";
+  stale_before_closure: boolean;
+  stale: boolean;
+  session: {
+    status: "WEEKEND" | "DAILY_BREAK" | "REGULAR_WINDOW";
+    version: string;
+    timezone: string;
+    holiday_calendar_verified: false;
+    display_only: true;
+    closure_start_at_ms: number | null;
+    nominal_reopen_at_ms: number | null;
+  };
+}
 /** Authenticated public refresh result; open candles remain display-only until close. */
 export interface LiveMarketResult {
   asset_id: string;
@@ -108,6 +131,8 @@ export interface LiveMarketResult {
   research_only: boolean;
   stale: boolean;
   refresh_error?: string;
+  poll_error?: string;
+  health?: EnergyHealth;
   new_segments?: { sha256: string }[];
 }
 /** Transparent structural cycle summary; the signed score is not a probability. */

@@ -115,6 +115,9 @@ def test_persistence_freshness_and_product_boundary(monkeypatch, logged_in):
         assert db.get(Asset, "yahoo_energy:CL").underlying_id == db.get(Asset, "binance_usdm:CLUSDT").underlying_id
     response = logged_in.post("/api/market/live", json={"asset_id": "yahoo_energy:CL", "interval": "15m"})
     assert response.status_code == 200 and response.json()["source_event_at_ms"] == NOW-120000
+    assert response.json()["health"]["session"]["display_only"] is True
+    health = response.json()["health"]
+    assert health["source_age_seconds"] == (health["checked_at_ms"]-(NOW-120000))//1000
 
 
 def test_persistent_retry_and_concurrent_stream_lock():

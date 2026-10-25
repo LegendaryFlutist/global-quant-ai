@@ -10,6 +10,7 @@ from app.core.db import SessionLocal
 from app.domains.models import Asset, Alias, Membership, Provider, MarketData, Setting
 from app.storage.redis_cache import cache_underlying_refresh, read_cached_underlying_refresh
 from app.storage.provider_rate_limit import _redis_client
+from app.services.energy_health import energy_health
 
 POLL_SECONDS = {"15m": 300, "1d": 21600}
 ENERGY_FRESHNESS = "Yahoo延迟参考；免费个人研究接口，无实时性或可用性保证"
@@ -63,14 +64,13 @@ def read_energy_snapshot(db, asset_id, interval, now_ms=None):
     }
     status = db.get(Setting, energy_status_key(asset_id, interval))
     state = status.value if status else {}
-    age = current - int(result.get("source_event_at_ms") or 0)
-    max_age = 90*60_000 if interval == "15m" else 8*3600_000
-    poll_age = current - int(result.get("updated_at_ms") or 0)
-    result["stale"] = (not result.get("updated_at_ms") or age > max_age
-        or poll_age > (POLL_SECONDS[interval] + 120)*1000 or state.get("status") == "ERROR")
+    health = energy_health(result, state, interval, POLL_SECONDS[interval], current)
+    result["health"] = health
+    result["stale"] = health["stale"]
     result["refresh_state"] = state
+    result.pop("refresh_error", None)
     if result["stale"]:
-        result["refresh_error"] = "行情偏旧、休市或刷新异常；请核对源时间，不能作为即时交易价格"
+        result["refresh_error"] = health["collector_error"] or "行情或缓存偏旧；请查看分项状态，不能作为即时交易价格"
     return result
 
 

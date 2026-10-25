@@ -3,6 +3,7 @@ import { DEFAULT_CHART_INDICATORS, type ArchiveResult, type Asset, type Candle, 
 import { api, date, post } from "../services/api";
 import PriceChart from "../components/PriceChart";
 import ReferenceSeriesChart from "../components/ReferenceSeriesChart";
+import EnergyHealthPanel from "../components/EnergyHealthPanel";
 /** 按标的/周期读取已校验历史；切换后忽略旧请求，采集作为独立后台任务。 */
 export default function ChartPage({
   assets,
@@ -183,7 +184,7 @@ export default function ChartPage({
         retryDelay = Math.min(retryDelay * 2, 60000);
         if (active) {
           setLive((previous) => previous
-            ? { ...previous, stale: true, refresh_error: (e as Error).message }
+            ? { ...previous, stale: true, poll_error: (e as Error).message, refresh_error: (e as Error).message }
             : { asset_id: assetId, interval, closed_candles: [], live_candle: null, research_only: true, stale: true, refresh_error: (e as Error).message });
         }
       } finally {
@@ -391,7 +392,7 @@ export default function ChartPage({
           <span>{asset?.name}</span>
           <span className="badge neutral">仅研究</span>
         </div>
-        {!isObservationSeries && <div className="chart-live-status">
+        {!isObservationSeries && live?.health ? <EnergyHealthPanel live={live} timezone={timezone} /> : !isObservationSeries && <div className="chart-live-status">
           <span className={`badge ${live?.stale ? "negative" : live ? "positive" : "neutral"}`}>
             {!canRefresh ? "等待本地K线" : live?.stale ? "数据偏旧 / 休市 / 更新异常" : live ? isUnderlyingCandle ? "底层源已连接" : "Binance行情已连接" : "正在连接行情"}
           </span>

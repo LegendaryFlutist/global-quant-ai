@@ -1,3 +1,13 @@
+## 2026-10-25 能源采集与行情状态分层（已测试并部署）
+
+- 完成实现：独立energy_health诊断模块和能源图表中文面板，采集成功/失败/超期、源报价偏旧、缓存过期分别显示；显示源时间、缓存接收、后台成功和下次重试计划。周末仍标旧，故障不被休市掩盖；休市前已有缺口单独提示；页面断连撤下正常徽标并保留上次状态。常规周末/维护时间按America/Chicago DST计算，带版本、仅展示，不用于特征/聚合/执行或暂停采集；节假日/临时停市明确未核验。无数据迁移或历史行情改写。
+- 实际测试（2026-10-25）：`bash scripts/platform.sh test` **159 passed / 1条既有Starlette-httpx弃用提示，57.26秒**；只用quant_test/redis-test。新增夏令时切换、周末故障、长退避、陈旧缓存、未来时间和源时间API回归。`cd frontend && npm ci --no-audit --no-fund && npm test && npm run build` **11 passed / TypeScript+Vite成功**，包括真实React服务端渲染状态检查；不是用户登录浏览器E2E。`python3 scripts/check_docs.py` **872函数通过**，`git diff --check`通过。
+- 部署与数据实证：`bash scripts/platform.sh up`重建成功，API/Web/market-refresh/PG/Redis/代理桥健康，worker和research-runner运行，原lab连续运行5天未中断。16:33北京时间生产只读核验：CL/NG15m为3912/3918根，最新分别10月24日04:59:59/05:14:59；两者collector=OK、cache=PRESENT、source=STALE、session=WEEKEND，旧价没有因休市变新。六流状态OK。原始证据/Parquet及13个既有D1版本校验通过；旧CLUSDT8639根、10月19日时间和SHA保持不变。证据目录`.runtime/development-evidence/20261025-energy-health/`，私人日志与数据不提交。
+- 未完成：全球完整日历/节假日、能源换月与D1点时版本、同产品备用源及更广泛资产持续刷新仍PLANNED；本单元没有修复Binance访问限制或启用paper/live交易。
+- Git：本单元准备显式文件本地提交并推送现有功能分支/Draft PR #11；远程CI尚未核验，不以本地测试替代。准确提交见git log。
+- 下一步：能源D1版本/质量报告及A2完整日历；真实用户浏览器交互仍待验收。
+- 恢复：`bash scripts/resume.sh`；服务`bash scripts/platform.sh up`；状态`bash scripts/platform.sh status`；测试`bash scripts/platform.sh test`。
+
 # 项目进度与会话交接
 
 ## 2026-10-25 能源跨日运行验收与交接完成
