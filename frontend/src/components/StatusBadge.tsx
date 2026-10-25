@@ -12,6 +12,9 @@ const statuses: Record<string, string> = {
   UNAVAILABLE: "连接不可用",
   UNKNOWN: "未知",
   CONNECTED: "已连接",
+  PUBLIC_NO_KEY: "免密钥公开源，待验证",
+  CONFIGURED_NOT_VALIDATED: "已配置待验证",
+  NEEDS_CONFIGURATION: "需本机配置密钥",
   REGISTERED_RESEARCH_ONLY: "仅登记",
 };
 /** 把后端状态码转换为中文；未知新状态保留原码，不默认视为成功。 */

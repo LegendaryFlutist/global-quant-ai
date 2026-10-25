@@ -1,5 +1,21 @@
 # Phase 1：基础 Web 平台
 
+### A1 规格历史（首个子单元）
+
+资产页每行新增“规格历史”，查看有效期、实际入库时间、币种、交易单位、价位表、交收限制和证据。可用两个UTC时点查询历史：规则何时生效、系统何时已知。首批覆盖`xtks:1321`和`xetr:EXW1`，日历聚合仍PLANNED；它们无本地行情，不进入旧永续回测。未导入版本的老资产显示尚无记录。迁移0005及详解见[产品规格说明](instruments.md)。
+
+当前新增工作的范围/验收见[2026-10-21 Stage0审计](global-expansion-audit.md)。下文保留历史验收日期；历史测试和覆盖不自动计作当前阶段通过。后续隔离本地paper已获开发授权，但当前仍PLANNED；实盘默认拒绝。
+
+### D1 数据版本页
+
+登录后左侧选择“数据版本”：选择NVDA Yahoo研究日线、Coinbase BTC-USD现货日线或已有BTCUSDT永续快照，指定交易日范围并提交。后台任务显示真实分页进度；失败保留已保存版本，点击重试续未完成页。来源拒绝不会自动循环重试。选择历史版本后不会因新增版本自动切换；曲线仅绘制该版本原生收盘价，质量与来源展开查看。日线日期按市场session解释，永续日期按UTC；范围最多3650天，数据返回少于请求区间时只显示真实覆盖。
+
+API：`GET /api/datasets/catalog`、`POST /api/datasets/ingest`、`GET /api/datasets?asset_id=...`、`GET /api/datasets/{version_id}/bars?as_of_ms=...`。全部要求会话；写请求继续验证CSRF和Origin，不接收URL/key/interval覆盖。as-of仅表示该固定版本在观测时点可见的行，不伪造历史当时接收时间。
+
+已有MarketData图表与数据版本页暂时分别展示；新增证券和BTC现货不送入旧USDT线性永续回测。新建数据版本采集使用`research-data`队列和独立`dataset-worker`（1 CPU、2 GiB内存、单任务并发）；旧行情回填仍由`market-data`/`worker`处理，不争用同一个消费者。数据版本队列内部仍按FIFO排队，供应商共享限流/429冷却不变，不承诺立即取得上游数据。
+
+升级前已发布到旧队列的任务原位完成，不清空或搬迁队列。启动补发只处理Redis中不存在的`QUEUED/QUEUE_ERROR`任务；旧来源和新来源的任务ID都可跨队列对账，分页进度保留。查询`bash scripts/platform.sh logs dataset-worker`可查看新消费者；更广泛的采集优先级/公平调度仍属后续D3工作。
+
 ## 开发清单
 
 - [x] 原工程内新增backend/frontend，保留GPU lab和历史报告。
@@ -8,7 +24,7 @@
 - [x] 全球资产登记、多主题与底层关系；13个精确Binance合约元数据快照；全部产品禁止实盘。
 - [x] 四个优先标的真实历史15m导入；来源、SHA256、最近90天；独立队列与重试。
 - [x] Binance公开REST适配器；启动时核验；失败状态和原因可见。
-- [x] 交互K线、成交量、MA20/60、十字线、缩放；支持的较大周期严格聚合。
+- [x] 交互K线、成交量、可调根数均线、布林线、MACD、TD九转序列和三点支撑/压力趋势线；支持的较大周期严格聚合。
 - [x] 显示时区、默认周期和标的、密码修改；后续能力显式PLANNED。
 - [x] Docker Compose及开发/生产配置样例、README、AGENTS。
 - [x] 后端20项测试、前端2项测试、生产构建与真实Chrome验收通过；详情见下方。
@@ -23,7 +39,7 @@ bash scripts/platform.sh credentials
 
 访问 http://localhost:8080 。账号`admin`，随机密码只在本机`.runtime/bootstrap-admin.txt`（0600）。首次登录后可修改密码。修改后初始文件失效；本阶段没有公网密码找回流程。不要把该文件发到聊天中。
 
-服务：web、api、worker、postgres、redis；现有lab仍保留。`up`先构建镜像再启动，避免错误拉取本地自建镜像。镜像首次需要网络下载依赖。
+服务：web、api、worker、dataset-worker、postgres、redis及研究runner；现有lab仍保留。`up`先构建镜像再启动，避免错误拉取本地自建镜像。镜像首次需要网络下载依赖。
 
 ```bash
 bash scripts/platform.sh status
@@ -42,16 +58,81 @@ npm run build
 
 ## 已知边界
 
-- 当前容器对Binance域名DNS解析失败，宿主机先前公开REST探测也曾返回451；公开行情自动更新存在网络/上游访问限制；任务显示实际失败原因，13个合约元数据快照与四个真实历史行情仍可研究。其他登记资产无行情时显示缺失。
+- 当前环境的Binance公开REST访问仍被网络限制：API容器直连时DNS解析失败，宿主机代理请求返回HTTP 451；13个合约元数据快照与现有真实15分钟K线仍可研究，无法把它们标为实时数据。其他登记资产无行情时显示缺失。
+- 原始底层数据已经独立接入：美国股票/ETF由Massive公开REST读取，免费档需要key且为日终数据；SK海力士/三星由Twelve Data按XKRX日终读取，API key本身不保证交易所权限；WTI Cushing和Henry Hub由EIA以免费注册key读取日度标量参考，不能显示成15分钟蜡烛。新增中国上证、深证、创业板、科创50、中证500、沪深300指数，使用新浪无key公开日线，失败时转腾讯无key公开日线；这两类接口未经官方API/SLA验证，市场数据使用/再分发权利需自行核对，当前标记为研究用途。启动会为这六个无密钥指数排入缺失日线任务，其他需要key的源仍只在本机配置后排队。不要把密钥粘贴到聊天、前端或进度文件。
+- Compose会把宿主机标准`HTTP_PROXY`、`HTTPS_PROXY`传给API/worker；SOCKS或其他代理需在私有`.runtime/platform.env`显式配置`PLATFORM_ALL_PROXY`。也可在该文件设置`PLATFORM_HTTP_PROXY`、`PLATFORM_HTTPS_PROXY`及`PLATFORM_NO_PROXY`。代理地址须能从Docker网段到达，并允许`fapi.binance.com:443`；HTTP 451表示代理/上游拒绝，容器配置不能自行解除。
 - 本机8080是HTTP，仅绑定127.0.0.1。远程访问需要SSH转发或自行配置TLS/私网代理；使用HTTPS时配置Secure Cookie和Origin。
-- 图表为已收盘历史缓存，不是实时报价或盘口。1m/3m/5m需要独立公开采集；不从15m伪造。月线90天只有很少完整K线，不进行趋势预测。
-- 全局风险为UNKNOWN；没有接入新闻、情绪或全球联动计算。图表只实现MA和成交量，其余技术分析与人工标注在Phase2。
-- 当前没有Web训练、实时信号循环、持久模拟账户、SMTP/私有API凭据、2FA或实盘交易。原脚本与离线报告可继续使用，未重跑或改变原回测。
+- 图表历史以本地已收盘行情为主，不提供逐笔盘口或WebSocket。默认只显示均线与量柱；布林带、MACD、九转、趋势线、道氏123、背离和波浪候选可在“指标设置”中逐项启用，偏好保存在PostgreSQL。普通90天缓存和三年缓存视图在图表打开时均每五秒尝试刷新当前标的/周期；状态条展示最后尝试和失败原因。只有已收盘K线参与结构评估，正在形成的K线只作为临时显示。均线周期按当前K线根数计算；1m/3m/5m需各自公开采集，不从15m伪造。
+- 底层股票图表5秒刷新只检查缓存，Massive上游请求至少30秒节流，XKRX EOD至少6小时，中国指数公开源至少60秒节流；API显示计划延迟类型，不把页面轮询频率说成市场数据频率。EIA数值和中国指数源均为日线，不能用作15分钟实时入场触发。
+- 总体周期摘要仅使用本地结构数据；无新闻、宏观事件或跨市场传导源。多模拟配置现可读取本地已归档数据生成离线回测权益/逐笔文件；没有已采集行情时不会生成模拟收益，离线既有回测与原模型结果未因本平台改写。
+- 当前没有Web训练、实盘信号循环、SMTP/私有API凭据、2FA或实盘交易。原脚本与离线报告可继续使用，未重跑或改变原回测。
 - 单人本机版不等于公网多租户生产版。生产需TLS、备份恢复演练、监控、严格角色授权、密钥服务与后续审批/账本测试。
 
 ## Phase 2 计划
 
+### Phase2首个增量（2026-10-18）
+
+已实现三年历史归档服务：所选标的/周期通过`FETCH_ARCHIVE`任务从公开Kline接口分页回填，逐页保存独立不可变Parquet分段和SHA256 manifest；失败后重试从最后已保存K线继续。批量`FETCH_BINANCE_ARCHIVES`只扫描已精确核验的Binance USDM资产，为全部当前符合条件的合约回填15m历史并逐合约持久化进度；服务启动时检查清单，只把缺失/不完整且没有活动任务的资产排入后台，完整归档不重复采集，最近公开连接/HTTP失败有15分钟冷却，修复后的代理依赖或配置错误会立即再次尝试，网络I/O不会阻塞API启动。图表页面保留手动补档按钮和“查看三年缓存”；缺少高周期文件时从15m数据聚合更大周期完整桶，15m以下周期不插值。其它市场资产维持未接行情源状态。新归档不覆盖90天快照。Binance REST仍可能因网络代理拒绝而失败。
+
+实现通过mock分页、续传、损坏检测和API边界测试；本机测试`bash scripts/platform.sh test`：30 passed。前端2 passed，TypeScript及Vite构建通过。由于此前主机访问币安域名失败，本单元没有声称真实回填成功；运行时在用户点击且已核验合约可用时才会采集。
+
+### 底层股票/ETF与能源参考数据（2026-10-20）
+
+使用`config/platform/market_sources.json`绑定原始资产与公开供应商：Massive对美国股票/ETF提供15m、1h、1d OHLCV；Twelve Data对XKRX提供EOD日线；EIA分别提供WTI Cushing与Henry Hub日度标量参考。任务`FETCH_UNDERLYING_HISTORY`在用户明确排队或启动时发现本机已配置密钥后补采最近三年，并落到本地不可变Parquet段/manifest；每条记录保存产品ID、来源、来源时间、SHA256。EIA使用Alembic 0003的新标量元数据，不生成伪K线。读API需要登录，密钥仅进容器环境，路径/供应商代码由服务端白名单绑定；没有密钥时页面显示待配置，上游权限失败不写假数据。Massive图表请求至少30秒节流、Twelve Data至少6小时节流；EIA仍为日频，XKRX仍为日终，页面5秒刷新不代表上游也5秒更新。
+
+当前没有用户供应商密钥/授权，故只完成代码和模拟响应测试，没有真实供应商连接或三年底层行情数据；不购买任何计划。后端隔离测试、Docker镜像重建、前端测试及实际页面核验完成后，以本机运行记录更新验证状态。
+
 接入已有经典道氏和1-2-3作为独立分析器；配置ATR/幅度/成交量/有效期；保存pivot_at与confirmed_at。添加多候选波浪硬规则及失效点、支撑压力、趋势线、多周期共振、手工标注及历史回放。先用确定样本和prefix不变性测试证明无未来数据，再对接Web图表。模型中心与训练调度仍属于Phase3。
+
+### Phase2 多周期结构归档图层（2026-10-18）
+
+新增已认证只读`GET /api/market/structure`：为所选标的读取本地三年归档，不在查看时请求Binance；每周期最多取配置范围内的真实K线，统一按截止时点分析已收盘样本。返回趋势方向/趋势线和破坏状态、确认版道氏1-2-3、Elliott候选、价格-RSI背离、各事件发生与确认时间、证据及归档manifest SHA256。价格类字段以十进制字符串返回。缓存缺周期时返回缺档清单；页面可叠加当前图表周期线和破位/123/背离标记，并显示多周期状态。相关原理保持研究候选，不代表获利概率，也不调用下单接口。
+
+验证：本机前端`npm test`为2 passed且`npm run build`成功；Python语法检查和`python3 scripts/check_docs.py`通过（437个具名函数）；GitHub PR提交`32f1a9e`的Python3.11隔离backend、frontend、risk-engine和publish-hygiene四项CI全部success。该提交时本机Docker构建受ARM64 NumPy下载停滞影响；后续刷新/情绪/配置账号已分单实现，见下方记录。
+
+### Phase2 当前周期实时刷新（WIP，2026-10-19）
+
+三年缓存视图打开时仅刷新当前选中标的和周期，UI等待前一请求完成后发出带CSRF的同源POST；后端使用固定无密钥Binance公开GET适配器。已收盘K线作为新的不可变Parquet分段写入长期本地缓存，未收盘快照单独原子替换到`live.json`并附SHA256，页面标记未收盘/最近更新时间；断线保留旧行情并递增退避。行情数据不触发结构信号，结构仍只用闭合K线。
+
+验证：`cf678fd`与快照哈希修正`dbb3602`的Python3.11隔离backend、frontend、risk-engine与publish-hygiene检查全部success；后端mock覆盖新闭合K线追加、正在形成的K线快照与SHA256、认证和CSRF，前端2 passed且生产构建通过。未访问真实Binance。当前单API进程锁避免本机清单竞争；跨API副本共享节流需在横向部署前增加。受本机Docker下载ARM64 NumPy wheel停滞影响，新容器尚未重建，当前运行容器仍为旧版；网络可达后运行`bash scripts/platform.sh up`、`bash scripts/platform.sh test`，再以隔离账号验收页面和连续刷新。当前功能仅在已选中的三年缓存图表可用，关闭页面/切换到90天缓存后停止轮询。
+
+### Phase2 总体结构周期摘要（2026-10-19）
+
+新增本地只读`GET /api/market/sentiment`草稿，默认聚合四个优先标的及15m/1h/4h/1d趋势。分数以方向指数呈现：趋势70%、道氏30%，最近八根K线内的已确认RSI背离最多±0.2；总体按各资产等权汇总。20根已收盘对数收益波动率只作背景展示、不改变分数。4h与1d反向或高周期趋势线破坏为TRANSITIONING；缺档保留UNKNOWN。UI会披露每项趋势、道氏、背离、波浪候选、20根波动、支撑/压力及来源哈希，分数明确不是胜率。
+
+验证：提交`9225ecc`的Python3.11 backend、frontend、risk-engine、publish-hygiene四项PR CI全success；后端测试模拟结构响应，使用隔离数据库且不访问外部行情。研究引擎`bash scripts/container.sh test` 156 passed；前端`npm test` 2 passed，`npm run build`成功；457个Python函数docstring检查通过。趋势/道氏分解、背离新近窗口、跨4h/1d方向冲突、缺档UNKNOWN和API周期白名单都有测试。浏览器端到端验收和本机新API镜像启动仍待下载网络恢复；新功能已通过CI但未声称在当前本机容器运行。
+
+### 多模拟回测配置账号（2026-10-19）
+
+Alembic 0002新增用户隔离配置表；起始资本为NUMERIC(28,8)，保存模型/技术理论权重、精确已核验永续标的、周期、杠杆/保证金、1小时至90天最短/最长持仓策略、退出方式、revision与configuration SHA256。止损仍可在最短持仓门槛前执行。React工作台可创建、查看和编辑多个账号配置，并按用户显式请求三年交易价、标记价与资金费数据。
+
+新增Python3.11后端回测服务：以已收盘原生周期为基础，按收盘可知时点对齐高周期趋势/道氏/波浪/背离，融合已实现反转形态分数，并强制方向服从最高配置周期趋势；下根K线执行时使用真实归档标记价、资金费，显式计入固定手续费/滑点/维持保证金假设，支持持仓时间门槛和提前止损。模型权重含未登记深度模型时明确拒绝，不会自动加载或训练。每个用户账号保存单独的净值和逐笔Parquet、收益/回撤/持仓摘要、跳过资产原因以及配置/算法/数据SHA256，API所有者校验后才可读取；前端展示组合曲线、逐笔和每标的结果。缺少本地行情时资产留现金并显示跳过原因；不联网拉取，不下单，不代表持续纸面账户。
+
+验证：`bash scripts/platform.sh test`使用隔离PostgreSQL/Redis及合成归档，回测端到端、时间前缀不变性、资金/哈希文件和API所有权覆盖共47项通过（最终验证记录见`PROJECT_PROGRESS.md`）。前端2项测试、TypeScript与Vite构建通过；`scripts/check_docs.py`及发布扫描通过。真实Binance三年数据尚未由用户点击回填，因此没有真实资产回测收益结果；深度模型注册/加载及账号间叠图比较保留在后续Phase3/4。
+
+### 可配置多周期与多期限回测（2026-10-19）
+
+模拟账号可独立设置15m至1d周期相对权重、顺最高周期趋势/多理论确认逆势反弹/多周期多数方向规则、3/7/30天主要评估期限及跨期限共识权重。必须至少有一个已选周期权重大于0。多周期特征只按已完成K线收盘时间向下对齐；逆势反弹需要基础周期反转形态和背离、道氏或趋势证据之一共同确认。
+
+每次入场保存3/7/30天方向分数和启发式价格中心/波动情景带；回测结束后再用对应未来实际收盘价格统计方向命中和方向化收益。未来价格不进入入场决策；可用数据尚未覆盖评估时点时结果留空。情景带目前未做概率校准，不是置信区间或目标价保证。最短持仓API/UI下限为1小时，止损仍可提前执行；最长持仓允许至90天。
+
+模型调研结论：公开资料没有能证明“某一家量化公司模型普遍最优”的证据。TimesFM 3.0在其公开通用预测基准表现突出，但官方预训练权重目前限非商业/非生产用途，不宜直接作为本平台可发布模型；[官方仓库](https://github.com/google-research/timesfm)列出多变量支持与许可。金融收益研究发现预训练时序模型相对随机游走的优势小且稀疏，[金融收益基准研究](https://arxiv.org/abs/2606.27100)；另一项覆盖2010–2025日频多资产期货的研究报告VSN+LSTM在该实验的总体Sharpe较高，同时不同架构在下行风险和交易成本承受力各有优势，[金融深度模型基准](https://arxiv.org/abs/2603.01820)。因此候选模型应在本地滚动样本外基准中和简单基线、现有GRU、VSN+LSTM、PatchTST/Chronos类预测器比较，按扣费后净值、回撤、换手、稳定性及期限分别评估，不按通用预测排名直接选型。
+
+资源检查（2026-10-19）：宿主机报告121 GiB内存、105 GiB可用、15 GiB swap空闲；`/home`所在卷3.7 TiB、可用约1.0 TiB；本地行情目录约1.2 MiB。平台Compose已运行PostgreSQL持久卷、Redis AOF和RQ worker。当前观测没有显示缓存或磁盘压力；Redis/RQ已承担当下队列需求，暂不增加RabbitMQ/Kafka。随三年行情增长再按磁盘、Parquet增长、Redis内存和队列积压监控调整。
+
+验证（2026-10-19）：`bash scripts/platform.sh test`隔离PostgreSQL/Redis中48 passed、1项既有Starlette TestClient弃用提示；包括账户4小时配置接受、1小时策略回测、逆势模式配置、跨期限字段与未来样本前缀不变性。`cd frontend && npm test && npm run build`为2 passed且生产构建成功；`python3 scripts/check_docs.py`为529个具名函数全通过，`python3 -m compileall -q backend/app backend/tests`成功。提交`3d22cac`的GitHub Actions run `39195935406`中backend、frontend、risk-engine、publish-hygiene四项全success；本机`bash scripts/platform.sh up`后API数据库/Redis健康且首页HTTP 200。尚未接入新的深度模型，也没有真实三年行情上的预测校准或盈利结论。
+
+### 按需采集合约标记价格与资金费（2026-10-19）
+
+新增固定Binance公开GET适配器、持久`FETCH_DERIVATIVE_DATA`任务和账号页面按钮。按精确核验产品、原生周期、最长三年UTC时间窗采集标记价格K线与实际结算资金费率；数据分流写入本机`DATA_ROOT/derivatives/<symbol>/<interval>/mark|funding/`不可变Parquet，分页后原子更新manifest并校验每段SHA256。采集失败保留已成功页面以便续传；只在用户点击后联网。重叠或扩展请求可沿用既有窗口；不支持向更早时间扩展。
+
+验证：新API/任务、分段哈希、Decimal往返、用户所有权、损坏文件和断点续传的mock测试计入`bash scripts/platform.sh test`；Python3.11 ARM64镜像构建成功，隔离PostgreSQL/Redis 44 passed，1项Starlette TestClient弃用提示。前端2 passed且TypeScript/Vite构建成功；498个具名Python函数文档检查、发布扫描和语法检查通过。提交`5d2a028`的GitHub backend、frontend、risk-engine、publish-hygiene CI全success（run 39145561898）。`bash scripts/platform.sh up`后API健康端点/首页HTTP 200且新route已注册。未发起真实Binance请求；随后开发的离线回测/曲线实现详见上一节，本机实际行情收益仍未知。
+
+### 系统页面整套多模型回测（2026-10-20更新）
+
+模拟与回测页面新增全模型任务面板：可选四个优先标的、道氏123/PatchTST/TFT-Attention/TCN四个算法及15分钟至4小时入场周期，在页面启动同一离线研究引擎。任务保存在现有`scheduled_tasks`表，由独立NVIDIA PyTorch容器处理；引擎在每个模型验证折及周期/退出配置完成时上报实际进度，页面每2秒轮询并显示百分比与当前标的/周期/模型/折。报告保存在`.runtime/research-runs/<UUID>`，页面按登录用户隔离读取总体摘要、模型/标的报告、不同退出模式排名、验证期权益曲线和逐笔模拟操作。深度模型每个训练折单独拟合缩放参数、保存算法/seed/训练审计，并避免模型间检查点互相覆盖。已有`runs/`中带`batch_summary.json`的历史报告作为只读归档展示，不修改旧报告。GPU容器无Binance私有密钥，邮件仅模拟，禁止下单；当前验证窗有历史查看选择偏差，不代表未来收益更高。
+
+资产目录API同时返回派生`market_category`和`product_type`，分别表示虚拟货币、股票、ETF、指数、商品、外汇、宏观参考等底层类别，以及现货/永续/期货/参考数据产品类型。模拟账号保存会修剪空白名称，并可选择最多100个已核验资产，覆盖当前13个Binance永续；未修改数据库结构。
 
 ## 实际验收记录（2026-10-18，DGX Spark ARM64）
 
@@ -65,3 +146,16 @@ npm run build
 - 外部连接限制：容器内fapi.binance.com DNS解析失败。自动核验真实失败并最多重试3次；页面不会把缓存标成实时行情。当前使用已验证连接器采集的真实历史快照。
 
 验收产物位于`runs/platform_phase1/`：`browser-check.json`、`runtime-check.json`、测试日志、依赖审计和页面截图。重新验证浏览器需启动隔离Chrome后执行`node scripts/platform_browser_check.mjs 9223`；脚本只在内存中读取本机初始凭据并在结束时退出登录。若已改密码，初始密码文件不能再用于此脚本，需改用独立测试账号。
+
+### Multi-model backtest and market-category update (2026-10-20)
+
+The authenticated research page lists the 13 exact Binance USD-M contract IDs and enables only symbols with matching local bars, funding, mark-price bars and frozen evaluation plans. Its current model whitelist compares the deterministic multi-timeframe Dow-123 rule, PatchTST (Transformer attention), TFT-Attention and TCN under the same folds, features, costs and exit rules. Deep models use train-fold-only normalization and record seed, architecture audit, source/data hashes and per-model curves/operations. The implementation adds no claim of superior or profitable future returns; the previously inspected validation periods remain selection-biased, and no full GPU run was triggered in this change.
+
+The asset API now derives market category (`crypto`, `stocks`, `etf`, `other`) separately from product type (`spot`, `perpetual`, `future`, `reference`, `other`). This is a presentation projection over the existing catalog, not new market verification. Simulation account names are trimmed/validated and the account policy now accepts up to 100 assets, covering all 13 verified contracts; single-account deep-model version loading remains a separate planned integration. Current network access is blocked: direct Binance DNS lookup fails and the configured proxy returns HTTP 451.
+
+
+## 能源持续刷新（2026-10-23）
+
+能源参考新增独立`market-refresh`服务，Yahoo原生CL=F/NG=F与EIA官方无密钥日度表分别保存，产品不与Binance永续混写。复用MarketData/MarketObservation、不可变Parquet/raw SHA、Redis缓存；Setting的`market_refresh:<asset>:<interval>`保存每流尝试/成功/源时间/退避检查点，无新增迁移。接口沿用认证与CSRF；参考数据不获交易准入。详细限制、来源证据和恢复方式见[能源数据设计](energy-data.md)。本单元测试/部署状态以PROJECT_PROGRESS.md的实际记录为准。
+
+2026-10-25能源诊断新增只读`health`响应与独立中文状态面板：采集/缓存/源时间分别判定，常规周末及维护时段使用芝加哥DST参考，节假日未核验、仅展示且不降低stale。页面断连保留旧状态并撤下正常徽标。复用原Setting检查点，无数据库迁移或行情改写；完整规则与边界见[能源数据设计](energy-data.md)。

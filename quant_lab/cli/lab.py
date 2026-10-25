@@ -402,7 +402,7 @@ def main():
     a=sub.add_parser('patterns',help='12 reversal families, 15m-4h entries, multiple exits and leveraged validation')
     a.add_argument('--data',type=Path,required=True);a.add_argument('--baseline-report',type=Path,required=True);a.add_argument('--out',type=Path,required=True)
     a.add_argument('--timeframes',nargs='+',default=['15m','30m','1h','2h','4h'])
-    a.add_argument('--models',nargs='+',help='Optional subset, including torch_gru and analysis_dow123')
+    a.add_argument('--models',nargs='+',help='Optional subset: analysis_dow123, patchtst, tft_attention, tcn')
     a.add_argument('--exit-modes',nargs='+',default=['swing_percent','fixed_rr','atr_trailing','three_bar_breakout','three_bar_trailing','time_exit','fixed_three_bar_target'])
     a.add_argument('--leverage',type=float,default=5.);a.add_argument('--margin-fraction',type=float,default=.1)
     a.add_argument('--confidence',type=float,default=.45);a.add_argument('--fee',type=float,default=.0005);a.add_argument('--slippage',type=float,default=.0002)

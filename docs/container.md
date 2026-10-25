@@ -4,7 +4,7 @@
 
 实测基础镜像为 Python 3.12.3、NVIDIA PyTorch `2.10.0a0+b558c986e8.nv25.11`、CUDA 13.0，GPU 为 NVIDIA GB10。这个镜像提供的是 **PyTorch**，本机镜像没有安装 TensorFlow；TensorRT 和 TensorFlow 是不同的组件。未来可直接在 PyTorch 上开发深度学习模型；如确实需要 TensorFlow，应单独验证适配 ARM64/GB10/CUDA 的官方环境，避免覆盖当前 NVIDIA 库。
 
-当前逻辑回归、随机森林、ExtraTrees、HistGradient、sklearn MLP 仍在 CPU 上训练；GPU 检查通过不表示这些模型会自动使用 GPU；新增 `torch_gru` 是独立的PyTorch双层GRU，已实际用GB10训练。
+旧离线批次中的逻辑回归、随机森林、ExtraTrees、HistGradient、sklearn MLP 在CPU训练；旧`torch_gru`使用GPU。系统页面的新研究白名单还包括PatchTST（Transformer注意力）、TFT-Attention和TCN；它们使用PyTorch，在GPU容器按任务训练。镜像检查通过只证明硬件/依赖可用，不代表本轮已在真实行情上完成训练或获得正收益。
 
 ## 首次构建、启动和检查
 

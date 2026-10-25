@@ -15,6 +15,7 @@ echarts.use([
   CanvasRenderer,
 ]);
 import { api, post, date } from "../services/api";
+import { formatExitReason } from "../utils/labels";
 interface Budget {
   allowed: boolean;
   reasons: string[];
@@ -385,7 +386,7 @@ export default function RiskPage() {
                       <td>{trade.leverage_at_entry}×</td>
                       <td>{trade.holding_hours.toFixed(1)}小时</td>
                       <td>{pct(trade.net_pnl)}</td>
-                      <td>{trade.exit_reason}</td>
+                      <td>{formatExitReason(trade.exit_reason)}</td>
                     </tr>
                   ))}
                 </tbody>

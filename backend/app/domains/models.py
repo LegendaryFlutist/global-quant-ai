@@ -1,8 +1,11 @@
-"""Phase 1 tables only. Future ledger/approval tables are specified in docs, not simulated."""
+"""Phase 1 tables plus versioned research configs; no ledger or execution tables."""
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, BigInteger, Boolean, DateTime, JSON, ForeignKey, UniqueConstraint
+from decimal import Decimal
+from sqlalchemy import String, Integer, BigInteger, Boolean, DateTime, JSON, ForeignKey, Numeric, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
+from app.domains.datasets import DatasetVersion  # Register additive metadata in test/Alembic discovery.
+from app.domains.instruments import InstrumentVersion, InstrumentPeriod, InstrumentAliasPeriod
 
 def utcnow():
     """为持久记录生成带UTC时区的当前时间。
@@ -82,6 +85,22 @@ class MarketData(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (UniqueConstraint('asset_id', 'interval'),)
 
+class MarketObservation(Base):
+    """Non-OHLC reference time series such as daily physical-energy spot prices."""
+    __tablename__ = 'market_observation_metadata'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey('assets.id'), index=True)
+    metric: Mapped[str] = mapped_column(String(60))
+    path: Mapped[str] = mapped_column(String(300))
+    row_count: Mapped[int] = mapped_column(Integer)
+    first_observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    last_observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    unit: Mapped[str] = mapped_column(String(40))
+    sha256: Mapped[str] = mapped_column(String(64))
+    source: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint('asset_id', 'metric'),)
+
 class Task(Base):
     __tablename__ = 'scheduled_tasks'
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -92,6 +111,21 @@ class Task(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class SimulationAccount(Base):
+    """用户隔离的回测策略配置容器；不代表余额账本或可交易账户。"""
+    __tablename__ = 'simulation_accounts'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    initial_equity: Mapped[Decimal] = mapped_column(Numeric(28, 8))
+    base_currency: Mapped[str] = mapped_column(String(8), default='USDT')
+    configuration: Mapped[dict] = mapped_column(JSON)
+    configuration_sha256: Mapped[str] = mapped_column(String(64))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_simulation_account_owner_name'),)
 
 class Setting(Base):
     __tablename__ = 'system_settings'

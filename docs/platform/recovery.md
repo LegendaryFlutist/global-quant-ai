@@ -2,6 +2,8 @@
 
 恢复入口是版本库内的AGENTS.md、PROJECT_PROGRESS.md、TASKS.md和Git状态，不是任何单次聊天。维护者可以更换Codex会话、模型或重启计算机。
 
+数据版本D1恢复：同时保留PostgreSQL（当前迁移0005，0004增加数据版本，0005增加产品规格/别名时间线）与`.runtime/market-data/dataset_versions/`的完整目录；manifest/raw/Parquet及共享blobs缺一不可。硬链接可以由保留链接的备份工具复制，也可恢复为独立但字节相同的文件，不删除被历史manifest引用的内容。先查`INGEST_DATASET`任务进度和版本SHA，再从页面重试；已经成功的版本不会覆盖。失败的新源不得用旧缓存冒充成功。新源任务本身不在启动时全量重拉；旧来源启动策略仍独立运行。规格版本随数据库备份；只重新seed会产生新的实际入库时点，不能恢复旧known-at历史，须保留完整PG备份。
+
 ## 新会话 / 额度耗尽后
 
 ```bash
@@ -67,7 +69,7 @@ BACKUP_ROOT="$PWD/.runtime/backups/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_ROOT"
 git rev-parse HEAD > "$BACKUP_ROOT/git-commit.txt"
 # 应用当前无交易执行；做完整一致备份时先停止写入端，期间网页暂不可用。
-docker compose --env-file .runtime/platform.env -p quant-lab -f compose.yaml -f compose.platform.yaml stop worker api
+docker compose --env-file .runtime/platform.env -p quant-lab -f compose.yaml -f compose.platform.yaml stop worker dataset-worker market-refresh research-runner api
 docker exec quant-lab-postgres-1 pg_dump -U quant -d global_quant -Fc > "$BACKUP_ROOT/postgres.dump"
 # 根据本机存在的文件选取；首次克隆没有.env/data/runs时先删去不存在项。
 tar -czf "$BACKUP_ROOT/private-state.tar.gz" \
@@ -91,3 +93,5 @@ bash scripts/platform.sh up
 ## 阶段结束报告格式
 
 每个阶段必须说明：已完成功能、实际通过的测试、未解决问题、`git log -1`、下一阶段具体任务、恢复命令。区分本地提交、已推送提交、远程CI成功；不能把排队/未验证当作成功。
+
+能源刷新上线后，备份前的停写服务还应包括 `market-refresh`；恢复后随 `bash scripts/platform.sh up` 启动。不要只停RQ workers而遗漏持续写入行情的采集容器。`Setting`检查点与`energy-public-raw/`随数据库/行情目录一并备份。

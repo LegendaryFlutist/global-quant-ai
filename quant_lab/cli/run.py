@@ -19,7 +19,7 @@ from quant_lab.core.paths import PROJECT_ROOT
 
 ROOT=PROJECT_ROOT
 DEFAULT_SYMBOLS=('KORUUSDT','CLUSDT','NVDAUSDT','BTCUSDT')
-SUPPORTED_SYMBOLS=DEFAULT_SYMBOLS+('ETHUSDT',)
+SUPPORTED_SYMBOLS=DEFAULT_SYMBOLS+('SKHYNIXUSDT','SPCXUSDT','SNDKUSDT','XAUUSDT','QQQUSDT','INTCUSDT','TSLAUSDT','OPENAIUSDT','ZHIPUUSDT')
 TIMEFRAMES=('15m','30m','1h','2h','4h')
 
 
@@ -93,7 +93,7 @@ def main(argv=None,root=ROOT):
     except (OSError,ValueError,TypeError) as error:
         print('研究配置读取失败：'+str(error),file=sys.stderr)
         return 1
-    parser=argparse.ArgumentParser(description='优先四合约的多周期结构、道氏123与PyTorch时序研究。')
+    parser=argparse.ArgumentParser(description='已核验合约的多周期结构与道氏123规则回测。')
     parser.add_argument('--config',type=Path,default=early.config,help='JSON研究参数；命令行参数可覆盖')
     parser.add_argument('--out',type=Path,help='本次统一输出目录，必须不存在')
     parser.add_argument('--symbols',nargs='+',choices=SUPPORTED_SYMBOLS,default=list(DEFAULT_SYMBOLS))

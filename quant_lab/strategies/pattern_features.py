@@ -7,7 +7,7 @@ from quant_lab.analysis.market_structure import structure_features,ANALYSIS_FEAT
 
 MINUTES={'15m':15,'30m':30,'1h':60,'2h':120,'4h':240}
 FEATURE_COLUMNS=tuple(FEATURES)+tuple(PATTERN_COLUMNS)+('bullish_count','bearish_count','atr_pct','rsi14','higher_ema_gap')+ANALYSIS_FEATURES
-PATTERN_STRATEGY='multiperiod_structure_gru_dow123_v4'
+PATTERN_STRATEGY='multiperiod_structure_deep_dow123_v5'
 
 
 def aggregate_closed(bars, minutes, source_minutes=15):

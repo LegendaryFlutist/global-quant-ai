@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Asset, Job, PageId, User } from "./types";
+import { DEFAULT_CHART_INDICATORS } from "./types";
 import { post } from "./services/api";
 import { useAuth } from "./hooks/useAuth";
 import { useWorkspaceData } from "./hooks/useWorkspaceData";
@@ -12,6 +13,8 @@ import JobsPage from "./pages/JobsPage";
 import CapabilitiesPage from "./pages/CapabilitiesPage";
 import RiskPage from "./pages/RiskPage";
 import SettingsPage from "./pages/SettingsPage";
+import SimulationPage from "./pages/SimulationPage";
+import DatasetsPage from "./pages/DatasetsPage";
 
 /** 工作台路由协调层；身份、轮询与各页面分离，业务能力由后端再次授权。 */
 export default function App() {
@@ -55,7 +58,22 @@ export default function App() {
   /** 使用原任务的已保存参数重新入队；不会把旧失败记录改为成功。 */
   async function retryTask(job: Job) {
     try {
-      await post("/tasks", { kind: job.kind, ...job.parameters });
+      if (job.kind === "FETCH_BINANCE_ARCHIVES") {
+        await post("/tasks/binance-archives", {
+          asset_ids: job.parameters.asset_ids,
+          interval: job.parameters.interval,
+        });
+      } else if (job.kind === "INGEST_DATASET") {
+        await post("/datasets/ingest", {
+          asset_id: job.parameters.asset_id,
+          provider_id: job.parameters.provider_id,
+          start_date: job.parameters.start_date,
+          end_date: job.parameters.end_date,
+        });
+      } else {
+        const { startup_reconcile: _startupReconcile, ...parameters } = job.parameters;
+        await post("/tasks", { kind: job.kind, ...parameters });
+      }
       setNotice("已重新入队");
       await data.refresh();
     } catch (error) {
@@ -113,9 +131,12 @@ export default function App() {
           initialInterval={data.settings?.display.default_interval ?? "4h"}
           timezone={timezone}
           onTask={setNotice}
+          indicatorPreferences={data.settings?.chart_indicators ?? DEFAULT_CHART_INDICATORS}
         />
       )}
       {page === "risk" && <RiskPage />}
+      {page === "datasets" && <DatasetsPage timezone={timezone} jobs={data.jobs} onTask={setNotice} onJobs={() => navigate("jobs")} />}
+      {page === "simulation" && <SimulationPage />}
       {page === "jobs" && (
         <JobsPage
           jobs={data.jobs}

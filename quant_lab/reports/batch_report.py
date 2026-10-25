@@ -20,11 +20,14 @@ from quant_lab.reports.operation_report import export_operations_report
 REPORT_VERSION = 2
 MODEL_LABELS = {
     'torch_gru':'PyTorch双层GRU时序网络','analysis_dow123':'多周期结构 · 道氏123',
+    'patchtst':'PatchTST · 分段Transformer','tft_attention':'TFT-Attention · 时序融合注意力',
+    'tcn':'TCN · 膨胀时序卷积',
     'pattern_only': '反转形态规则', 'logistic': '逻辑回归',
     'logistic_regression': '逻辑回归', 'random_forest': '随机森林',
     'extra_trees': '极端随机树', 'hist_gradient': '直方图梯度提升',
     'hist_gradient_boosting': '直方图梯度提升', 'mlp': '多层感知机',
 }
+DEEP_MODEL_IDS={'torch_gru','patchtst','tft_attention','tcn'}
 INPUTS = ('report.json', 'validation_curves.json', 'trades.csv', 'events.csv')
 HOLDOUT_FILES = ('selected_holdout_trades.csv', 'selected_holdout_equity.csv',
                  'selected_holdout_events.csv')
@@ -211,7 +214,7 @@ def _scoped_run(source, target, report, model, fingerprint):
         scoped['holdout_used'] = False
         if isinstance(selected, dict):
             scoped['status'] = 'NOT_SELECTED'
-    if model!='torch_gru':scoped.pop('deep_training',None)
+    if model not in DEEP_MODEL_IDS:scoped.pop('deep_training',None)
     scoped.pop('simulated_mail_count', None)
     scoped['actual_email_sent'] = False
     scoped['real_orders_enabled'] = False
@@ -248,7 +251,7 @@ def _scoped_run(source, target, report, model, fingerprint):
     analysis=target.parents[3]/'analysis'/summary['symbol']/'index.html'
     if analysis.exists():
         page=page.replace('<main>','<main><p><a href="../../../../analysis/'+summary['symbol']+'/index.html">本标的多周期K线、趋势、支撑压力与波浪分析</a></p>',1)
-    if model=='torch_gru' and (source/'deep_training.html').exists():
+    if model in DEEP_MODEL_IDS and (source/'deep_training.html').exists():
         relative=Path('../../../../')/source.relative_to(target.parents[3])/'deep_training.html' if source.is_relative_to(target.parents[3]) else None
         if relative:page=page.replace('<main>','<main><p><a href="'+str(relative)+'">实际GPU训练记录、损失曲线与检查点</a></p>',1)
     page = page.replace('<main>', '<main><p><a href="../../index.html">返回本模型报告</a> · '

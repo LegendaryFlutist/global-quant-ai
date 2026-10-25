@@ -2,10 +2,10 @@
 import csv
 import json
 import time
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.core.config import RESEARCH_ROOT
 from app.domains.models import Asset, Provider, MarketData, utcnow
-from app.adapters.public_binance import BinancePublic
+from app.adapters.public_binance import BinancePublic, PublicDataError
 from app.services.market_data import save_dataset, read_dataset
 
 def import_local(db,asset_id: str):
@@ -42,8 +42,13 @@ def verify_assets(db):
     provider=db.get(Provider,'binance_public')
     try:
         info=BinancePublic().exchange_info()
-    except Exception as exc:
+    except PublicDataError as exc:
         provider.status='UNAVAILABLE';provider.detail={**provider.detail,'last_attempt_at':utcnow().isoformat(),'error':str(exc)};db.commit()
+        snapshot_count=db.scalar(select(func.count()).select_from(Asset).where(
+            Asset.venue=='BINANCE_USDM', Asset.verification=='VERIFIED_SNAPSHOT')) or 0
+        if snapshot_count:
+            return {'verified_assets':snapshot_count,'verification_mode':'VERIFIED_LOCAL_SNAPSHOT',
+                    'live_refresh':False,'warning':str(exc)}
         raise
     indexed={s['symbol']:s for s in info['symbols']}
     verified=0
