@@ -1,5 +1,14 @@
 # 项目进度与会话交接
 
+## 2026-10-25 能源跨日运行验收与交接完成
+
+- 已完成：10月23日能源来源/持续采集/页面入口改造及NG未确认异常隔离均已部署。功能提交`8bafa36`、补丁`75d19df`均已推送功能分支，Draft PR #11保持未合并；两次实现CI均四项success。尚未进行真实用户登录浏览器E2E，不把API测试和生产构建当浏览器验收。
+- 37小时运行实证：2026-10-25 10:06北京时间，API/Web/market-refresh/代理桥/PG/Redis健康；六流最近采集状态OK、failures=0。CL15m 3912根到10月24日04:59:59，NG15m 3918根到05:14:59；CL日线755根、NG756根。每日保守close label到10月24日11:59:59，不代表该时刻成交。EIA点数745/746，最新源观测仍10月20日。最新报价时间与请求时间分离，周日期间两个盘中快照stale=true，不因为HTTP成功而冒充即时行情；完整期货交易日历仍未核验。
+- 数据保护：全部能源Parquet/raw SHA、既有13份D1版本再次通过读取验证；旧CLUSDT8639根、最新10月19日与原SHA不变。尾部空OHLC供应商记录未填补；公开原始响应保留在私有磁盘。证据`.runtime/development-evidence/20261023-energy/integration-20261025.json`。
+- 测试状态：无新增业务代码，本轮不重复测试；对应已部署75d19df的真实结果为后端147 passed/1既有弃用提示、前端8 passed及构建、文档865函数通过。远程[补丁CI 39959296648](https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39959296648)四项success。随后文档交接提交的CI需单独查看，不能预报通过。
+- 未解决/下一阶段：免费盘中参考无SLA或已验证同产品备用；当前连续代码不是Binance合约成交价。优先补真实用户页面验收、能源日历/换月与D1点时版本，再扩展已接股票/指数的常驻刷新与质量状态；不把本单元描述为所有资产已同步、模型训练已验收或模拟交易已完成。
+- 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；启动`bash scripts/platform.sh up`；采集日志`bash scripts/platform.sh logs market-refresh`；测试`bash scripts/platform.sh test`。仅本机`.local/`保持未跟踪，不纳入发布。
+
 ## 2026-10-23 能源数据持续刷新：已测试、部署并真实入库
 
 - 完成：优先处理原油10月19日停更；旧CLUSDT确为一次性MCP快照。新增独立`yahoo_energy:CL/NG`延迟连续参考（15m/1d），EIA官方无密钥HTML日度现货；公共raw SHA、不可变Parquet、源/请求双时间；独立market-refresh自动启动、Redis流锁和共享Yahoo配额、PG持久检查点、失败降级与重启恢复。页面原油合约旁可切换“WTI原油连续参考”，首次无缓存也会在入库后恢复显示；原合约数据不被替换。
@@ -10,7 +19,7 @@
 - 部署：最终`bash scripts/platform.sh up`成功；API/Web/PG/Redis/代理桥/market-refresh健康，原lab保留；两个RQ worker和research-runner运行。未重置数据库、改私钥、下单或发送邮件。隔离API测试覆盖认证行情缓存调用；未声称真实用户登录浏览器E2E已完成。
 - 证据：`.runtime/development-evidence/20261023-energy/backend-tests.log`、`integration.json`与重建日志；架构/来源/范围见`docs/platform/energy-data.md`。本机原始行情、测试证据及既有.local/不提交。
 - Git：实现提交`8bafa36 feat: refresh free energy references independently of charts`已经推送至`feature/phase2-market-structure`，沿用Draft PR #11，未合并main。发布扫描289文件通过。本地没有gh命令，实现提交8bafa36的[GitHub CI 39922816305](https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39922816305)已完成，backend/frontend/risk-engine/publish-hygiene四项全部success。此结果不覆盖后续解析器补丁。
-- 长时间验收补丁（测试已通过，部署验收中）：21:07北京时间核验，盘中运行5小时并自动推进到20:29，旧CLUSDT SHA和13份D1仍通过。NG日线当天未收盘OHLC出现open低于low，导致整页拒绝；新增parser v2只忽略并计数异常未确认K线，已确认异常仍拒绝；解析器升级允许一次校验失败重试，不绕过429。146项初验通过；增加恢复测试后的最终`bash scripts/platform.sh test` **147 passed / 1既有弃用提示，50.94秒**，check_docs **865函数通过**。正在platform up重建部署此补丁。证据raw SHA `d7eefeef806ac460203351d4099e691e523e70487123a05527abd16f021cf47e`仅公共行情。下一步：等待/tmp/quant-energy-parser-build.log重建结束，再核验NG日线恢复并记录最终提交/CI。
+- 长时间验收补丁（已测试并部署）：21:07北京时间核验，盘中运行5小时并自动推进到20:29，旧CLUSDT SHA和13份D1仍通过。NG日线当天未收盘OHLC出现open低于low，导致整页拒绝；新增parser v2只忽略并计数异常未确认K线，已确认异常仍拒绝；解析器升级允许一次校验失败重试，不绕过429。146项初验通过；增加恢复测试后的最终`bash scripts/platform.sh test` **147 passed / 1既有弃用提示，50.94秒**，check_docs **865函数通过**。platform up重建已成功。21:12北京时间生产自动重试NG日线成功，755根日线，六流恢复OK；最新盘中CL3878/NG3883根到20:29:59，13份D1与旧合约SHA复验通过。证据raw SHA `d7eefeef806ac460203351d4099e691e523e70487123a05527abd16f021cf47e`仅公共行情。补丁提交`75d19df fix: isolate malformed provisional energy candles`已推送；[CI 39959296648](https://github.com/LegendaryFlutist/global-quant-ai/actions/runs/39959296648)已核验完成，backend/frontend/risk-engine/publish-hygiene四项全部success（2026-10-25查验）。最终证据`integration-parser-v2.json`及`parser-tests.log`。
 - 未完成/下一步：免费接口没有SLA或已核验盘中同产品备用；EIA现货不能当期货盘中备用。其他资产自动更新、D1能源点时版本、交易日历/换月版本、真实用户浏览器验收仍待实施；A1b/A2按审计依赖继续。纸面/实盘执行均未由本单元启用。
 - 恢复：`cd /home/xmfsamsara/Documents/quant_lab && bash scripts/resume.sh`；运行`bash scripts/platform.sh up`；查看`bash scripts/platform.sh logs market-refresh`；隔离回归`bash scripts/platform.sh test`。备份停写必须包括market-refresh。
 
